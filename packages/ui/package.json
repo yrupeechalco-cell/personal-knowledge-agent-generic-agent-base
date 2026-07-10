@@ -1,0 +1,22 @@
+{
+  "name": "@knowledge-agent/ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@knowledge-agent/agent": "0.1.0",
+    "@knowledge-agent/core": "0.1.0",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

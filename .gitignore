@@ -1,0 +1,39 @@
+# Local/editor state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Dependencies and builds
+node_modules/
+dist/
+build/
+.next/
+target/
+apps/desktop/src-tauri/gen/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
+# Private project memory and local-only planning notes.
+.private/
+PROJECT_MEMORY.md
+DEVELOPMENT_LOG.md
+
+# Knowledge vaults must be added deliberately, never by accident.
+vaults/
+private-vaults/
+*.sqlite
+*.db
+
+# Generated indexes can be rebuilt.
+.kb/cache/
+.kb/index.graph.json
+
+# Local visual/debug scratch space.
+.debug-video-frames/

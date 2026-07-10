@@ -1,0 +1,24 @@
+{
+  "name": "@knowledge-agent/desktop",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@knowledge-agent/agent": "0.1.0",
+    "@knowledge-agent/core": "0.1.0",
+    "@knowledge-agent/ui": "0.1.0",
+    "@knowledge-agent/workspace": "0.1.0",
+    "@tauri-apps/api": "^2.10.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}

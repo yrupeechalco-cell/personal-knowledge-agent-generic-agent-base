@@ -1,0 +1,21 @@
+{
+  "name": "@knowledge-agent/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@knowledge-agent/agent": "0.1.0",
+    "@knowledge-agent/core": "0.1.0",
+    "@knowledge-agent/ui": "0.1.0",
+    "@knowledge-agent/workspace": "0.1.0",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}

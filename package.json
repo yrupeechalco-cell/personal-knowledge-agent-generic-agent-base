@@ -1,0 +1,39 @@
+{
+  "name": "personal-knowledge-agent-generic-agent-base",
+  "private": true,
+  "version": "0.1.1",
+  "description": "GitHub-native Obsidian-like personal knowledge base Agent.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/desktop",
+    "dev:desktop": "npm run dev -w apps/desktop",
+    "dev:web": "npm run dev -w apps/web",
+    "tauri:dev": "npm run tauri -w apps/desktop -- dev",
+    "tauri:build": "npm run tauri -w apps/desktop -- build",
+    "build:web": "npm run build -w apps/web",
+    "build:desktop": "npm run build -w apps/desktop",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.10.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "jsdom": "^27.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.15"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  }
+}
