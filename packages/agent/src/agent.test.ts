@@ -143,10 +143,33 @@ describe("NoteAgentKernel", () => {
     expect(result.message.content).toBe("已切换到关系图谱。");
   });
 
-  it("routes complex graph generation requests to the document generator", async () => {
+  it("runs the document generator only when the model explicitly selects that tool", async () => {
     const index = buildVaultIndex(files);
     let argumentsJson = "";
+    let modelTurns = 0;
     const agent = new NoteAgentKernel({
+      provider: {
+        name: "tool-provider",
+        async generate() {
+          return "";
+        },
+        async generateTurn() {
+          modelTurns += 1;
+          if (modelTurns === 1) {
+            return {
+              content: "",
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "app_generate_stress_graph",
+                  arguments: JSON.stringify({ count: 12, folderName: "模型选择的测试库", topic: "复杂文档状态" })
+                }
+              ]
+            };
+          }
+          return { content: "已按你的要求生成复杂文档测试库。", toolCalls: [] };
+        }
+      },
       tools: [
         {
           name: "app_generate_stress_graph",
@@ -166,9 +189,10 @@ describe("NoteAgentKernel", () => {
       index
     });
 
+    expect(modelTurns).toBe(2);
     expect(result.toolCalls).toEqual(["app_generate_stress_graph"]);
-    expect(JSON.parse(argumentsJson)).toMatchObject({ count: 30, folderName: "复杂关系图谱测试" });
-    expect(result.message.content).toBe("generated");
+    expect(JSON.parse(argumentsJson)).toMatchObject({ count: 12, folderName: "模型选择的测试库" });
+    expect(result.message.content).toBe("已按你的要求生成复杂文档测试库。");
   });
 });
 

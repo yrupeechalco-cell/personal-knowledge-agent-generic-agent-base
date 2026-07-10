@@ -21,18 +21,7 @@ export class NoteAgentKernel {
     const diffs: AgentDiff[] = [];
     let content = "";
 
-    if (isStressGraphGenerationRequest(normalized) && this.tools.has("app_generate_stress_graph")) {
-      content = await this.callTool(
-        "app_generate_stress_graph",
-        JSON.stringify({
-          folderName: "复杂关系图谱测试",
-          count: requestedDocumentCount(normalized) ?? 30,
-          topic: "复杂知识系统"
-        }),
-        context,
-        toolCalls
-      );
-    } else if (shouldRunLocalShortcut(this.provider, normalized, "summarize")) {
+    if (shouldRunLocalShortcut(this.provider, normalized, "summarize")) {
       content = await this.callTool("summarize_note", "", context, toolCalls);
     } else if (shouldRunLocalShortcut(this.provider, normalized, "links")) {
       content = await this.callTool("suggest_links", "", context, toolCalls);
@@ -175,21 +164,6 @@ export class NoteAgentKernel {
 function shouldRunLocalShortcut(provider: ModelProvider, input: string, command: string): boolean {
   if (provider.generateTurn) return input.trim().toLowerCase() === `/${command}`;
   return isCommand(input, command);
-}
-
-export function isStressGraphGenerationRequest(input: string): boolean {
-  const normalized = input.toLowerCase();
-  const asksToGenerate = /生成|创建|建立|模拟|造一/.test(normalized);
-  const mentionsGraph = /关系图谱|知识图谱|graph/.test(normalized);
-  const asksForDocuments = /文件夹|文档|笔记|实际内容|复杂内容|高复杂|运行工况|压力测试/.test(normalized);
-  return asksToGenerate && mentionsGraph && asksForDocuments;
-}
-
-function requestedDocumentCount(input: string): number | undefined {
-  const match = /(\d{1,3})\s*(?:个|篇|份)?/.exec(input);
-  if (!match) return undefined;
-  const value = Number(match[1]);
-  return Number.isFinite(value) ? Math.min(Math.max(value, 8), 80) : undefined;
 }
 
 function isCommand(input: string, command: string): boolean {

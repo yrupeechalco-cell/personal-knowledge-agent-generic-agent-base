@@ -1,7 +1,6 @@
 import {
   NoteAgentKernel,
   classifyRestore,
-  isStressGraphGenerationRequest,
   type AgentDiff,
   type AgentMessage,
   type AgentPermission,
@@ -368,7 +367,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       {
         name: "app_generate_stress_graph",
         description:
-          "Generate a realistic high-complexity test knowledge set inside the current vault: one folder, an overview note, many content-rich Markdown notes, and dense cross-links. Use this when the user asks to create or simulate a complex relationship graph, not build_graph.",
+          "Developer/test-only generator for a high-complexity synthetic knowledge set inside the current vault: one folder, an overview note, many content-rich Markdown notes, and dense cross-links. Use it only when the user explicitly asks for demo, simulation, stress-test, or synthetic test data. For real knowledge work, use the normal read/create/update note tools instead.",
         parameters: objectSchema(
           {
             folderName: stringSchema("Vault-relative folder name for the generated test set."),
@@ -1133,7 +1132,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       await runInterlinkedVaultOperation(sessionId, input, localOperation);
       return;
     }
-    if (adapter.saveDeepSeekApiKey && !modelSettings.deepSeekApiKeyConfigured && !isStressGraphGenerationRequest(input)) {
+    if (adapter.saveDeepSeekApiKey && !modelSettings.deepSeekApiKeyConfigured) {
       setAgentKeyDialogOpen(true);
       setAgentSettingsOpen(true);
       setStatus("请先填写本机 DeepSeek API key，再让 Agent 调用在线模型。");
