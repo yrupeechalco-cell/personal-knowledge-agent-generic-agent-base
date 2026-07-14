@@ -11,8 +11,6 @@ $tag = "app-v$Version"
 $privateKey = Join-Path $root ".private/updater/knowledge-agent.key"
 $privatePassword = Join-Path $root ".private/updater/password.txt"
 $bundleDir = Join-Path $root "apps/desktop/src-tauri/target/release/bundle/nsis"
-$sourceInstaller = Join-Path $bundleDir "个人知识库 Agent_${Version}_x64-setup.exe"
-$sourceSignature = "$sourceInstaller.sig"
 $stagingDir = Join-Path $root ".artifacts/release-$Version"
 $assetName = "knowledge-agent_${Version}_x64-setup.exe"
 $assetInstaller = Join-Path $stagingDir $assetName
@@ -34,7 +32,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Signed Tauri build failed." }
   }
 
-  if (-not (Test-Path $sourceInstaller) -or -not (Test-Path $sourceSignature)) {
+  $sourceInstaller = Get-ChildItem -LiteralPath $bundleDir -Filter "*_${Version}_x64-setup.exe" |
+    Select-Object -First 1 -ExpandProperty FullName
+  $sourceSignature = if ($sourceInstaller) { "$sourceInstaller.sig" } else { $null }
+  if (-not $sourceInstaller -or -not (Test-Path $sourceSignature)) {
     throw "Signed installer artifacts for $Version were not found."
   }
 
@@ -57,8 +58,14 @@ try {
   } | ConvertTo-Json -Depth 6
   [IO.File]::WriteAllText($manifestPath, $manifest, [Text.UTF8Encoding]::new($false))
 
-  gh release view $tag --repo $repo *> $null
-  if ($LASTEXITCODE -eq 0) {
+  $releaseExists = $false
+  try {
+    gh release view $tag --repo $repo *> $null
+    $releaseExists = $LASTEXITCODE -eq 0
+  } catch {
+    $releaseExists = $false
+  }
+  if ($releaseExists) {
     gh release upload $tag $assetInstaller $assetSignature $manifestPath --clobber --repo $repo
     gh release edit $tag --title "Knowledge Agent v$Version" --notes-file CHANGELOG.md --latest --repo $repo
   } else {
