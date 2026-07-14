@@ -7,6 +7,9 @@ import type {
   KnowledgeWorkspaceAdapter,
   LoadedVault,
   ModelConnectionSettings,
+  ReadOnlyDirectoryListing,
+  ReadOnlyFilePreview,
+  StorageRoot,
   TrashEntry,
   WriteChangesResult
 } from "@knowledge-agent/workspace";
@@ -43,13 +46,6 @@ interface VaultChangedPayload {
   paths: string[];
 }
 
-interface ReadOnlyStructureScan {
-  files: NoteFile[];
-  folderCount: number;
-  fileCount: number;
-  truncated: boolean;
-}
-
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   return {
     canOpenVault: true,
@@ -84,20 +80,19 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       if (!selected) {
         throw new Error("已取消只读结构扫描，当前知识库保持不变。");
       }
-      const scan = await invoke<ReadOnlyStructureScan>("scan_directory_structure_read_only", { root: selected });
-      // Never retain this path as an editable vault. This mode has no write-back route.
-      activeVaultPath = "";
-      return {
-        files: scan.files,
-        sourceName: selected,
-        sourceKind: "structure" as const,
-        safetyManifest: buildSafetyManifest(scan.files.map((file) => file.path)),
-        readOnlyStructure: {
-          folderCount: scan.folderCount,
-          fileCount: scan.fileCount,
-          truncated: scan.truncated
-        }
-      };
+      return loadReadOnlyRoot(selected);
+    },
+    async openReadOnlyRoot(root) {
+      return loadReadOnlyRoot(root);
+    },
+    listStorageRoots() {
+      return invoke<StorageRoot[]>("list_storage_roots");
+    },
+    listReadOnlyDirectory(root, path) {
+      return invoke<ReadOnlyDirectoryListing>("list_directory_read_only", { root, path });
+    },
+    readReadOnlyFile(root, path) {
+      return invoke<ReadOnlyFilePreview>("read_file_preview_read_only", { root, path });
     },
     async createVaultFolder(folderName) {
       const created = await invoke<string | null>("create_vault_dir", { name: folderName });
@@ -190,6 +185,23 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       if (sourceKind === "desktop") return "桌面 vault";
       if (sourceKind === "structure") return "只读磁盘结构";
       return "Demo";
+    }
+  };
+}
+
+async function loadReadOnlyRoot(root: string): Promise<LoadedVault> {
+  const listing = await invoke<ReadOnlyDirectoryListing>("list_directory_read_only", { root, path: "" });
+  activeVaultPath = "";
+  return {
+    files: [],
+    sourceName: root,
+    sourceKind: "structure",
+    safetyManifest: buildSafetyManifest([]),
+    readOnlyStructure: {
+      folderCount: listing.entries.filter((entry) => entry.kind === "directory").length,
+      fileCount: listing.entries.filter((entry) => entry.kind === "file").length,
+      truncated: listing.truncated,
+      listing
     }
   };
 }

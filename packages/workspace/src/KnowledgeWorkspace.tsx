@@ -22,19 +22,23 @@ import {
 } from "@knowledge-agent/core";
 import { AgentConsole, FileTree, NoteEditor, StarGraph, type FileTreeFolder, type Viewport } from "@knowledge-agent/ui";
 import {
+  ArrowUp,
   BookOpen,
   Bot,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   FilePlus2,
+  File,
   FileText,
+  Folder,
   FolderOpen,
   GitBranch,
   HardDrive,
   Network,
   PanelLeft,
   Search,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Trash2,
@@ -105,8 +109,41 @@ export interface LoadedVault {
     folderCount: number;
     fileCount: number;
     truncated: boolean;
+    listing?: ReadOnlyDirectoryListing;
   };
   unsupportedReason?: string;
+}
+
+export interface StorageRoot {
+  name: string;
+  path: string;
+}
+
+export interface ReadOnlyDirectoryEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file" | "symlink" | "other";
+  extension?: string;
+  size?: number;
+  modifiedAtMs?: number;
+}
+
+export interface ReadOnlyDirectoryListing {
+  root: string;
+  path: string;
+  entries: ReadOnlyDirectoryEntry[];
+  truncated: boolean;
+}
+
+export interface ReadOnlyFilePreview {
+  root: string;
+  path: string;
+  name: string;
+  previewKind: "text" | "docx" | "unsupported" | "too-large";
+  content?: string;
+  message?: string;
+  size: number;
+  modifiedAtMs?: number;
 }
 
 export interface DraftChange {
@@ -143,6 +180,10 @@ export interface KnowledgeWorkspaceAdapter {
   loadInitialVault(): Promise<LoadedVault> | LoadedVault;
   openVault(): Promise<LoadedVault>;
   openReadOnlyStructure?(): Promise<LoadedVault>;
+  openReadOnlyRoot?(root: string): Promise<LoadedVault>;
+  listStorageRoots?(): Promise<StorageRoot[]> | StorageRoot[];
+  listReadOnlyDirectory?(root: string, path: string): Promise<ReadOnlyDirectoryListing>;
+  readReadOnlyFile?(root: string, path: string): Promise<ReadOnlyFilePreview>;
   loadDemoVault(): LoadedVault;
   createVaultFolder?(folderName: string): Promise<LoadedVault>;
   createInterlinkedVault?(options: InterlinkedVaultRequest): Promise<LoadedVault>;
@@ -312,6 +353,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [autoSaveRevision, setAutoSaveRevision] = useState(0);
   const [storageOpen, setStorageOpen] = useState(false);
   const [storageBusy, setStorageBusy] = useState(false);
+  const [storageRoots, setStorageRoots] = useState<StorageRoot[]>([]);
+  const [readOnlyListing, setReadOnlyListing] = useState<ReadOnlyDirectoryListing | null>(null);
+  const [readOnlyPreview, setReadOnlyPreview] = useState<ReadOnlyFilePreview | null>(null);
+  const [readOnlyBusy, setReadOnlyBusy] = useState(false);
   const [newVaultName, setNewVaultName] = useState("新知识库");
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenu | null>(null);
   const [graphDeleteTarget, setGraphDeleteTarget] = useState<PendingGraphDelete | null>(null);
@@ -710,6 +755,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   useEffect(() => {
     if (!storageOpen) return;
+    if (adapter.listStorageRoots && storageRoots.length === 0) {
+      Promise.resolve(adapter.listStorageRoots())
+        .then(setStorageRoots)
+        .catch((error) => setStatus(error instanceof Error ? `无法列出本机磁盘：${error.message}` : "无法列出本机磁盘。"));
+    }
     function closeStoragePanel(event: PointerEvent) {
       const target = event.target as Element | null;
       if (target?.closest(".storage-panel") || target?.closest('[aria-label="存储空间"]')) return;
@@ -717,7 +767,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
     window.addEventListener("pointerdown", closeStoragePanel);
     return () => window.removeEventListener("pointerdown", closeStoragePanel);
-  }, [storageOpen]);
+  }, [adapter, storageOpen, storageRoots.length]);
 
   const isReadOnlyStructure = sourceKind === "structure";
   const index = useMemo(
@@ -939,15 +989,20 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setSourceKind(vault.sourceKind);
     setSourceSafety(vault.safetyManifest);
     setCurrentPath(nextIndex.notes[0]?.path ?? "");
-    setCenterMode("graph");
+    setCenterMode(vault.sourceKind === "structure" ? "explorer" : "graph");
     setEditorMode("preview");
     setSelectedGraphPaths([]);
     if (vault.sourceKind === "structure") {
       setAgentKeyDialogOpen(false);
       setAgentSettingsOpen(false);
     }
-    setWorkspaceTabs([{ id: GRAPH_TAB_ID, mode: "graph" }]);
-    setActiveTabId(GRAPH_TAB_ID);
+    setReadOnlyListing(vault.readOnlyStructure?.listing ?? null);
+    setReadOnlyPreview(null);
+    const initialTab = vault.sourceKind === "structure"
+      ? { id: EXPLORER_TAB_ID, mode: "explorer" as const }
+      : { id: GRAPH_TAB_ID, mode: "graph" as const };
+    setWorkspaceTabs([initialTab]);
+    setActiveTabId(initialTab.id);
     if (!options?.preserveAgentSessions) {
       const initialAgentSession = createAgentConversationSession("1");
       setAgentSessions([initialAgentSession]);
@@ -1012,21 +1067,67 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus("当前入口不支持只读磁盘结构扫描；请使用桌面 App。" );
       return;
     }
-    setStatus("正在只读扫描文件夹结构：不会读取文件正文，也不会修改任何本地文件...");
+    setStatus("正在打开只读文件浏览器：只列出当前目录，不会修改任何本地文件...");
     setStorageBusy(true);
     try {
       const vault = await adapter.openReadOnlyStructure();
       const summary = vault.readOnlyStructure;
-      const limitMessage = summary?.truncated ? "已达到图谱安全上限，请选择更具体的子目录继续查看。" : "";
+      const limitMessage = summary?.truncated ? "当前目录超过 1000 项，仅显示前 1000 项。" : "";
       applyLoadedVault(
         vault,
-        `只读结构已载入：${summary?.folderCount ?? 0} 个文件夹、${summary?.fileCount ?? 0} 个文件。未读取文件正文，未修改任何本地文件。${limitMessage}`
+        `只读浏览已打开：当前目录有 ${summary?.folderCount ?? 0} 个文件夹、${summary?.fileCount ?? 0} 个文件。只有点击文件时才会读取预览，任何内容都不会被修改。${limitMessage}`
       );
       setStorageOpen(false);
     } catch (error) {
       setStatus(error instanceof Error ? `未能读取磁盘结构：${error.message}` : "未能读取磁盘结构。");
     } finally {
       setStorageBusy(false);
+    }
+  }
+
+  async function openReadOnlyRoot(root: string) {
+    if (!adapter.openReadOnlyRoot) return;
+    setStorageBusy(true);
+    setStatus(`正在以只读方式打开 ${root}...`);
+    try {
+      const vault = await adapter.openReadOnlyRoot(root);
+      applyLoadedVault(vault, `已以只读方式打开 ${root}。点击文件夹继续浏览，点击文件查看预览。`);
+      setStorageOpen(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? `无法打开 ${root}：${error.message}` : `无法打开 ${root}。`);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function browseReadOnlyDirectory(path: string) {
+    if (!readOnlyListing || !adapter.listReadOnlyDirectory) return;
+    setReadOnlyBusy(true);
+    try {
+      const listing = await adapter.listReadOnlyDirectory(readOnlyListing.root, path);
+      setReadOnlyListing(listing);
+      setReadOnlyPreview(null);
+      setStatus(
+        `只读目录：${listing.root}${listing.path ? `\\${listing.path.replaceAll("/", "\\")}` : ""} · ${listing.entries.length} 项${listing.truncated ? "（仅显示前 1000 项）" : ""}`
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? `无法读取目录：${error.message}` : "无法读取目录。原始文件未被修改。");
+    } finally {
+      setReadOnlyBusy(false);
+    }
+  }
+
+  async function previewReadOnlyFile(path: string) {
+    if (!readOnlyListing || !adapter.readReadOnlyFile) return;
+    setReadOnlyBusy(true);
+    try {
+      const preview = await adapter.readReadOnlyFile(readOnlyListing.root, path);
+      setReadOnlyPreview(preview);
+      setStatus(`只读预览：${preview.name} · ${formatFileSize(preview.size)}。未修改原始文件。`);
+    } catch (error) {
+      setStatus(error instanceof Error ? `无法预览文件：${error.message}` : "无法预览文件。原始文件未被修改。");
+    } finally {
+      setReadOnlyBusy(false);
     }
   }
 
@@ -1658,6 +1759,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function openGraphTab() {
+    if (sourceKind === "structure") {
+      openExplorerTab();
+      setStatus("当前是只读硬盘浏览模式；关系图谱只用于已打开的 Markdown 知识库。");
+      return;
+    }
     setWorkspaceTabs((current) => (current.some((tab) => tab.id === GRAPH_TAB_ID) ? current : [{ id: GRAPH_TAB_ID, mode: "graph" }, ...current]));
     setActiveTabId(GRAPH_TAB_ID);
     setCenterMode("graph");
@@ -2038,7 +2144,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           onFolderNameChange={setNewVaultName}
           onOpen={openLocalVault}
           onReadStructure={openReadOnlyStructure}
+          onReadRoot={openReadOnlyRoot}
           onUseDemo={useDemoVault}
+          roots={storageRoots}
           sourceLabel={sourceLabel}
           sourceName={sourceName}
         />
@@ -2085,16 +2193,24 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               value={noteFilter}
             />
           </label>
-          <FileTree
-            currentPath={currentPath}
-            notes={filteredNotes}
-            onFolderContextMenu={isReadOnlyStructure ? undefined : (folder, event) => openTreeFolderMenu(folder, event)}
-            onNoteContextMenu={isReadOnlyStructure ? undefined : (note, event) => openTreeNoteMenu(note, event)}
-            onSelect={selectNote}
-          />
+          {isReadOnlyStructure && readOnlyListing ? (
+            <ReadOnlySidebarList
+              listing={readOnlyListing}
+              onOpenDirectory={browseReadOnlyDirectory}
+              onOpenFile={previewReadOnlyFile}
+            />
+          ) : (
+            <FileTree
+              currentPath={currentPath}
+              notes={filteredNotes}
+              onFolderContextMenu={(folder, event) => openTreeFolderMenu(folder, event)}
+              onNoteContextMenu={(note, event) => openTreeNoteMenu(note, event)}
+              onSelect={selectNote}
+            />
+          )}
         </section>
 
-        <section className="vault-panel compact-panel">
+        {!isReadOnlyStructure ? <section className="vault-panel compact-panel">
           <div className="section-heading">
             <h2>标签</h2>
             <span>{tags.length}</span>
@@ -2102,7 +2218,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <div className="tag-list">
             {tags.length === 0 ? <p className="muted">暂无标签</p> : tags.map((tag) => <span key={tag.name}>#{tag.name} {tag.count}</span>)}
           </div>
-        </section>
+        </section> : null}
 
         <section className="vault-panel compact-panel safety-card">
           <div className="section-heading">
@@ -2208,7 +2324,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </div>
           <div className="breadcrumb">
             <span>{centerMode === "explorer" ? sourceName : currentPath.split("/").slice(0, -1).join(" / ") || "关系图谱"}</span>
-            <strong>{centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? "资源查询" : leafName(currentPath)}</strong>
+            <strong>{centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? (isReadOnlyStructure ? "只读文件浏览" : "资源查询") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{status}</div>
@@ -2314,15 +2430,26 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             ) : null}
           </div>
         ) : centerMode === "explorer" ? (
-          <VaultExplorer
-            model={explorerModel}
-            onOpenNote={selectNote}
-            onQueryChange={setExplorerQuery}
-            onScopeChange={setExplorerScope}
-            query={explorerQuery}
-            scope={explorerScope}
-            sourceName={sourceName}
-          />
+          isReadOnlyStructure && readOnlyListing ? (
+            <ReadOnlyStorageExplorer
+              busy={readOnlyBusy}
+              listing={readOnlyListing}
+              onClosePreview={() => setReadOnlyPreview(null)}
+              onOpenDirectory={browseReadOnlyDirectory}
+              onOpenFile={previewReadOnlyFile}
+              preview={readOnlyPreview}
+            />
+          ) : (
+            <VaultExplorer
+              model={explorerModel}
+              onOpenNote={selectNote}
+              onQueryChange={setExplorerQuery}
+              onScopeChange={setExplorerScope}
+              query={explorerQuery}
+              scope={explorerScope}
+              sourceName={sourceName}
+            />
+          )
         ) : (
           <NoteEditor
             miniGraph={currentNoteGraph}
@@ -2567,7 +2694,9 @@ interface StoragePanelProps {
   onFolderNameChange(value: string): void;
   onOpen(): void;
   onReadStructure(): void;
+  onReadRoot(root: string): void;
   onUseDemo(): void;
+  roots: StorageRoot[];
   sourceLabel: string;
   sourceName: string;
 }
@@ -2583,7 +2712,9 @@ function StoragePanel({
   onFolderNameChange,
   onOpen,
   onReadStructure,
+  onReadRoot,
   onUseDemo,
+  roots,
   sourceLabel,
   sourceName
 }: StoragePanelProps) {
@@ -2602,6 +2733,20 @@ function StoragePanel({
       </header>
 
       <section className="storage-actions">
+        {roots.length > 0 ? (
+          <div className="storage-roots" aria-label="本机磁盘">
+            <span>此电脑</span>
+            <div>
+              {roots.map((root) => (
+                <button disabled={busy} key={root.path} onClick={() => onReadRoot(root.path)} type="button">
+                  <HardDrive size={15} />
+                  <strong>{root.name}</strong>
+                  <small>{root.path}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <button disabled={!canOpen || busy} onClick={onOpen} type="button">
           <FolderOpen size={15} />
           打开已有文件夹
@@ -2609,7 +2754,7 @@ function StoragePanel({
 
         <button disabled={!canReadStructure || busy} onClick={onReadStructure} type="button">
           <HardDrive size={15} />
-          只读扫描文件结构
+          选择其他位置只读浏览
         </button>
 
         <div className={canCreate ? "storage-create" : "storage-create disabled"}>
@@ -2837,6 +2982,153 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+function ReadOnlySidebarList({
+  listing,
+  onOpenDirectory,
+  onOpenFile
+}: {
+  listing: ReadOnlyDirectoryListing;
+  onOpenDirectory(path: string): void;
+  onOpenFile(path: string): void;
+}) {
+  return (
+    <div className="readonly-sidebar-list" aria-label="当前磁盘目录">
+      {listing.entries.map((entry) => (
+        <button
+          key={`${entry.kind}:${entry.path}`}
+          onClick={() => entry.kind === "directory" ? onOpenDirectory(entry.path) : entry.kind === "file" ? onOpenFile(entry.path) : undefined}
+          title={entry.path}
+          type="button"
+        >
+          {entry.kind === "directory" ? <Folder size={14} /> : <File size={14} />}
+          <span>{entry.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function ReadOnlyStorageExplorer({
+  busy,
+  listing,
+  onClosePreview,
+  onOpenDirectory,
+  onOpenFile,
+  preview
+}: {
+  busy: boolean;
+  listing: ReadOnlyDirectoryListing;
+  onClosePreview(): void;
+  onOpenDirectory(path: string): void;
+  onOpenFile(path: string): void;
+  preview: ReadOnlyFilePreview | null;
+}) {
+  const [query, setQuery] = useState("");
+  const segments = listing.path ? listing.path.split("/").filter(Boolean) : [];
+  const parentPath = segments.slice(0, -1).join("/");
+  const filteredEntries = listing.entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()));
+
+  return (
+    <section className={preview ? "readonly-explorer with-preview" : "readonly-explorer"} aria-label="只读文件浏览器">
+      <div className="readonly-browser-main">
+        <header className="readonly-browser-toolbar">
+          <div className="readonly-browser-actions">
+            <button disabled={busy || segments.length === 0} onClick={() => onOpenDirectory(parentPath)} title="上一级" type="button">
+              <ArrowUp size={15} />
+            </button>
+            <button disabled={busy} onClick={() => onOpenDirectory(listing.path)} title="刷新当前目录" type="button">
+              <RefreshCw className={busy ? "spinning" : ""} size={15} />
+            </button>
+          </div>
+          <nav className="readonly-breadcrumb" aria-label="当前文件路径">
+            <button onClick={() => onOpenDirectory("")} type="button"><HardDrive size={14} />{listing.root}</button>
+            {segments.map((segment, index) => {
+              const path = segments.slice(0, index + 1).join("/");
+              return (
+                <span key={path}>
+                  <ChevronRight size={13} />
+                  <button onClick={() => onOpenDirectory(path)} type="button">{segment}</button>
+                </span>
+              );
+            })}
+          </nav>
+          <label className="readonly-search">
+            <Search size={14} />
+            <input onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前目录" value={query} />
+          </label>
+        </header>
+
+        <div className="readonly-location-summary">
+          <strong>{segments.at(-1) ?? listing.root}</strong>
+          <span>{listing.entries.length} 项 · 只读</span>
+        </div>
+
+        <div className="readonly-file-table" role="table" aria-label="文件和文件夹">
+          <div className="readonly-file-row header" role="row">
+            <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
+          </div>
+          {filteredEntries.length === 0 ? (
+            <div className="readonly-file-empty">当前目录没有匹配项。</div>
+          ) : filteredEntries.map((entry) => (
+            <button
+              className={`readonly-file-row ${entry.kind}`}
+              key={`${entry.kind}:${entry.path}`}
+              onClick={() => entry.kind === "directory" ? onOpenDirectory(entry.path) : entry.kind === "file" ? onOpenFile(entry.path) : undefined}
+              role="row"
+              title={entry.path}
+              type="button"
+            >
+              <span>{entry.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}<strong>{entry.name}</strong></span>
+              <span>{readOnlyEntryType(entry)}</span>
+              <span>{entry.kind === "file" ? formatFileSize(entry.size ?? 0) : "—"}</span>
+              <span>{formatModifiedTime(entry.modifiedAtMs)}</span>
+            </button>
+          ))}
+        </div>
+        {listing.truncated ? <p className="readonly-limit">当前目录超过 1000 项，仅显示前 1000 项。进入子文件夹可继续浏览。</p> : null}
+      </div>
+
+      {preview ? (
+        <aside className="readonly-preview" aria-label="只读文件预览">
+          <header>
+            <div><span>只读预览</span><strong>{preview.name}</strong></div>
+            <button aria-label="关闭预览" onClick={onClosePreview} type="button"><X size={15} /></button>
+          </header>
+          <dl>
+            <div><dt>位置</dt><dd>{preview.root}{preview.path ? `\\${preview.path.replaceAll("/", "\\")}` : ""}</dd></div>
+            <div><dt>大小</dt><dd>{formatFileSize(preview.size)}</dd></div>
+            <div><dt>修改</dt><dd>{formatModifiedTime(preview.modifiedAtMs)}</dd></div>
+          </dl>
+          {preview.content !== undefined ? (
+            <pre>{preview.content || "（文档没有可显示的文字内容）"}</pre>
+          ) : (
+            <div className="readonly-preview-message"><File size={26} /><p>{preview.message}</p></div>
+          )}
+          <footer><ShieldCheck size={13} />本视图没有写入、重命名或删除权限</footer>
+        </aside>
+      ) : null}
+    </section>
+  );
+}
+
+function readOnlyEntryType(entry: ReadOnlyDirectoryEntry): string {
+  if (entry.kind === "directory") return "文件夹";
+  if (entry.kind === "symlink") return "符号链接";
+  if (entry.kind !== "file") return "其他";
+  return entry.extension ? `${entry.extension.toUpperCase()} 文件` : "文件";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(bytes < 10_485_760 ? 1 : 0)} MB`;
+  return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+}
+
+function formatModifiedTime(value?: number): string {
+  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 }
 
 function VaultExplorer({

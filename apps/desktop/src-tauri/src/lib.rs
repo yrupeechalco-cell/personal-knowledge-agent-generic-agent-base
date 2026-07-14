@@ -1,10 +1,11 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::HashMap,
     env, fs,
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::Command,
     sync::Mutex,
@@ -18,6 +19,8 @@ const TRASH_FILES_DIR: &str = "files";
 const TRASH_INDEX_FILE: &str = "index.json";
 const TRASH_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 const MAX_READ_ONLY_STRUCTURE_ENTRIES: usize = 900;
+const MAX_READ_ONLY_DIRECTORY_ENTRIES: usize = 1_000;
+const MAX_READ_ONLY_PREVIEW_BYTES: u64 = 1_048_576;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +37,46 @@ struct ReadOnlyStructureScan {
     folder_count: usize,
     file_count: usize,
     truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageRoot {
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadOnlyDirectoryEntry {
+    name: String,
+    path: String,
+    kind: String,
+    extension: Option<String>,
+    size: Option<u64>,
+    modified_at_ms: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadOnlyDirectoryListing {
+    root: String,
+    path: String,
+    entries: Vec<ReadOnlyDirectoryEntry>,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadOnlyFilePreview {
+    root: String,
+    path: String,
+    name: String,
+    preview_kind: String,
+    content: Option<String>,
+    message: Option<String>,
+    size: u64,
+    modified_at_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -181,6 +224,24 @@ fn select_read_only_structure_dir() -> Result<Option<String>, String> {
         .set_title("选择要读取结构的磁盘或文件夹（只读）")
         .pick_folder()
         .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn list_storage_roots() -> Vec<StorageRoot> {
+    available_storage_roots()
+}
+
+#[tauri::command]
+fn list_directory_read_only(
+    root: String,
+    path: String,
+) -> Result<ReadOnlyDirectoryListing, String> {
+    list_directory_read_only_at(Path::new(&root), &path)
+}
+
+#[tauri::command]
+fn read_file_preview_read_only(root: String, path: String) -> Result<ReadOnlyFilePreview, String> {
+    read_file_preview_read_only_at(Path::new(&root), &path)
 }
 
 #[tauri::command]
@@ -652,6 +713,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             select_vault_dir,
             select_read_only_structure_dir,
+            list_storage_roots,
+            list_directory_read_only,
+            read_file_preview_read_only,
             create_vault_dir,
             create_interlinked_demo_vault,
             create_word_document_on_desktop,
@@ -761,6 +825,293 @@ fn collect_read_only_structure(
     Ok(())
 }
 
+fn available_storage_roots() -> Vec<StorageRoot> {
+    #[cfg(windows)]
+    {
+        (b'A'..=b'Z')
+            .filter_map(|letter| {
+                let path = format!("{}:\\", letter as char);
+                Path::new(&path).is_dir().then(|| StorageRoot {
+                    name: format!("本地磁盘 ({}:)", letter as char),
+                    path,
+                })
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        vec![StorageRoot {
+            name: "文件系统".to_string(),
+            path: "/".to_string(),
+        }]
+    }
+}
+
+fn list_directory_read_only_at(
+    root: &Path,
+    relative: &str,
+) -> Result<ReadOnlyDirectoryListing, String> {
+    let directory_path = resolve_read_only_path(root, relative)?;
+    if !directory_path.is_dir() {
+        return Err("the requested read-only path is not a directory".to_string());
+    }
+
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    let directory = fs::read_dir(&directory_path).map_err(|error| error.to_string())?;
+    for item in directory {
+        if entries.len() >= MAX_READ_ONLY_DIRECTORY_ENTRIES {
+            truncated = true;
+            break;
+        }
+        let Ok(item) = item else { continue };
+        let Ok(file_type) = item.file_type() else {
+            continue;
+        };
+        let metadata = item.metadata().ok();
+        let name = item.file_name().to_string_lossy().to_string();
+        let item_relative = if relative.trim().is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", relative.trim_matches(&['/', '\\'][..]), name)
+        };
+        let kind = if file_type.is_dir() {
+            "directory"
+        } else if file_type.is_file() {
+            "file"
+        } else if file_type.is_symlink() {
+            "symlink"
+        } else {
+            "other"
+        };
+        entries.push(ReadOnlyDirectoryEntry {
+            name,
+            path: item_relative.replace('\\', "/"),
+            kind: kind.to_string(),
+            extension: item
+                .path()
+                .extension()
+                .map(|value| value.to_string_lossy().to_lowercase()),
+            size: metadata
+                .as_ref()
+                .filter(|_| file_type.is_file())
+                .map(|value| value.len()),
+            modified_at_ms: metadata.and_then(|value| modified_time_ms(&value)),
+        });
+    }
+    entries.sort_by(|left, right| {
+        let left_rank = if left.kind == "directory" { 0 } else { 1 };
+        let right_rank = if right.kind == "directory" { 0 } else { 1 };
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+
+    Ok(ReadOnlyDirectoryListing {
+        root: root.to_string_lossy().to_string(),
+        path: relative.trim_matches(&['/', '\\'][..]).replace('\\', "/"),
+        entries,
+        truncated,
+    })
+}
+
+fn read_file_preview_read_only_at(
+    root: &Path,
+    relative: &str,
+) -> Result<ReadOnlyFilePreview, String> {
+    let file_path = resolve_read_only_path(root, relative)?;
+    if !file_path.is_file() {
+        return Err("the requested read-only path is not a regular file".to_string());
+    }
+    let metadata = fs::metadata(&file_path).map_err(|error| error.to_string())?;
+    let size = metadata.len();
+    let name = file_path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| relative.to_string());
+    let extension = file_path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let modified_at_ms = modified_time_ms(&metadata);
+
+    if size > MAX_READ_ONLY_PREVIEW_BYTES {
+        return Ok(ReadOnlyFilePreview {
+            root: root.to_string_lossy().to_string(),
+            path: relative.replace('\\', "/"),
+            name,
+            preview_kind: "too-large".to_string(),
+            content: None,
+            message: Some("文件超过 1 MB，只显示结构和元数据，未加载正文。".to_string()),
+            size,
+            modified_at_ms,
+        });
+    }
+
+    if extension == "docx" {
+        let content = read_docx_text(&file_path)?;
+        return Ok(ReadOnlyFilePreview {
+            root: root.to_string_lossy().to_string(),
+            path: relative.replace('\\', "/"),
+            name,
+            preview_kind: "docx".to_string(),
+            content: Some(content),
+            message: None,
+            size,
+            modified_at_ms,
+        });
+    }
+
+    if !is_text_preview_extension(&extension) {
+        return Ok(ReadOnlyFilePreview {
+            root: root.to_string_lossy().to_string(),
+            path: relative.replace('\\', "/"),
+            name,
+            preview_kind: "unsupported".to_string(),
+            content: None,
+            message: Some("当前版本只读预览文本、Markdown、常见代码/数据文件和 Word .docx；该文件仅显示元数据。".to_string()),
+            size,
+            modified_at_ms,
+        });
+    }
+
+    let bytes = fs::read(&file_path).map_err(|error| error.to_string())?;
+    if bytes.iter().take(8_192).any(|byte| *byte == 0) {
+        return Ok(ReadOnlyFilePreview {
+            root: root.to_string_lossy().to_string(),
+            path: relative.replace('\\', "/"),
+            name,
+            preview_kind: "unsupported".to_string(),
+            content: None,
+            message: Some("检测到二进制内容，因此未把文件作为文本打开。".to_string()),
+            size,
+            modified_at_ms,
+        });
+    }
+    Ok(ReadOnlyFilePreview {
+        root: root.to_string_lossy().to_string(),
+        path: relative.replace('\\', "/"),
+        name,
+        preview_kind: "text".to_string(),
+        content: Some(String::from_utf8_lossy(&bytes).to_string()),
+        message: None,
+        size,
+        modified_at_ms,
+    })
+}
+
+fn resolve_read_only_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    ensure_existing_dir(root)?;
+    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
+    let normalized = relative.trim_matches(&['/', '\\'][..]);
+    if !normalized.is_empty() {
+        ensure_safe_relative(normalized)?;
+    }
+    let candidate = if normalized.is_empty() {
+        canonical_root.clone()
+    } else {
+        canonical_root
+            .join(normalized)
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+    };
+    if !candidate.starts_with(&canonical_root) {
+        return Err("read-only path escapes the selected storage root".to_string());
+    }
+    Ok(candidate)
+}
+
+fn modified_time_ms(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis() as u64)
+}
+
+fn is_text_preview_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "txt"
+            | "md"
+            | "markdown"
+            | "json"
+            | "jsonl"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "csv"
+            | "tsv"
+            | "log"
+            | "xml"
+            | "html"
+            | "htm"
+            | "css"
+            | "scss"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "py"
+            | "rs"
+            | "go"
+            | "java"
+            | "c"
+            | "h"
+            | "cpp"
+            | "hpp"
+            | "cs"
+            | "sh"
+            | "ps1"
+            | "bat"
+            | "cmd"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "sql"
+            | "tex"
+            | "rtf"
+    )
+}
+
+fn read_docx_text(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut document = archive
+        .by_name("word/document.xml")
+        .map_err(|error| error.to_string())?;
+    if document.size() > MAX_READ_ONLY_PREVIEW_BYTES {
+        return Err("Word document text exceeds the 1 MB preview limit".to_string());
+    }
+    let mut xml = String::new();
+    document
+        .read_to_string(&mut xml)
+        .map_err(|error| error.to_string())?;
+
+    let mut reader = XmlReader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+    let mut output = String::new();
+    loop {
+        match reader.read_event() {
+            Ok(XmlEvent::Text(text)) => {
+                if let Ok(value) = text.decode() {
+                    if !output.is_empty() && !output.ends_with(['\n', '\t', ' ']) {
+                        output.push(' ');
+                    }
+                    output.push_str(&value);
+                }
+            }
+            Ok(XmlEvent::End(tag)) if tag.name().as_ref() == b"w:p" => output.push('\n'),
+            Ok(XmlEvent::End(tag)) if tag.name().as_ref() == b"w:tc" => output.push('\t'),
+            Ok(XmlEvent::Eof) => break,
+            Err(error) => return Err(error.to_string()),
+            _ => {}
+        }
+    }
+    Ok(output.trim().to_string())
+}
+
 fn structure_entries_as_notes(entries: &[StructureEntry]) -> Vec<NoteFile> {
     let mut children_by_parent: HashMap<String, Vec<&StructureEntry>> = HashMap::new();
     for entry in entries {
@@ -817,7 +1168,9 @@ fn structure_note_path(entry: &StructureEntry) -> String {
 }
 
 fn structure_note_target(entry: &StructureEntry) -> String {
-    structure_note_path(entry).trim_end_matches(".md").to_string()
+    structure_note_path(entry)
+        .trim_end_matches(".md")
+        .to_string()
 }
 
 fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -1628,10 +1981,14 @@ mod tests {
         )
         .expect("note should be saved");
 
-        let loaded = load_vault_notes(root.to_string_lossy().to_string()).expect("vault should reload");
+        let loaded =
+            load_vault_notes(root.to_string_lossy().to_string()).expect("vault should reload");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].path, "Generated/Systems/overview.md");
-        assert_eq!(loaded[0].content, "# Persistent overview\n\n[[Generated/Systems/node-a]]");
+        assert_eq!(
+            loaded[0].content,
+            "# Persistent overview\n\n[[Generated/Systems/node-a]]"
+        );
 
         fs::remove_dir_all(&root).expect("test vault should be removed");
     }
@@ -1680,12 +2037,89 @@ mod tests {
         let notes = structure_entries_as_notes(&entries);
 
         assert!(!truncated);
-        assert!(entries.iter().any(|entry| entry.path == "资料" && entry.is_directory));
-        assert!(entries.iter().any(|entry| entry.path == "资料/原始内容.txt" && !entry.is_directory));
-        assert!(notes.iter().any(|note| note.path == "资料/__folder.structure.md"));
-        assert!(notes.iter().any(|note| note.path == "资料/原始内容.txt.structure-file.md"));
-        assert!(notes.iter().all(|note| !note.content.contains("this body must remain untouched")));
-        assert_eq!(fs::read(&source).expect("source bytes should remain readable"), before);
+        assert!(entries
+            .iter()
+            .any(|entry| entry.path == "资料" && entry.is_directory));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.path == "资料/原始内容.txt" && !entry.is_directory));
+        assert!(notes
+            .iter()
+            .any(|note| note.path == "资料/__folder.structure.md"));
+        assert!(notes
+            .iter()
+            .any(|note| note.path == "资料/原始内容.txt.structure-file.md"));
+        assert!(notes
+            .iter()
+            .all(|note| !note.content.contains("this body must remain untouched")));
+        assert_eq!(
+            fs::read(&source).expect("source bytes should remain readable"),
+            before
+        );
+
+        fs::remove_dir_all(&root).expect("test folder should be removed");
+    }
+
+    #[test]
+    fn browses_and_previews_storage_without_mutating_source_files() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-file-browser-{stamp}"));
+        let folder = root.join("资料");
+        let source = folder.join("说明.md");
+        fs::create_dir_all(&folder).expect("test folder should be created");
+        fs::write(&source, "# 只读内容\n\n不能被改变").expect("test file should be written");
+        let before = fs::read(&source).expect("source bytes should be readable");
+
+        let root_listing = list_directory_read_only_at(&root, "").expect("root should list");
+        assert!(root_listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == "资料" && entry.kind == "directory"));
+
+        let folder_listing =
+            list_directory_read_only_at(&root, "资料").expect("folder should list");
+        assert!(folder_listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == "说明.md" && entry.kind == "file"));
+
+        let preview = read_file_preview_read_only_at(&root, "资料/说明.md")
+            .expect("text preview should load");
+        assert_eq!(preview.preview_kind, "text");
+        assert!(preview
+            .content
+            .expect("preview should include text")
+            .contains("不能被改变"));
+        assert_eq!(
+            fs::read(&source).expect("source should still be readable"),
+            before
+        );
+        assert!(resolve_read_only_path(&root, "../outside.md").is_err());
+
+        fs::remove_dir_all(&root).expect("test folder should be removed");
+    }
+
+    #[test]
+    fn extracts_word_text_for_read_only_preview() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-docx-preview-{stamp}"));
+        fs::create_dir_all(&root).expect("test folder should be created");
+        let path = root.join("项目说明.docx");
+        write_minimal_docx(&path, "项目说明").expect("docx should be written");
+
+        let preview = read_file_preview_read_only_at(&root, "项目说明.docx")
+            .expect("docx preview should load");
+        assert_eq!(preview.preview_kind, "docx");
+        assert!(preview
+            .content
+            .expect("docx should contain text")
+            .contains("项目说明"));
 
         fs::remove_dir_all(&root).expect("test folder should be removed");
     }
@@ -1744,10 +2178,7 @@ mod tests {
         assert_eq!(value["role"], "assistant");
         assert_eq!(value["tool_calls"][0]["id"], "call-1");
         assert_eq!(value["tool_calls"][0]["type"], "function");
-        assert_eq!(
-            value["tool_calls"][0]["function"]["name"],
-            "app_show_graph"
-        );
+        assert_eq!(value["tool_calls"][0]["function"]["name"], "app_show_graph");
         assert_eq!(value["reasoning_content"], "use the graph tool");
 
         let tool_result = model_message_json(ModelMessage {
