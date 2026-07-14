@@ -97,9 +97,11 @@ describe("AgentConsole", () => {
 
   it("shows numbered sub-agent sessions and switches between them", () => {
     const onSelectSession = vi.fn();
+    const onDeleteSession = vi.fn();
 
     renderAgentConsole({
       activeSessionId: "agent-2",
+      onDeleteSession,
       onSelectSession,
       sessions: [
         { id: "agent-1", label: "1", running: true },
@@ -112,6 +114,9 @@ describe("AgentConsole", () => {
     fireEvent.click(screen.getByRole("button", { name: "切换到子 Agent 1" }));
 
     expect(onSelectSession).toHaveBeenCalledWith("agent-1");
+    fireEvent.contextMenu(screen.getByRole("button", { name: "切换到子 Agent 2" }));
+    expect(onDeleteSession).toHaveBeenCalledWith("agent-2");
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -128,6 +133,7 @@ function baseAgentConsole({
   onAgentModeChange,
   onModelChange,
   onRequestApiKey,
+  onDeleteSession,
   onSelectSession,
   onToggleSettings,
   running = false,
@@ -145,6 +151,7 @@ function baseAgentConsole({
   onAgentModeChange?: (mode: string) => void;
   onModelChange?: (model: string) => void;
   onRequestApiKey?: () => void;
+  onDeleteSession?: (sessionId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onToggleSettings?: () => void;
   running?: boolean;
@@ -168,6 +175,7 @@ function baseAgentConsole({
       onModelChange={onModelChange}
       onRequestApiKey={onRequestApiKey}
       onRun={onRun}
+      onDeleteSession={onDeleteSession}
       onSelectSession={onSelectSession}
       onToggleSettings={onToggleSettings}
       running={running}

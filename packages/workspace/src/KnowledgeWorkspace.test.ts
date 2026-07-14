@@ -6,6 +6,7 @@ import {
   agentMutationApprovalFor,
   detectInterlinkedVaultRequest,
   detectWordDocumentRequest,
+  removeAgentConversationSession,
   selectAutoSaveChanges,
   updateConversationById
 } from "./KnowledgeWorkspace";
@@ -83,6 +84,28 @@ describe("detectWordDocumentRequest", () => {
 
   it("does not treat ordinary note requests as Word document creation", () => {
     expect(detectWordDocumentRequest("在当前笔记里写一下张凯瑞")).toBeNull();
+  });
+});
+
+describe("removeAgentConversationSession", () => {
+  it("removes the right-clicked session, reindexes labels, and selects its neighbor", () => {
+    const result = removeAgentConversationSession(
+      [
+        { id: "agent-1", label: "1" },
+        { id: "agent-2", label: "2" },
+        { id: "agent-3", label: "3" }
+      ],
+      "agent-2",
+      "agent-2"
+    );
+
+    expect(result).toEqual({
+      sessions: [
+        { id: "agent-1", label: "1" },
+        { id: "agent-3", label: "2" }
+      ],
+      nextActiveSessionId: "agent-3"
+    });
   });
 });
 

@@ -1,0 +1,49 @@
+// @vitest-environment jsdom
+
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DesktopUpdateNotifier } from "./DesktopUpdateNotifier";
+
+const { checkMock } = vi.hoisted(() => ({ checkMock: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => checkMock() }));
+
+describe("DesktopUpdateNotifier", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    checkMock.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("offers and installs a signed desktop update", async () => {
+    const downloadAndInstall = vi.fn(async (onEvent: (event: unknown) => void) => {
+      onEvent({ event: "Started", data: { contentLength: 100 } });
+      onEvent({ event: "Progress", data: { chunkLength: 50 } });
+      onEvent({ event: "Finished" });
+    });
+    checkMock.mockResolvedValue({
+      version: "0.2.1",
+      body: "Graph and agent improvements",
+      downloadAndInstall
+    });
+
+    render(<DesktopUpdateNotifier />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(screen.getByText("发现新版本 v0.2.1")).toBeTruthy();
+    expect(screen.getByText("Graph and agent improvements")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    });
+
+    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("v0.2.1 已安装")).toBeTruthy();
+  });
+});

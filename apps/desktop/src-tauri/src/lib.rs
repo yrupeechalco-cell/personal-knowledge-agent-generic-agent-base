@@ -645,6 +645,7 @@ fn deepseek_chat_completion_blocking(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(VaultWatcherState {
             watcher: Mutex::new(None),
         })

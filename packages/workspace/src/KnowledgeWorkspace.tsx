@@ -41,6 +41,8 @@ import {
   X
 } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -51,10 +53,13 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 
+const KnowledgeRoleMap = lazy(() => import("./KnowledgeRoleMap").then((module) => ({ default: module.KnowledgeRoleMap })));
+
 const GRAPH_TAB_ID = "graph-overview";
 const EXPLORER_TAB_ID = "vault-explorer";
 
 type CenterMode = "graph" | "edit" | "explorer";
+type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
 type SourceKind = "demo" | "browser-directory" | "desktop" | "structure";
 type DraftChangeKind = "created" | "modified" | "deleted";
@@ -240,6 +245,23 @@ export function updateConversationById<T extends { id: string }>(items: T[], id:
   return items.map((item) => (item.id === id ? updater(item) : item));
 }
 
+export function removeAgentConversationSession<T extends { id: string; label: string }>(
+  sessions: T[],
+  sessionId: string,
+  activeSessionId: string
+): { sessions: T[]; nextActiveSessionId: string | null } {
+  const removedIndex = sessions.findIndex((session) => session.id === sessionId);
+  if (removedIndex < 0) return { sessions, nextActiveSessionId: activeSessionId || sessions[0]?.id || null };
+  const remaining = sessions
+    .filter((session) => session.id !== sessionId)
+    .map((session, index) => ({ ...session, label: String(index + 1) }));
+  const nextActiveSessionId =
+    activeSessionId === sessionId
+      ? remaining[Math.min(removedIndex, remaining.length - 1)]?.id ?? null
+      : activeSessionId || remaining[0]?.id || null;
+  return { sessions: remaining, nextActiveSessionId };
+}
+
 export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAdapter }) {
   const initialVault = useMemo(() => adapter.loadDemoVault(), [adapter]);
   const [files, setFiles] = useState<NoteFile[]>([]);
@@ -278,6 +300,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [explorerQuery, setExplorerQuery] = useState("");
   const [explorerScope, setExplorerScope] = useState("");
   const [graphSettingsOpen, setGraphSettingsOpen] = useState(false);
+  const [graphPerspective, setGraphPerspective] = useState<GraphPerspective>("knowledge");
   const [graphFilter, setGraphFilter] = useState("");
   const [graphViewport, setGraphViewport] = useState<Viewport | null>(null);
   const [graphRadius, setGraphRadius] = useState(1);
@@ -1239,21 +1262,22 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
   }
 
-  function snapshotAgentSession(title: string): AgentSessionSnapshot | null {
-    if (messages.length === 0 && diffs.length === 0 && prompt.trim() === "" && agentPinnedPaths.length === 0) return null;
+  function snapshotAgentSession(title: string, session = activeAgentSession): AgentSessionSnapshot | null {
+    if (!session) return null;
+    if (session.messages.length === 0 && session.diffs.length === 0 && session.prompt.trim() === "" && session.pinnedPaths.length === 0) return null;
     return {
       id: crypto.randomUUID(),
       title,
-      messages,
-      diffs,
-      prompt,
-      pinnedPaths: agentPinnedPaths,
+      messages: session.messages,
+      diffs: session.diffs,
+      prompt: session.prompt,
+      pinnedPaths: session.pinnedPaths,
       savedAt: new Date().toISOString()
     };
   }
 
-  function saveAgentSnapshot(title: string) {
-    const snapshot = snapshotAgentSession(title);
+  function saveAgentSnapshot(title: string, session = activeAgentSession) {
+    const snapshot = snapshotAgentSession(title, session);
     if (!snapshot) return;
     setAgentSessionHistory((current) => [snapshot, ...current].slice(0, 12));
   }
@@ -1275,7 +1299,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setAgentSessions((current) => [...current, nextSession]);
     setActiveAgentSessionId(nextSession.id);
     setAgentSessionNumber(nextNumber);
-    setStatus(`已新建子 Agent ${nextSession.label}。底部编号可切换不同子 Agent 会话。`);
+    setStatus(`已新建子 Agent ${nextSession.label}。底部编号左键进入会话，右键删除会话。`);
   }
 
   function resetAgentSession() {
@@ -1307,6 +1331,31 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setActiveAgentSessionId(sessionId);
     const session = agentSessions.find((item) => item.id === sessionId);
     setStatus(`已切换到子 Agent ${session?.label ?? ""}。`);
+  }
+
+  function deleteAgentSession(sessionId: string) {
+    const target = agentSessions.find((session) => session.id === sessionId);
+    if (!target) return;
+    if (runningAgentSessionIds.has(sessionId)) {
+      setStatus(`子 Agent ${target.label} 正在执行任务，完成后才能删除。`);
+      return;
+    }
+
+    saveAgentSnapshot(`已删除的 Agent ${target.label}`, target);
+    if (agentSessions.length === 1) {
+      const replacement = createAgentConversationSession("1");
+      setAgentSessions([replacement]);
+      setActiveAgentSessionId(replacement.id);
+      setAgentSessionNumber(1);
+      setStatus("最后一个子 Agent 会话已清空，并创建了新的会话 1。");
+      return;
+    }
+
+    const result = removeAgentConversationSession(agentSessions, sessionId, activeAgentSessionKey);
+    setAgentSessions(result.sessions);
+    setActiveAgentSessionId(result.nextActiveSessionId);
+    setAgentSessionNumber(result.sessions.length);
+    setStatus(`已删除子 Agent ${target.label}；剩余会话已重新编号。`);
   }
 
   function uploadCurrentNoteToAgent() {
@@ -2159,27 +2208,56 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </div>
           <div className="breadcrumb">
             <span>{centerMode === "explorer" ? sourceName : currentPath.split("/").slice(0, -1).join(" / ") || "关系图谱"}</span>
-            <strong>{centerMode === "graph" ? "关系图谱" : centerMode === "explorer" ? "资源查询" : leafName(currentPath)}</strong>
+            <strong>{centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? "资源查询" : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{status}</div>
         {centerMode === "graph" ? (
           <div className="graph-workspace">
-            <StarGraph
-              filterText={graphFilter}
-              graph={graph}
-              onDelete={isReadOnlyStructure ? undefined : requestGraphDelete}
-              onDeleteMany={isReadOnlyStructure ? undefined : requestGraphDeleteMany}
-              onSelect={selectGraphNode}
-              onSelectionChange={setSelectedGraphPaths}
-              onViewportChange={setGraphViewport}
-              radiusScale={graphRadius}
-              showLabels={graphShowLabels}
-              showSecondHop={graphShowRelated}
-              selectedPaths={selectedGraphPaths}
-              viewport={graphViewport ?? undefined}
-            />
-            {graphSettingsOpen ? (
+            <div className="graph-perspective-switch" aria-label="图谱观察方式" role="tablist">
+              <button
+                aria-selected={graphPerspective === "knowledge"}
+                className={graphPerspective === "knowledge" ? "active" : ""}
+                onClick={() => {
+                  setGraphPerspective("knowledge");
+                  setGraphSettingsOpen(false);
+                }}
+                role="tab"
+                type="button"
+              >
+                知识地形
+              </button>
+              <button
+                aria-selected={graphPerspective === "files"}
+                className={graphPerspective === "files" ? "active" : ""}
+                onClick={() => setGraphPerspective("files")}
+                role="tab"
+                type="button"
+              >
+                文件关系
+              </button>
+            </div>
+            {graphPerspective === "knowledge" ? (
+              <Suspense fallback={<div className="knowledge-empty"><strong>正在构建知识地形</strong></div>}>
+                <KnowledgeRoleMap index={index} onSelectNote={selectNote} />
+              </Suspense>
+            ) : (
+              <StarGraph
+                filterText={graphFilter}
+                graph={graph}
+                onDelete={isReadOnlyStructure ? undefined : requestGraphDelete}
+                onDeleteMany={isReadOnlyStructure ? undefined : requestGraphDeleteMany}
+                onSelect={selectGraphNode}
+                onSelectionChange={setSelectedGraphPaths}
+                onViewportChange={setGraphViewport}
+                radiusScale={graphRadius}
+                showLabels={graphShowLabels}
+                showSecondHop={graphShowRelated}
+                selectedPaths={selectedGraphPaths}
+                viewport={graphViewport ?? undefined}
+              />
+            )}
+            {graphSettingsOpen && graphPerspective === "files" ? (
               <aside className="graph-settings-panel" aria-label="图谱设置">
                 <header>
                   <span>图谱设置</span>
@@ -2275,6 +2353,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         modelOptions={agentModelOptions}
         onApply={applyDiff}
         onAgentModeChange={(mode) => void updateAgentMode(mode)}
+        onDeleteSession={deleteAgentSession}
         onNewSession={createAgentSession}
         onInputChange={setPrompt}
         onModelChange={(model) => void updateAgentModel(model)}

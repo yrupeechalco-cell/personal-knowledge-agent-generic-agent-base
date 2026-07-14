@@ -38,6 +38,7 @@ export interface AgentConsoleProps {
   onResetSession?(): void;
   onRestoreSession?(): void;
   onSelectSession?(sessionId: string): void;
+  onDeleteSession?(sessionId: string): void;
   onUploadContext?(): void;
   onInputChange(input: string): void;
   onRun(): void;
@@ -86,6 +87,7 @@ export function AgentConsole({
   onResetSession,
   onRestoreSession,
   onSelectSession,
+  onDeleteSession,
   onUploadContext,
   onInputChange,
   onRun,
@@ -196,7 +198,11 @@ export function AgentConsole({
                   disabled={readOnly}
                   key={session.id}
                   onClick={() => onSelectSession?.(session.id)}
-                  title={`子 Agent ${session.label}`}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    if (!readOnly) onDeleteSession?.(session.id);
+                  }}
+                  title={`子 Agent ${session.label}：左键进入，右键删除`}
                   type="button"
                 >
                   {session.label}
