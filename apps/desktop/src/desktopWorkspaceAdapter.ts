@@ -43,6 +43,13 @@ interface VaultChangedPayload {
   paths: string[];
 }
 
+interface ReadOnlyStructureScan {
+  files: NoteFile[];
+  folderCount: number;
+  fileCount: number;
+  truncated: boolean;
+}
+
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   return {
     canOpenVault: true,
@@ -71,6 +78,26 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       activeVaultPath = selected;
       await invoke("save_app_settings", { settings: { vaultPath: selected } satisfies AppSettings });
       return loadVault(selected);
+    },
+    async openReadOnlyStructure() {
+      const selected = await invoke<string | null>("select_read_only_structure_dir");
+      if (!selected) {
+        throw new Error("已取消只读结构扫描，当前知识库保持不变。");
+      }
+      const scan = await invoke<ReadOnlyStructureScan>("scan_directory_structure_read_only", { root: selected });
+      // Never retain this path as an editable vault. This mode has no write-back route.
+      activeVaultPath = "";
+      return {
+        files: scan.files,
+        sourceName: selected,
+        sourceKind: "structure" as const,
+        safetyManifest: buildSafetyManifest(scan.files.map((file) => file.path)),
+        readOnlyStructure: {
+          folderCount: scan.folderCount,
+          fileCount: scan.fileCount,
+          truncated: scan.truncated
+        }
+      };
     },
     async createVaultFolder(folderName) {
       const created = await invoke<string | null>("create_vault_dir", { name: folderName });
@@ -160,7 +187,9 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       return invoke<ModelTurnResponse>("deepseek_tool_completion", { request });
     },
     getSourceLabel(sourceKind) {
-      return sourceKind === "desktop" ? "桌面 vault" : "Demo";
+      if (sourceKind === "desktop") return "桌面 vault";
+      if (sourceKind === "structure") return "只读磁盘结构";
+      return "Demo";
     }
   };
 }

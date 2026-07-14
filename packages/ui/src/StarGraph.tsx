@@ -27,12 +27,23 @@ interface PanDrag {
   startY: number;
   originX: number;
   originY: number;
+  moved: boolean;
+}
+
+interface SelectionDrag {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
 export interface StarGraphProps {
   graph: NoteGraph;
   onDelete?(path: string): void;
+  onDeleteMany?(paths: string[]): void;
   onSelect(path: string): void;
+  onSelectionChange?(paths: string[]): void;
+  selectedPaths?: string[];
   onViewportChange?(viewport: Viewport): void;
   filterText?: string;
   radiusScale?: number;
@@ -58,7 +69,10 @@ const LABEL_MAX_SIZE_COMPENSATION = 1.15;
 export function StarGraph({
   graph,
   onDelete,
+  onDeleteMany,
   onSelect,
+  onSelectionChange,
+  selectedPaths = [],
   onViewportChange,
   filterText = "",
   radiusScale = 1,
@@ -72,6 +86,8 @@ export function StarGraph({
   const nodesRef = useRef(new Map<string, SimNode>());
   const dragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null);
   const panRef = useRef<PanDrag | null>(null);
+  const selectionRef = useRef<SelectionDrag | null>(null);
+  const ctrlPressedRef = useRef(false);
   const pendingWheelRef = useRef<{ position: { x: number; y: number }; deltaY: number } | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const smoothViewportFrameRef = useRef<number | null>(null);
@@ -84,8 +100,10 @@ export function StarGraph({
   const [svgUnitScale, setSvgUnitScale] = useState(1);
   const [trashArmed, setTrashArmed] = useState(false);
   const [panning, setPanning] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<SelectionDrag | null>(null);
   const visibleGraph = useMemo(() => filterGraph(graph, filterText, showSecondHop), [graph, filterText, showSecondHop]);
   const adjacency = useMemo(() => buildAdjacency(visibleGraph.edges), [visibleGraph.edges]);
+  const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
 
   function updateViewport(next: Viewport | ((current: Viewport) => Viewport)) {
     cancelSmoothViewport();
@@ -146,6 +164,23 @@ export function StarGraph({
   useEffect(() => {
     return () => {
       cancelSmoothViewport();
+    };
+  }, []);
+
+  useEffect(() => {
+    function updateModifier(event: KeyboardEvent) {
+      ctrlPressedRef.current = event.type === "keyup" && event.key === "Control" ? false : event.ctrlKey || event.key === "Control";
+    }
+    function clearModifier() {
+      ctrlPressedRef.current = false;
+    }
+    window.addEventListener("keydown", updateModifier);
+    window.addEventListener("keyup", updateModifier);
+    window.addEventListener("blur", clearModifier);
+    return () => {
+      window.removeEventListener("keydown", updateModifier);
+      window.removeEventListener("keyup", updateModifier);
+      window.removeEventListener("blur", clearModifier);
     };
   }, []);
 
@@ -285,8 +320,46 @@ export function StarGraph({
     };
   }
 
+  function beginSelection(event: ReactPointerEvent<SVGSVGElement | SVGGElement>) {
+    panRef.current = null;
+    dragRef.current = null;
+    setPanning(false);
+    const position = graphPosition(event);
+    const selection = {
+      startX: position.x,
+      startY: position.y,
+      currentX: position.x,
+      currentY: position.y
+    };
+    selectionRef.current = selection;
+    setSelectionBox(selection);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function finishSelection(event: ReactPointerEvent<SVGSVGElement | SVGGElement>) {
+    const selection = selectionRef.current;
+    if (!selection) return false;
+    selectionRef.current = null;
+    setSelectionBox(null);
+    const left = Math.min(selection.startX, selection.currentX);
+    const right = Math.max(selection.startX, selection.currentX);
+    const top = Math.min(selection.startY, selection.currentY);
+    const bottom = Math.max(selection.startY, selection.currentY);
+    const paths = selectNodesInBounds([...nodesRef.current.values()], { left, right, top, bottom });
+    onSelectionChange?.(paths);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    return true;
+  }
+
   function startDrag(event: ReactPointerEvent<SVGGElement>, id: string) {
     event.stopPropagation();
+    if (event.ctrlKey || ctrlPressedRef.current) {
+      beginSelection(event);
+      return;
+    }
+    if (shouldClearSelectionOnGraphClick(selectedPaths, id)) {
+      onSelectionChange?.([]);
+    }
     userViewportRef.current = true;
     cancelSmoothViewport();
     const position = graphPosition(event);
@@ -317,6 +390,7 @@ export function StarGraph({
   }
 
   function endDrag(event: ReactPointerEvent<SVGGElement>, id: string) {
+    if (finishSelection(event)) return;
     const dragging = dragRef.current;
     const node = nodesRef.current.get(id);
     if (node) node.fixed = false;
@@ -341,24 +415,38 @@ export function StarGraph({
 
   function startPan(event: ReactPointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return;
-    if ((event.target as Element).closest(".graph-node")) return;
     userViewportRef.current = true;
     cancelSmoothViewport();
+    if (event.ctrlKey || ctrlPressedRef.current) {
+      beginSelection(event);
+      return;
+    }
+    if ((event.target as Element).closest(".graph-node")) return;
     const position = viewPosition(event);
     panRef.current = {
       startX: position.x,
       startY: position.y,
       originX: viewport.x,
-      originY: viewport.y
+      originY: viewport.y,
+      moved: false
     };
     setPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function movePan(event: ReactPointerEvent<SVGSVGElement>) {
+    const selection = selectionRef.current;
+    if (selection) {
+      const position = graphPosition(event);
+      const nextSelection = { ...selection, currentX: position.x, currentY: position.y };
+      selectionRef.current = nextSelection;
+      setSelectionBox(nextSelection);
+      return;
+    }
     const panningState = panRef.current;
     if (!panningState) return;
     const position = viewPosition(event);
+    panningState.moved ||= Math.hypot(position.x - panningState.startX, position.y - panningState.startY) > 3;
     updateViewport((current) => ({
       ...current,
       x: panningState.originX + position.x - panningState.startX,
@@ -367,10 +455,15 @@ export function StarGraph({
   }
 
   function endPan(event: ReactPointerEvent<SVGSVGElement>) {
-    if (!panRef.current) return;
+    if (finishSelection(event)) return;
+    const panningState = panRef.current;
+    if (!panningState) return;
     panRef.current = null;
     setPanning(false);
     event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!panningState.moved && shouldClearSelectionOnGraphClick(selectedPaths)) {
+      onSelectionChange?.([]);
+    }
   }
 
   function zoomAt(position: { x: number; y: number }, deltaY: number) {
@@ -415,13 +508,23 @@ export function StarGraph({
               />
             );
           })}
+          {selectionBox ? (
+            <rect
+              className="graph-selection-box"
+              height={Math.abs(selectionBox.currentY - selectionBox.startY)}
+              width={Math.abs(selectionBox.currentX - selectionBox.startX)}
+              x={Math.min(selectionBox.startX, selectionBox.currentX)}
+              y={Math.min(selectionBox.startY, selectionBox.currentY)}
+            />
+          ) : null}
           {positioned.map((node) => {
             const active = isNodeActive(node.id, hoveredId, adjacency);
+            const selected = selectedPathSet.has(node.id);
             const radius = node.depth === 0 ? 8 : node.depth === 1 ? 6 : 5;
             const labelMetrics = graphLabelMetrics(showLabels, viewport.scale, svgUnitScale, node.id, hoveredId, active);
             return (
               <g
-                className={nodeClass(node, hoveredId, active)}
+                className={nodeClass(node, hoveredId, active, selected)}
                 key={node.id}
                 onPointerDown={(event) => startDrag(event, node.id)}
                 onPointerMove={moveDrag}
@@ -447,9 +550,13 @@ export function StarGraph({
       {onDelete ? (
         <button
           aria-label="拖拽图谱节点到这里删除"
-          className={trashArmed ? "graph-trash active" : "graph-trash"}
+          className={trashArmed || selectedPaths.length > 0 ? "graph-trash active" : "graph-trash"}
+          disabled={selectedPaths.length > 0 && !onDeleteMany}
+          onClick={() => {
+            if (selectedPaths.length > 0) onDeleteMany?.(selectedPaths);
+          }}
           ref={trashRef}
-          title="删除"
+          title={selectedPaths.length > 0 ? `删除已框选的 ${selectedPaths.length} 个文档` : "将单个图谱节点拖到这里删除"}
           type="button"
         >
           <svg aria-hidden="true" className="graph-trash-icon" fill="none" height="14" viewBox="0 0 24 24" width="14">
@@ -526,6 +633,19 @@ export function fitGraphViewport(
     x: viewbox.width / 2 - centerX * scale,
     y: viewbox.height / 2 - centerY * scale
   };
+}
+
+export function selectNodesInBounds(
+  nodes: Array<{ id: string; x: number; y: number }>,
+  bounds: { left: number; right: number; top: number; bottom: number }
+): string[] {
+  return nodes
+    .filter((node) => node.x >= bounds.left && node.x <= bounds.right && node.y >= bounds.top && node.y <= bounds.bottom)
+    .map((node) => node.id);
+}
+
+export function shouldClearSelectionOnGraphClick(selectedPaths: string[], targetPath?: string): boolean {
+  return selectedPaths.length > 0 && (targetPath === undefined || !selectedPaths.includes(targetPath));
 }
 
 function graphLabelMetrics(
@@ -647,9 +767,10 @@ function edgeClass(edge: GraphEdge, hoveredId: string | undefined, active: boole
   return classes.join(" ");
 }
 
-function nodeClass(node: SimNode, hoveredId: string | undefined, active: boolean) {
+function nodeClass(node: SimNode, hoveredId: string | undefined, active: boolean, selected: boolean) {
   const classes = ["graph-node", `depth-${node.depth}`];
   if (node.fixed) classes.push("dragging");
+  if (selected) classes.push("selected");
   if (hoveredId) classes.push(active ? "active" : "dimmed");
   return classes.join(" ");
 }

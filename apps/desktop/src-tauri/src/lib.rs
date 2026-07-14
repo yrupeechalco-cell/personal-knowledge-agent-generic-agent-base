@@ -2,6 +2,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    collections::HashMap,
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
@@ -16,6 +17,7 @@ const TRASH_DIR: &str = ".knowledge-agent-trash";
 const TRASH_FILES_DIR: &str = "files";
 const TRASH_INDEX_FILE: &str = "index.json";
 const TRASH_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+const MAX_READ_ONLY_STRUCTURE_ENTRIES: usize = 900;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,21 @@ struct NoteFile {
     path: String,
     content: String,
     modified_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadOnlyStructureScan {
+    files: Vec<NoteFile>,
+    folder_count: usize,
+    file_count: usize,
+    truncated: bool,
+}
+
+#[derive(Clone)]
+struct StructureEntry {
+    path: String,
+    is_directory: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -159,6 +176,14 @@ fn select_vault_dir() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn select_read_only_structure_dir() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("选择要读取结构的磁盘或文件夹（只读）")
+        .pick_folder()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 fn start_vault_watcher(
     app: tauri::AppHandle,
     state: State<'_, VaultWatcherState>,
@@ -269,6 +294,26 @@ fn load_vault_notes(root: String) -> Result<Vec<NoteFile>, String> {
     collect_markdown_files(&root_path, &root_path, &mut files)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
+}
+
+#[tauri::command]
+fn scan_directory_structure_read_only(root: String) -> Result<ReadOnlyStructureScan, String> {
+    let root_path = PathBuf::from(root);
+    ensure_existing_dir(&root_path)?;
+
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    collect_read_only_structure(&root_path, &root_path, &mut entries, &mut truncated)?;
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let folder_count = entries.iter().filter(|entry| entry.is_directory).count();
+    let file_count = entries.len().saturating_sub(folder_count);
+    Ok(ReadOnlyStructureScan {
+        files: structure_entries_as_notes(&entries),
+        folder_count,
+        file_count,
+        truncated,
+    })
 }
 
 #[tauri::command]
@@ -605,12 +650,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             select_vault_dir,
+            select_read_only_structure_dir,
             create_vault_dir,
             create_interlinked_demo_vault,
             create_word_document_on_desktop,
             start_vault_watcher,
             stop_vault_watcher,
             load_vault_notes,
+            scan_directory_structure_read_only,
             list_trash_entries,
             save_note,
             delete_note,
@@ -663,6 +710,113 @@ fn collect_markdown_files(
         }
     }
     Ok(())
+}
+
+// This scanner intentionally never opens a source file. It only enumerates names,
+// relative paths, and directory/file types so the UI can render a structure graph.
+fn collect_read_only_structure(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<StructureEntry>,
+    truncated: &mut bool,
+) -> Result<(), String> {
+    let directory = match fs::read_dir(current) {
+        Ok(directory) => directory,
+        Err(_) => return Ok(()),
+    };
+
+    for entry in directory {
+        if entries.len() >= MAX_READ_ONLY_STRUCTURE_ENTRIES {
+            *truncated = true;
+            return Ok(());
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let relative = match path.strip_prefix(root) {
+            Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        if relative.is_empty() {
+            continue;
+        }
+
+        let is_directory = file_type.is_dir();
+        entries.push(StructureEntry {
+            path: relative,
+            is_directory,
+        });
+        if is_directory {
+            collect_read_only_structure(root, &path, entries, truncated)?;
+            if *truncated {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn structure_entries_as_notes(entries: &[StructureEntry]) -> Vec<NoteFile> {
+    let mut children_by_parent: HashMap<String, Vec<&StructureEntry>> = HashMap::new();
+    for entry in entries {
+        let parent = Path::new(&entry.path)
+            .parent()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        children_by_parent.entry(parent).or_default().push(entry);
+    }
+
+    entries
+        .iter()
+        .map(|entry| {
+            let title = Path::new(&entry.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| entry.path.clone());
+            let kind = if entry.is_directory { "文件夹" } else { "文件" };
+            let children = if entry.is_directory {
+                children_by_parent
+                    .get(&entry.path)
+                    .into_iter()
+                    .flatten()
+                    .map(|child| format!("- [[{}]]", structure_note_target(child)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            };
+            let child_section = if children.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n## 包含项\n\n{children}")
+            };
+
+            NoteFile {
+                path: structure_note_path(entry),
+                content: format!(
+                    "# {title}\n\n只读磁盘结构条目。App 未读取该文件的正文，也不会修改原始文件。\n\n- 类型：{kind}\n- 位置：{}{}",
+                    entry.path, child_section
+                ),
+                modified_at: None,
+            }
+        })
+        .collect()
+}
+
+fn structure_note_path(entry: &StructureEntry) -> String {
+    if entry.is_directory {
+        format!("{}/__folder.structure.md", entry.path)
+    } else {
+        format!("{}.structure-file.md", entry.path)
+    }
+}
+
+fn structure_note_target(entry: &StructureEntry) -> String {
+    structure_note_path(entry).trim_end_matches(".md").to_string()
 }
 
 fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -1458,6 +1612,30 @@ mod tests {
     }
 
     #[test]
+    fn saves_note_and_loads_it_again_from_the_vault() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-autosave-{stamp}"));
+        fs::create_dir_all(&root).expect("test vault root should be created");
+
+        save_note(
+            root.to_string_lossy().to_string(),
+            "Generated/Systems/overview.md".to_string(),
+            "# Persistent overview\n\n[[Generated/Systems/node-a]]".to_string(),
+        )
+        .expect("note should be saved");
+
+        let loaded = load_vault_notes(root.to_string_lossy().to_string()).expect("vault should reload");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].path, "Generated/Systems/overview.md");
+        assert_eq!(loaded[0].content, "# Persistent overview\n\n[[Generated/Systems/node-a]]");
+
+        fs::remove_dir_all(&root).expect("test vault should be removed");
+    }
+
+    #[test]
     fn creates_unique_interlinked_demo_vault() {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1479,6 +1657,36 @@ mod tests {
         assert!(first.contains("[[关系测试/节点 30]]"));
 
         fs::remove_dir_all(&parent).expect("test folders should be removed");
+    }
+
+    #[test]
+    fn reads_directory_structure_without_reading_or_changing_source_content() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-read-only-{stamp}"));
+        let source = root.join("资料").join("原始内容.txt");
+        fs::create_dir_all(source.parent().expect("source should have parent"))
+            .expect("test parent should be created");
+        fs::write(&source, "this body must remain untouched").expect("source should be written");
+
+        let before = fs::read(&source).expect("source bytes should be readable");
+        let mut entries = Vec::new();
+        let mut truncated = false;
+        collect_read_only_structure(&root, &root, &mut entries, &mut truncated)
+            .expect("structure scan should succeed");
+        let notes = structure_entries_as_notes(&entries);
+
+        assert!(!truncated);
+        assert!(entries.iter().any(|entry| entry.path == "资料" && entry.is_directory));
+        assert!(entries.iter().any(|entry| entry.path == "资料/原始内容.txt" && !entry.is_directory));
+        assert!(notes.iter().any(|note| note.path == "资料/__folder.structure.md"));
+        assert!(notes.iter().any(|note| note.path == "资料/原始内容.txt.structure-file.md"));
+        assert!(notes.iter().all(|note| !note.content.contains("this body must remain untouched")));
+        assert_eq!(fs::read(&source).expect("source bytes should remain readable"), before);
+
+        fs::remove_dir_all(&root).expect("test folder should be removed");
     }
 
     #[test]

@@ -56,6 +56,24 @@ describe("buildVaultIndex", () => {
     expect(index.unresolvedLinks).toHaveLength(1);
   });
 
+  it("can include path-only structure entries when the caller explicitly requests a read-only map", () => {
+    const structureIndex = buildVaultIndex(
+      [
+        { path: "Projects/__folder.structure.md", content: "# Projects\n[[Projects/secret.txt.structure-file]]" },
+        { path: "Projects/secret.txt.structure-file.md", content: "# secret.txt" }
+      ],
+      { includeExcludedPaths: true }
+    );
+
+    expect(structureIndex.notes.map((note) => note.path)).toEqual([
+      "Projects/__folder.structure.md",
+      "Projects/secret.txt.structure-file.md"
+    ]);
+    expect(structureIndex.outlinks.get("Projects/__folder.structure.md")).toEqual([
+      expect.objectContaining({ target: "Projects/secret.txt.structure-file.md", resolved: true })
+    ]);
+  });
+
   it("builds a current-note graph with first and second hop nodes", () => {
     const graph = buildNoteGraph(index, "A.md");
     expect(graph.center).toBe("A.md");

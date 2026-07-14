@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitGraphViewport } from "./StarGraph";
+import { fitGraphViewport, selectNodesInBounds, shouldClearSelectionOnGraphClick } from "./StarGraph";
 
 describe("fitGraphViewport", () => {
   it("centers a small graph without shrinking it", () => {
@@ -27,5 +27,28 @@ describe("fitGraphViewport", () => {
 
     expect(viewport.scale).toBeLessThan(0.2);
     expect(viewport.scale).toBeGreaterThanOrEqual(0.08);
+  });
+});
+
+describe("selectNodesInBounds", () => {
+  it("returns every graph node inside a Ctrl-drag selection rectangle", () => {
+    expect(
+      selectNodesInBounds(
+        [
+          { id: "A.md", x: 120, y: 140 },
+          { id: "B.md", x: 260, y: 240 },
+          { id: "C.md", x: 480, y: 320 }
+        ],
+        { left: 100, right: 300, top: 100, bottom: 260 }
+      )
+    ).toEqual(["A.md", "B.md"]);
+  });
+});
+
+describe("shouldClearSelectionOnGraphClick", () => {
+  it("clears a batch selection from blank space or an unrelated node, but preserves it for selected nodes", () => {
+    expect(shouldClearSelectionOnGraphClick(["A.md", "B.md"])).toBe(true);
+    expect(shouldClearSelectionOnGraphClick(["A.md", "B.md"], "C.md")).toBe(true);
+    expect(shouldClearSelectionOnGraphClick(["A.md", "B.md"], "A.md")).toBe(false);
   });
 });

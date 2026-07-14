@@ -3,10 +3,10 @@ import { parseNote } from "./parser";
 import { safetyDecisionForPath } from "./safety";
 import type { GraphEdge, GraphNode, NoteFile, NoteGraph, ParsedLink, ParsedLinkEdge, ParsedNote, VaultIndex } from "./types";
 
-export function buildVaultIndex(files: NoteFile[]): VaultIndex {
+export function buildVaultIndex(files: NoteFile[], options: { includeExcludedPaths?: boolean } = {}): VaultIndex {
   const notes = files
     .filter((file) => isMarkdownFile(file.path))
-    .filter((file) => safetyDecisionForPath(file.path).allowed)
+    .filter((file) => options.includeExcludedPaths || safetyDecisionForPath(file.path).allowed)
     .map(parseNote)
     .sort((a, b) => a.path.localeCompare(b.path));
 

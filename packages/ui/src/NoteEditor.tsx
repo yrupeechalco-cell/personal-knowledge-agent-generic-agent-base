@@ -5,12 +5,13 @@ export interface NoteEditorProps {
   note?: ParsedNote;
   miniGraph?: NoteGraph;
   mode: "edit" | "preview";
+  readOnly?: boolean;
   onModeChange(mode: "edit" | "preview"): void;
   onChange(content: string): void;
   onSelectGraphNode?(path: string): void;
 }
 
-export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSelectGraphNode }: NoteEditorProps) {
+export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSelectGraphNode, readOnly = false }: NoteEditorProps) {
   if (!note) {
     return <main className="note-editor empty">选择一篇笔记开始。</main>;
   }
@@ -23,7 +24,7 @@ export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSe
           <p>{note.path}</p>
         </div>
         <div className="segmented">
-          <button className={mode === "edit" ? "active" : ""} onClick={() => onModeChange("edit")} type="button">
+          <button disabled={readOnly} className={mode === "edit" ? "active" : ""} onClick={() => onModeChange("edit")} type="button">
             编辑
           </button>
           <button className={mode === "preview" ? "active" : ""} onClick={() => onModeChange("preview")} type="button">
@@ -32,7 +33,7 @@ export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSe
         </div>
       </header>
 
-      {mode === "edit" ? (
+      {mode === "edit" && !readOnly ? (
         <textarea className="markdown-input" value={note.content} onChange={(event) => onChange(event.target.value)} />
       ) : (
         <article className="markdown-preview">{renderPreview(note.content)}</article>

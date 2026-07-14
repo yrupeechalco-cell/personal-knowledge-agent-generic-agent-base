@@ -3,8 +3,10 @@ import type { NoteFile } from "@knowledge-agent/core";
 import {
   buildDraftChanges,
   buildStressGraphNotes,
+  agentMutationApprovalFor,
   detectInterlinkedVaultRequest,
   detectWordDocumentRequest,
+  selectAutoSaveChanges,
   updateConversationById
 } from "./KnowledgeWorkspace";
 
@@ -81,5 +83,29 @@ describe("detectWordDocumentRequest", () => {
 
   it("does not treat ordinary note requests as Word document creation", () => {
     expect(detectWordDocumentRequest("在当前笔记里写一下张凯瑞")).toBeNull();
+  });
+});
+
+describe("selectAutoSaveChanges", () => {
+  it("persists creates and edits automatically but leaves deletion for the trash confirmation", () => {
+    expect(
+      selectAutoSaveChanges([
+        { path: "created.md", kind: "created", after: "# created" },
+        { path: "changed.md", kind: "modified", before: "# old", after: "# new" },
+        { path: "deleted.md", kind: "deleted", before: "# deleted" }
+      ])
+    ).toEqual([
+      { path: "created.md", kind: "created", after: "# created" },
+      { path: "changed.md", kind: "modified", before: "# old", after: "# new" }
+    ]);
+  });
+});
+
+describe("agentMutationApprovalFor", () => {
+  it("grants direct Agent writes only for explicit create or delete document instructions", () => {
+    expect(agentMutationApprovalFor("请创建一个项目计划文档")).toEqual({ create: true, delete: false, restore: false });
+    expect(agentMutationApprovalFor("删除这个笔记文件")).toEqual({ create: false, delete: true, restore: false });
+    expect(agentMutationApprovalFor("撤回刚才删除的文档")).toEqual({ create: false, delete: false, restore: true });
+    expect(agentMutationApprovalFor("总结当前笔记")).toEqual({ create: false, delete: false, restore: false });
   });
 });

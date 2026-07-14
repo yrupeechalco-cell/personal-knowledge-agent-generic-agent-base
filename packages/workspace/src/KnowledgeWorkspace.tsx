@@ -56,9 +56,15 @@ const EXPLORER_TAB_ID = "vault-explorer";
 
 type CenterMode = "graph" | "edit" | "explorer";
 type EditorMode = "edit" | "preview";
-type SourceKind = "demo" | "browser-directory" | "desktop";
+type SourceKind = "demo" | "browser-directory" | "desktop" | "structure";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
+
+interface AgentMutationApproval {
+  create: boolean;
+  delete: boolean;
+  restore: boolean;
+}
 
 const AGENT_MODEL_OPTIONS = [
   { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro", description: "复杂整理、长上下文分析、重要写作提案。" },
@@ -90,6 +96,11 @@ export interface LoadedVault {
   sourceName: string;
   sourceKind: SourceKind;
   safetyManifest: SafetyManifest;
+  readOnlyStructure?: {
+    folderCount: number;
+    fileCount: number;
+    truncated: boolean;
+  };
   unsupportedReason?: string;
 }
 
@@ -126,6 +137,7 @@ export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
   loadInitialVault(): Promise<LoadedVault> | LoadedVault;
   openVault(): Promise<LoadedVault>;
+  openReadOnlyStructure?(): Promise<LoadedVault>;
   loadDemoVault(): LoadedVault;
   createVaultFolder?(folderName: string): Promise<LoadedVault>;
   createInterlinkedVault?(options: InterlinkedVaultRequest): Promise<LoadedVault>;
@@ -174,7 +186,7 @@ interface NoteClipboard {
 }
 
 interface PendingGraphDelete {
-  path: string;
+  paths: string[];
   title: string;
   preview: string;
 }
@@ -273,23 +285,67 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [graphShowRelated, setGraphShowRelated] = useState(true);
   const [changesOpen, setChangesOpen] = useState(false);
   const [writingChanges, setWritingChanges] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSaveRevision, setAutoSaveRevision] = useState(0);
   const [storageOpen, setStorageOpen] = useState(false);
   const [storageBusy, setStorageBusy] = useState(false);
   const [newVaultName, setNewVaultName] = useState("新知识库");
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenu | null>(null);
   const [graphDeleteTarget, setGraphDeleteTarget] = useState<PendingGraphDelete | null>(null);
+  const [selectedGraphPaths, setSelectedGraphPaths] = useState<string[]>([]);
   const [noteClipboard, setNoteClipboard] = useState<NoteClipboard | null>(null);
   const [leftWidth, setLeftWidth] = useState(248);
   const [agentWidth, setAgentWidth] = useState(380);
   const shellRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filesRef = useRef(files);
+  const currentPathRef = useRef(currentPath);
+  const sourceKindRef = useRef<SourceKind>(sourceKind);
+  const agentMutationApprovalRef = useRef<AgentMutationApproval>({ create: false, delete: false, restore: false });
+  const autoSaveInFlightRef = useRef(false);
+  const trashEntriesRef = useRef<TrashEntry[]>(trashEntries);
   filesRef.current = files;
+  currentPathRef.current = currentPath;
+  sourceKindRef.current = sourceKind;
+  trashEntriesRef.current = trashEntries;
   const selectedAgentMode = normalizeAgentMode(modelSettings.agentMode);
   const selectedAgentModel = normalizeAgentModel(modelSettings.model, Boolean(adapter.runModel));
   const agentModelOptions = adapter.runModel
     ? AGENT_MODEL_OPTIONS
     : [{ value: "offline", label: "Offline tools", description: "仅使用本地笔记工具，不调用在线模型。" }];
+
+  async function writeApprovedAgentChanges(changes: DraftChange[]): Promise<WriteChangesResult | null> {
+    const approval = agentMutationApprovalRef.current;
+    const allowed = changes.every((change) => (change.kind === "created" ? approval.create : change.kind === "deleted" ? approval.delete : false));
+    if (!allowed || sourceKindRef.current !== "desktop" || !adapter.writeChanges) return null;
+
+    const result = await adapter.writeChanges(changes);
+    if (result.files) {
+      filesRef.current = result.files;
+      setFiles(result.files);
+      setBaseFiles(result.files);
+    }
+    if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+    if (result.trashEntries) setTrashEntries(result.trashEntries);
+    return result;
+  }
+
+  async function restoreApprovedAgentTrashEntry(entry: TrashEntry): Promise<WriteChangesResult | null> {
+    if (!agentMutationApprovalRef.current.restore || sourceKindRef.current !== "desktop" || !adapter.restoreTrashEntry) {
+      return null;
+    }
+
+    const result = await adapter.restoreTrashEntry(entry.id);
+    if (result.files) {
+      filesRef.current = result.files;
+      setFiles(result.files);
+      setBaseFiles(result.files);
+    }
+    if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+    if (result.trashEntries) setTrashEntries(result.trashEntries);
+    return result;
+  }
+
   const appAgentTools = useMemo<AgentTool[]>(
     () => [
       {
@@ -309,7 +365,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       },
       {
         name: "app_create_note",
-        description: "Create and open a Markdown note draft. Disk write-back still requires user confirmation.",
+        description: "Create and open a Markdown note. Desktop vaults persist safe creations automatically; explicit user authorization writes it immediately.",
         parameters: objectSchema(
           {
             path: stringSchema("Vault-relative Markdown path for the new note."),
@@ -317,7 +373,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           },
           ["path", "content"]
         ),
-        run(input) {
+        async run(input) {
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           const safety = buildSafetyManifest([notePath]);
@@ -325,18 +381,24 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           if (filesRef.current.some((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase())) {
             return `Cannot create note because it already exists: ${notePath}`;
           }
+          const directResult = await writeApprovedAgentChanges([{ path: notePath, kind: "created", after: String(content ?? "") }]);
+          if (directResult) {
+            openNoteTab(notePath);
+            setStatus(`Agent 已按本轮用户授权直接创建本地文档：${notePath}`);
+            return `Created and wrote note directly: ${notePath}. User authorization applies only to this request.`;
+          }
           const nextFiles = [...filesRef.current, { path: notePath, content: String(content ?? ""), modifiedAt: new Date().toISOString() }];
           filesRef.current = nextFiles;
           setFiles(nextFiles);
           markDirty(notePath);
           openNoteTab(notePath);
           setStatus(`Agent 已创建笔记草稿：${notePath}`);
-          return `Created note draft: ${notePath}. Disk write-back still requires user confirmation.`;
+          return `Created note: ${notePath}. The desktop vault will save it automatically.`;
         }
       },
       {
         name: "app_replace_note",
-        description: "Replace an existing note's Markdown content in the app session. Disk write-back still requires user confirmation.",
+        description: "Replace an existing Markdown note. Desktop vaults save safe content edits automatically; deletions still require the normal confirmation flow.",
         parameters: objectSchema(
           {
             path: stringSchema("Vault-relative Markdown path to update."),
@@ -361,7 +423,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           markDirty(notePath);
           openNoteTab(notePath);
           setStatus(`Agent 已修改笔记草稿：${notePath}`);
-          return `Updated note draft: ${notePath}. Disk write-back still requires user confirmation.`;
+          return `Updated note: ${notePath}. The desktop vault will save it automatically.`;
         }
       },
       {
@@ -376,8 +438,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           },
           ["folderName", "count", "topic"]
         ),
-        run(input) {
+        async run(input) {
           const { folderName, count, topic } = parseAgentToolArguments(input);
+          if (sourceKindRef.current !== "desktop") {
+            return "A persistent local vault must be opened or created before generating a stress graph. Demo and read-only structure sources do not have a writable document folder.";
+          }
           const requestedFolder = normalizePath(String(folderName ?? "复杂关系图谱测试")).replace(/\/+$/g, "");
           if (!isVaultRelativeNotePath(`${requestedFolder}/index.md`)) {
             return `Blocked invalid test folder path: ${requestedFolder || "(empty)"}`;
@@ -385,6 +450,16 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           const safeCount = clampNumber(Math.round(Number(count) || 30), 8, 80);
           const resolvedFolder = uniqueGeneratedFolder(filesRef.current, requestedFolder);
           const generated = buildStressGraphNotes(resolvedFolder, safeCount, String(topic ?? "复杂知识系统"));
+          const directResult = await writeApprovedAgentChanges(
+            generated.map((file) => ({ path: file.path, kind: "created" as const, after: file.content }))
+          );
+          if (directResult) {
+            setGraphFilter("");
+            setCenterMode("graph");
+            setActiveTabId(GRAPH_TAB_ID);
+            setStatus(`Agent 已按本轮用户授权直接创建 ${generated.length} 篇图谱测试文档：${resolvedFolder}`);
+            return `已直接写入“${resolvedFolder}”中的 ${generated.length} 篇互相关联 Markdown 文档。`;
+          }
           const nextFiles = [...filesRef.current, ...generated];
           filesRef.current = nextFiles;
           setFiles(nextFiles);
@@ -392,7 +467,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           setCenterMode("graph");
           setActiveTabId(GRAPH_TAB_ID);
           setStatus(`Agent 已生成 ${generated.length} 篇高复杂度图谱测试文档：${resolvedFolder}`);
-          return `已在“${resolvedFolder}”中生成 ${generated.length} 篇互相关联、包含实际内容的 Markdown 文档，并切换到关系图谱。当前先保存为 App 草稿，确认“写回本地”后才会成为磁盘文件。`;
+          return `已在“${resolvedFolder}”中生成 ${generated.length} 篇互相关联、包含实际内容的 Markdown 文档，并切换到关系图谱。桌面 App 会自动保存到当前本地 vault。`;
         }
       },
       {
@@ -441,17 +516,55 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         }
       },
       {
+        name: "app_list_trash",
+        description: "List Markdown documents currently in the local 30-day trash, newest first. Use this before restoring a specific note.",
+        parameters: objectSchema({}, []),
+        run() {
+          if (sourceKindRef.current !== "desktop") return "The current source does not have a local trash.";
+          if (trashEntriesRef.current.length === 0) return "The local trash is empty.";
+          return trashEntriesRef.current
+            .map((entry) => `${entry.originalPath} | id=${entry.id} | restore-before=${new Date(entry.purgeAfterMs).toISOString()}`)
+            .join("\n");
+        }
+      },
+      {
+        name: "app_restore_note",
+        description:
+          "Restore one Markdown document from the local 30-day trash to its original path. The current user message must explicitly ask to restore, undo deletion, or recover it. Omit path only to restore the most recently deleted note.",
+        parameters: objectSchema({ path: stringSchema("Original vault-relative Markdown path to restore; optional for the newest trash entry.") }, []),
+        async run(input) {
+          const { path } = parseAgentToolArguments(input);
+          const requestedPath = normalizePath(String(path ?? "")).toLowerCase();
+          const entry = requestedPath
+            ? trashEntriesRef.current.find((candidate) => normalizePath(candidate.originalPath).toLowerCase() === requestedPath)
+            : trashEntriesRef.current[0];
+          if (!entry) return requestedPath ? `No trash entry found for: ${String(path)}` : "The local trash is empty.";
+
+          const result = await restoreApprovedAgentTrashEntry(entry);
+          if (!result) return "Restore needs an explicit restore instruction in the current user message and an open desktop vault.";
+          openNoteTab(entry.originalPath);
+          setStatus(`Agent 已按本轮用户指令恢复文档：${entry.originalPath}`);
+          return `Restored from the 30-day trash: ${entry.originalPath}`;
+        }
+      },
+      {
         name: "app_request_delete_note",
-        description: "Open the app's deletion confirmation dialog for an existing note. This never deletes immediately.",
+        description: "Delete an existing note. When the current user message explicitly authorizes deletion, the desktop App moves it to the 30-day trash directly; otherwise it opens the usual deletion confirmation dialog.",
         parameters: objectSchema({ path: stringSchema("Vault-relative Markdown path to request deletion for.") }, ["path"]),
-        run(input) {
+        async run(input) {
           const { path } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           if (!isVaultRelativeNotePath(notePath)) return `Blocked invalid note path: ${notePath || "(empty)"}`;
           const note = filesRef.current.find((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase());
           if (!note) return `Cannot request deletion because the note does not exist: ${notePath}`;
+          const directResult = await writeApprovedAgentChanges([{ path: note.path, kind: "deleted", before: note.content }]);
+          if (directResult) {
+            removeDeletedNotesFromUi([note.path]);
+            setStatus(`Agent 已按本轮用户授权将文档移入回收站：${note.path}`);
+            return `Deleted directly to the 30-day trash: ${note.path}. User authorization applies only to this request.`;
+          }
           setGraphDeleteTarget({
-            path: note.path,
+            paths: [note.path],
             title: leafName(note.path),
             preview: firstUsefulLines(note.content)
           });
@@ -533,6 +646,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   useEffect(() => {
     if (
+      sourceKind !== "structure" &&
       modelSettingsLoaded &&
       adapter.saveDeepSeekApiKey &&
       !modelSettings.deepSeekApiKeyConfigured &&
@@ -540,7 +654,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     ) {
       setAgentKeyDialogOpen(true);
     }
-  }, [adapter.saveDeepSeekApiKey, agentKeyDialogDismissed, modelSettings.deepSeekApiKeyConfigured, modelSettingsLoaded]);
+  }, [adapter.saveDeepSeekApiKey, agentKeyDialogDismissed, modelSettings.deepSeekApiKeyConfigured, modelSettingsLoaded, sourceKind]);
 
   useEffect(() => {
     if (!treeContextMenu) return;
@@ -582,7 +696,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     return () => window.removeEventListener("pointerdown", closeStoragePanel);
   }, [storageOpen]);
 
-  const index = useMemo(() => buildVaultIndex(files), [files]);
+  const isReadOnlyStructure = sourceKind === "structure";
+  const index = useMemo(
+    () => buildVaultIndex(files, { includeExcludedPaths: isReadOnlyStructure }),
+    [files, isReadOnlyStructure]
+  );
   const currentNote = currentPath ? getNote(index, currentPath) : undefined;
   const graph = useMemo(() => buildVaultGraph(index), [index]);
   const currentNoteGraph = useMemo(() => (currentPath ? buildNoteGraph(index, currentPath) : undefined), [currentPath, index]);
@@ -590,6 +708,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const filteredNotes = useMemo(() => filterNotes(index.notes, noteFilter), [index.notes, noteFilter]);
   const explorerModel = useMemo(() => buildExplorerModel(index.notes, explorerQuery, explorerScope), [explorerQuery, explorerScope, index.notes]);
   const draftChanges = useMemo(() => buildDraftChanges(baseFiles, files), [baseFiles, files]);
+  const autoSaveChanges = useMemo(() => selectAutoSaveChanges(draftChanges), [draftChanges]);
+  const autoSaveSignature = useMemo(() => JSON.stringify(autoSaveChanges), [autoSaveChanges]);
   const dirtyPaths = useMemo(() => draftChanges.map((change) => change.path), [draftChanges]);
   const dirtySafety = buildSafetyManifest(dirtyPaths);
   const directoryPickerAvailable = adapter.canOpenVault;
@@ -673,6 +793,59 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }, [dirtyPaths]);
 
   useEffect(() => {
+    const safety = buildSafetyManifest(autoSaveChanges.map((change) => change.path));
+    if (
+      sourceKind !== "desktop" ||
+      !adapter.writeChanges ||
+      autoSaveChanges.length === 0 ||
+      safety.excluded.length > 0 ||
+      autoSaveInFlightRef.current
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerStarted = false;
+    let saved = false;
+    const snapshot = autoSaveChanges;
+    const timer = window.setTimeout(() => {
+      timerStarted = true;
+      autoSaveInFlightRef.current = true;
+      setAutoSaving(true);
+      void adapter
+        .writeChanges!(snapshot)
+        .then((result) => {
+          if (cancelled) return;
+          // Keep newer in-memory edits intact; the next debounce persists them.
+          if (result.files) setBaseFiles(result.files);
+          if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+          if (result.trashEntries) setTrashEntries(result.trashEntries);
+          saved = true;
+          setStatus(`已自动保存 ${snapshot.length} 个本地改动。`);
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setStatus(error instanceof Error ? `自动保存失败：${error.message}` : "自动保存失败，改动仍保留在当前 App 中。");
+          }
+        })
+        .finally(() => {
+          autoSaveInFlightRef.current = false;
+          if (!cancelled) {
+            setAutoSaving(false);
+            if (saved) setAutoSaveRevision((revision) => revision + 1);
+          }
+        });
+    }, 450);
+
+    return () => {
+      if (!timerStarted) {
+        cancelled = true;
+        window.clearTimeout(timer);
+      }
+    };
+  }, [adapter, autoSaveChanges, autoSaveRevision, autoSaveSignature, sourceKind]);
+
+  useEffect(() => {
     const ids = new Set(trashEntries.map((entry) => entry.id));
     setTrashAuthorizations((current) => {
       const next = Object.fromEntries(Object.entries(current).filter(([id]) => ids.has(id)));
@@ -744,6 +917,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setSourceSafety(vault.safetyManifest);
     setCurrentPath(nextIndex.notes[0]?.path ?? "");
     setCenterMode("graph");
+    setEditorMode("preview");
+    setSelectedGraphPaths([]);
+    if (vault.sourceKind === "structure") {
+      setAgentKeyDialogOpen(false);
+      setAgentSettingsOpen(false);
+    }
     setWorkspaceTabs([{ id: GRAPH_TAB_ID, mode: "graph" }]);
     setActiveTabId(GRAPH_TAB_ID);
     if (!options?.preserveAgentSessions) {
@@ -805,6 +984,29 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
   }
 
+  async function openReadOnlyStructure() {
+    if (!adapter.openReadOnlyStructure) {
+      setStatus("当前入口不支持只读磁盘结构扫描；请使用桌面 App。" );
+      return;
+    }
+    setStatus("正在只读扫描文件夹结构：不会读取文件正文，也不会修改任何本地文件...");
+    setStorageBusy(true);
+    try {
+      const vault = await adapter.openReadOnlyStructure();
+      const summary = vault.readOnlyStructure;
+      const limitMessage = summary?.truncated ? "已达到图谱安全上限，请选择更具体的子目录继续查看。" : "";
+      applyLoadedVault(
+        vault,
+        `只读结构已载入：${summary?.folderCount ?? 0} 个文件夹、${summary?.fileCount ?? 0} 个文件。未读取文件正文，未修改任何本地文件。${limitMessage}`
+      );
+      setStorageOpen(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? `未能读取磁盘结构：${error.message}` : "未能读取磁盘结构。");
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
   async function createLocalVaultFolder() {
     if (!adapter.createVaultFolder) {
       setStatus("当前入口不支持新建本地文件夹；请在桌面 App 中使用。");
@@ -834,6 +1036,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function createSessionNote() {
+    if (isReadOnlyStructure) {
+      setStatus("当前是只读磁盘结构模式，不能新建或修改本地文件。");
+      return;
+    }
     const path = nextUntitledPath(files);
     const content = `# ${leafName(path)}\n\n`;
     setFiles((current) => [...current, { path, content, modifiedAt: new Date().toISOString() }]);
@@ -841,10 +1047,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setEditorMode("edit");
     setNoteFilter("");
     markDirty(path);
-    setStatus("已创建一篇会话笔记。Web v1 不会自动写回磁盘。");
+    setStatus("已创建笔记。连接本地 vault 时会自动保存到磁盘。");
   }
 
   function createNoteInContext(target: TreeContextMenu | null) {
+    if (isReadOnlyStructure) {
+      setStatus("当前是只读磁盘结构模式，不能新建或修改本地文件。");
+      return;
+    }
     const folder = target?.type === "folder" ? target.folder.path : target?.type === "note" ? noteStemPath(target.note.path) : "Inbox";
     const parentLink = target?.type === "note" ? `\n上级：[[${target.note.path.replace(/\.md$/i, "")}]]\n` : "";
     const path = uniqueNotePath(files, `${folder}/新文档.md`);
@@ -854,7 +1064,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     openNoteTab(path);
     setEditorMode("edit");
     markDirty(path);
-    setStatus(`已在 ${folder} 新建文档草稿：${path}`);
+    setStatus(`已在 ${folder} 新建文档：${path}。连接本地 vault 时会自动保存。`);
   }
 
   function renameContextTarget(target: TreeContextMenu) {
@@ -954,35 +1164,35 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   function deleteContextTarget(target: TreeContextMenu) {
     if (target.type === "note") {
-      deleteNoteFromSession(target.note.path);
+      setGraphDeleteTarget({
+        paths: [target.note.path],
+        title: target.note.title || leafName(target.note.path),
+        preview: firstUsefulLines(target.note.content)
+      });
       setTreeContextMenu(null);
       return;
     }
     const folderPath = target.folder.path;
-    const paths = files.filter((file) => isPathInsideFolder(file.path, folderPath)).map((file) => file.path);
+    const folderNotes = files.filter((file) => isPathInsideFolder(file.path, folderPath));
+    const paths = folderNotes.map((file) => file.path);
     if (paths.length === 0) {
       setStatus("这个文件夹里没有可删除的文档。");
       setTreeContextMenu(null);
       return;
     }
-    const ok = window.confirm(`将 ${paths.length} 篇文档加入回收站待写回？\n\n${folderPath}`);
-    if (!ok) return;
-    setFiles((current) => current.filter((file) => !isPathInsideFolder(file.path, folderPath)));
-    setWorkspaceTabs((current) => current.filter((tab) => !tab.path || !isPathInsideFolder(tab.path, folderPath)));
-    if (currentPath && isPathInsideFolder(currentPath, folderPath)) {
-      setActiveTabId(GRAPH_TAB_ID);
-      setCenterMode("graph");
-      setCurrentPath("");
-    }
+    setGraphDeleteTarget({
+      paths,
+      title: `${folderPath}（${paths.length} 篇文档）`,
+      preview: folderNotes.slice(0, 8).map((note) => `- ${note.path}`).join("\n")
+    });
     setTreeContextMenu(null);
-    setStatus(`已将 ${paths.length} 篇文档加入回收站待写回：${folderPath}`);
   }
 
   function updateCurrentNote(content: string) {
     if (!currentPath) return;
     setFiles((current) => current.map((file) => (file.path === currentPath ? { ...file, content } : file)));
     markDirty(currentPath);
-    setStatus("当前改动只保存在本次浏览器会话中，尚未写回磁盘。");
+    setStatus("当前笔记已更新。连接本地 vault 时正在自动保存到磁盘。");
   }
 
   async function saveAgentApiKey() {
@@ -1100,6 +1310,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function uploadCurrentNoteToAgent() {
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式不会把目录信息发送给 Agent。");
+      return;
+    }
     if (!currentPath) {
       setStatus("当前没有打开的笔记，无法加入 Agent 上下文。");
       return;
@@ -1118,6 +1332,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   async function runAgent() {
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式已禁用 Agent，确保不读取正文、不生成草稿，也不修改本地文件。");
+      return;
+    }
     if (prompt.trim() === "") return;
     const sessionId = activeAgentSessionKey;
     if (!sessionId || runningAgentSessionIds.has(sessionId)) return;
@@ -1157,6 +1375,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       prompt: ""
     }));
     setAgentSessionRunning(sessionId, true);
+    agentMutationApprovalRef.current = agentMutationApprovalFor(input);
     try {
       const result = await agent.run(input, { currentPath, files, index, messages: [...messages, userMessage], pinnedPaths: agentPinnedPaths });
       updateAgentSession(sessionId, (session) => ({
@@ -1204,6 +1423,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       }));
       setStatus(`Agent failed: ${content}`);
     } finally {
+      agentMutationApprovalRef.current = { create: false, delete: false, restore: false };
       setAgentSessionRunning(sessionId, false);
     }
   }
@@ -1326,11 +1546,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setFiles((current) => current.map((file) => (file.path === diff.path ? { ...file, content: diff.after } : file)));
     markDirty(diff.path);
     openNoteTab(diff.path);
-    setStatus("Diff 已应用到浏览器会话副本。第一版不会直接写回本地 vault。");
+    setStatus("Diff 已应用。连接本地 vault 时会自动保存；删除仍需确认。");
   }
 
   function markDirty(path: string) {
-    setStatus(`已记录草稿改动：${path}。写回本地前会显示 diff 和安全摘要。`);
+    setStatus(`已记录改动：${path}。新建和修改会自动保存；删除仍需确认。`);
   }
 
   function focusSearch() {
@@ -1363,6 +1583,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     const existingNote = getNote(index, path) ?? getNote(index, ensureMarkdownPath(path));
     if (existingNote) {
       openNoteTab(existingNote.path);
+      return;
+    }
+
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式只能打开已扫描的结构条目，不能创建新文件。");
       return;
     }
 
@@ -1449,20 +1674,60 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setCurrentPath((path) => normalized.get(normalizePath(path).toLowerCase()) ?? path);
   }
 
-  function deleteNoteFromSession(path: string) {
-    const normalized = normalizePath(path);
-    const id = tabIdForPath(normalized);
-    setFiles((current) => current.filter((file) => normalizePath(file.path).toLowerCase() !== normalized.toLowerCase()));
-    setWorkspaceTabs((current) => current.filter((tab) => tab.id !== id));
-    if (tabIdForPath(currentPath) === id) {
+  function removeDeletedNotesFromUi(paths: string[]) {
+    const normalizedPaths = new Set(paths.map((path) => normalizePath(path).toLowerCase()));
+    if (normalizedPaths.size === 0) return;
+    setWorkspaceTabs((current) => current.filter((tab) => !tab.path || !normalizedPaths.has(normalizePath(tab.path).toLowerCase())));
+    if (normalizedPaths.has(normalizePath(currentPathRef.current).toLowerCase())) {
       setActiveTabId(GRAPH_TAB_ID);
       setCenterMode("graph");
       setCurrentPath("");
+      currentPathRef.current = "";
     }
-    setStatus(`已加入回收站待写回：${normalized}。写回本地后会移入 .knowledge-agent-trash，并保留 30 天。`);
+    setSelectedGraphPaths([]);
+  }
+
+  function deleteNotesFromSession(paths: string[]) {
+    const normalizedPaths = new Set(paths.map((path) => normalizePath(path).toLowerCase()));
+    if (normalizedPaths.size === 0) return;
+    setFiles((current) => current.filter((file) => !normalizedPaths.has(normalizePath(file.path).toLowerCase())));
+    removeDeletedNotesFromUi(paths);
+    setStatus(`已将 ${normalizedPaths.size} 篇文档加入回收站待写回。写回本地后会移入 .knowledge-agent-trash，并保留 30 天。`);
+  }
+
+  async function deleteConfirmedNotesToTrash(paths: string[]) {
+    const normalizedPaths = new Set(paths.map((path) => normalizePath(path).toLowerCase()));
+    const changes = filesRef.current
+      .filter((file) => normalizedPaths.has(normalizePath(file.path).toLowerCase()))
+      .map((file) => ({ path: file.path, kind: "deleted" as const, before: file.content }));
+    if (changes.length === 0) return;
+
+    if (sourceKindRef.current !== "desktop" || !adapter.writeChanges) {
+      deleteNotesFromSession(paths);
+      return;
+    }
+
+    try {
+      const result = await adapter.writeChanges(changes);
+      if (result.files) {
+        filesRef.current = result.files;
+        setFiles(result.files);
+        setBaseFiles(result.files);
+      }
+      if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+      if (result.trashEntries) setTrashEntries(result.trashEntries);
+      removeDeletedNotesFromUi(paths);
+      setStatus(`${result.message} 已确认删除的 ${changes.length} 篇文档可以由 Agent 在 30 天内恢复。`);
+    } catch (error) {
+      setStatus(error instanceof Error ? `删除失败：${error.message}` : "删除失败，原文件未被修改。");
+    }
   }
 
   function requestGraphDelete(path: string) {
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式不支持删除。原始文件未被修改。");
+      return;
+    }
     const normalized = normalizePath(path);
     const note = getNote(index, normalized);
     if (!note) {
@@ -1470,17 +1735,40 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       return;
     }
     setGraphDeleteTarget({
-      path: note.path,
+      paths: [note.path],
       title: note.title || leafName(note.path),
       preview: firstUsefulLines(note.content)
     });
   }
 
-  function confirmGraphDelete() {
+  function requestGraphDeleteMany(paths: string[]) {
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式不支持删除。原始文件未被修改。");
+      return;
+    }
+    const selectedNotes = paths
+      .map((path) => getNote(index, normalizePath(path)))
+      .filter((note): note is ParsedNote => Boolean(note));
+    if (selectedNotes.length === 0) {
+      setStatus("没有可删除的已框选文档。");
+      return;
+    }
+    setGraphDeleteTarget({
+      paths: selectedNotes.map((note) => note.path),
+      title: `已框选 ${selectedNotes.length} 篇文档`,
+      preview: selectedNotes.slice(0, 8).map((note) => `- ${note.path}`).join("\n")
+    });
+  }
+
+  async function confirmGraphDelete() {
     const target = graphDeleteTarget;
-    setGraphDeleteTarget(null);
     if (!target) return;
-    deleteNoteFromSession(target.path);
+    if (autoSaving) {
+      setStatus("正在完成自动保存，请稍后再次确认删除，避免保存与删除发生冲突。");
+      return;
+    }
+    setGraphDeleteTarget(null);
+    await deleteConfirmedNotesToTrash(target.paths);
   }
 
   function startColumnResize(target: "left" | "agent", event: ReactPointerEvent<HTMLDivElement>) {
@@ -1519,6 +1807,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   async function writeDraftChanges() {
+    if (isReadOnlyStructure) {
+      setStatus("只读磁盘结构模式不能写回本地文件。");
+      return;
+    }
     if (!adapter.writeChanges) {
       setStatus("当前入口只支持预览草稿；桌面 App 才会写回真实本地文件。");
       return;
@@ -1663,14 +1955,21 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               </div>
             ))}
           </div>
-          <button aria-label="New note tab" className="tab-plus" onClick={createSessionNote} type="button">
+          <button
+            aria-label="New note tab"
+            className="tab-plus"
+            disabled={isReadOnlyStructure}
+            onClick={createSessionNote}
+            title={isReadOnlyStructure ? "只读结构模式不能新建笔记" : "新建笔记"}
+            type="button"
+          >
             +
           </button>
         </div>
         <div className="chrome-right">
-          {draftChanges.length > 0 || trashEntries.length > 0 ? (
+          {draftChanges.length > 0 || trashEntries.length > 0 || autoSaving ? (
             <button className="changes-pill" onClick={() => setChangesOpen((open) => !open)} type="button">
-              改动 {draftChanges.length} · 回收站 {trashEntries.length}
+              {autoSaving ? "保存中 · " : ""}改动 {draftChanges.length} · 回收站 {trashEntries.length}
             </button>
           ) : null}
           <span>{sourceLabel}</span>
@@ -1683,11 +1982,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           busy={storageBusy}
           canCreate={Boolean(adapter.createVaultFolder)}
           canOpen={adapter.canOpenVault}
+          canReadStructure={Boolean(adapter.openReadOnlyStructure)}
           folderName={newVaultName}
           onClose={() => setStorageOpen(false)}
           onCreate={createLocalVaultFolder}
           onFolderNameChange={setNewVaultName}
           onOpen={openLocalVault}
+          onReadStructure={openReadOnlyStructure}
           onUseDemo={useDemoVault}
           sourceLabel={sourceLabel}
           sourceName={sourceName}
@@ -1715,14 +2016,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <button onClick={openLocalVault} disabled={!directoryPickerAvailable} title="打开本地知识库" type="button">
             <FolderOpen size={16} />
           </button>
-          <button onClick={createSessionNote} title="新建会话笔记" type="button">
+          <button disabled={isReadOnlyStructure} onClick={createSessionNote} title={isReadOnlyStructure ? "只读结构模式不能新建笔记" : "新建会话笔记"} type="button">
             <FilePlus2 size={16} />
           </button>
         </div>
 
         <section className="vault-panel file-card">
           <div className="section-heading">
-            <h2>读书</h2>
+            <h2>{isReadOnlyStructure ? "磁盘结构" : "读书"}</h2>
             <span>{filteredNotes.length}/{index.notes.length}</span>
           </div>
           <label className="search-box">
@@ -1738,8 +2039,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <FileTree
             currentPath={currentPath}
             notes={filteredNotes}
-            onFolderContextMenu={(folder, event) => openTreeFolderMenu(folder, event)}
-            onNoteContextMenu={(note, event) => openTreeNoteMenu(note, event)}
+            onFolderContextMenu={isReadOnlyStructure ? undefined : (folder, event) => openTreeFolderMenu(folder, event)}
+            onNoteContextMenu={isReadOnlyStructure ? undefined : (note, event) => openTreeNoteMenu(note, event)}
             onSelect={selectNote}
           />
         </section>
@@ -1757,11 +2058,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <section className="vault-panel compact-panel safety-card">
           <div className="section-heading">
             <h2>安全状态</h2>
-            <span>{sourceSafety.excluded.length === 0 ? "OK" : "已排除"}</span>
+            <span>{isReadOnlyStructure ? "只读" : sourceSafety.excluded.length === 0 ? "OK" : "已排除"}</span>
           </div>
           <p>
             <ShieldCheck size={13} />
-            允许 {sourceSafety.allowed.length} / 排除 {sourceSafety.excluded.length}
+            {isReadOnlyStructure ? "仅枚举名称、路径和层级；正文读取与写入均已关闭。" : `允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`}
           </p>
           <p>
             <CheckCircle2 size={13} />
@@ -1775,7 +2076,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
       {changesOpen ? (
         <DraftChangesPanelWithTrash
-          canWrite={Boolean(adapter.writeChanges)}
+          canWrite={Boolean(adapter.writeChanges) && !isReadOnlyStructure}
           changes={draftChanges}
           hasDraftChanges={draftChanges.length > 0}
           onClose={() => setChangesOpen(false)}
@@ -1867,12 +2168,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             <StarGraph
               filterText={graphFilter}
               graph={graph}
-              onDelete={requestGraphDelete}
+              onDelete={isReadOnlyStructure ? undefined : requestGraphDelete}
+              onDeleteMany={isReadOnlyStructure ? undefined : requestGraphDeleteMany}
               onSelect={selectGraphNode}
+              onSelectionChange={setSelectedGraphPaths}
               onViewportChange={setGraphViewport}
               radiusScale={graphRadius}
               showLabels={graphShowLabels}
               showSecondHop={graphShowRelated}
+              selectedPaths={selectedGraphPaths}
               viewport={graphViewport ?? undefined}
             />
             {graphSettingsOpen ? (
@@ -1944,11 +2248,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         ) : (
           <NoteEditor
             miniGraph={currentNoteGraph}
-            mode={editorMode}
+            mode={isReadOnlyStructure ? "preview" : editorMode}
             note={currentNote}
-            onChange={updateCurrentNote}
-            onModeChange={setEditorMode}
+            onChange={isReadOnlyStructure ? () => undefined : updateCurrentNote}
+            onModeChange={isReadOnlyStructure ? () => undefined : setEditorMode}
             onSelectGraphNode={selectNote}
+            readOnly={isReadOnlyStructure}
           />
         )}
       </main>
@@ -1959,6 +2264,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         canConfigureModel={Boolean(adapter.saveDeepSeekApiKey)}
         diffs={diffs}
         input={prompt}
+        readOnly={isReadOnlyStructure}
         messages={messages}
         canRestoreSession={agentSessionHistory.length > 0}
         contextUploadLabel={currentPath ? `把 ${currentPath} 加入 Agent 上下文` : "当前没有可上传的笔记"}
@@ -2081,9 +2387,9 @@ function GraphDeleteConfirmDialog({ target, onCancel, onConfirm }: GraphDeleteCo
           <Trash2 size={20} />
         </div>
         <div className="graph-delete-copy">
-          <p>确认移除这个文档？</p>
+          <p>{target.paths.length > 1 ? "确认移除这些文档？" : "确认移除这个文档？"}</p>
           <h2>{target.title}</h2>
-          <span>{target.path}</span>
+          <span>{target.paths.length > 1 ? `${target.paths.length} 个已框选路径` : target.paths[0]}</span>
         </div>
         <pre>{target.preview}</pre>
         <p className="graph-delete-note">这一步只会加入回收站待写回；写回本地后会移入 .knowledge-agent-trash，并保留 30 天。</p>
@@ -2175,11 +2481,13 @@ interface StoragePanelProps {
   busy: boolean;
   canCreate: boolean;
   canOpen: boolean;
+  canReadStructure: boolean;
   folderName: string;
   onClose(): void;
   onCreate(): void;
   onFolderNameChange(value: string): void;
   onOpen(): void;
+  onReadStructure(): void;
   onUseDemo(): void;
   sourceLabel: string;
   sourceName: string;
@@ -2189,11 +2497,13 @@ function StoragePanel({
   busy,
   canCreate,
   canOpen,
+  canReadStructure,
   folderName,
   onClose,
   onCreate,
   onFolderNameChange,
   onOpen,
+  onReadStructure,
   onUseDemo,
   sourceLabel,
   sourceName
@@ -2218,6 +2528,11 @@ function StoragePanel({
           打开已有文件夹
         </button>
 
+        <button disabled={!canReadStructure || busy} onClick={onReadStructure} type="button">
+          <HardDrive size={15} />
+          只读扫描文件结构
+        </button>
+
         <div className={canCreate ? "storage-create" : "storage-create disabled"}>
           <label htmlFor="new-vault-name">新建文件夹名称</label>
           <div>
@@ -2240,7 +2555,11 @@ function StoragePanel({
         </button>
       </section>
 
-      <footer>{canCreate ? "桌面端会记住连接位置；笔记写回仍需要在改动面板确认。" : "浏览器入口只能打开授权文件夹；新建任意本机文件夹请使用桌面 App。"}</footer>
+      <footer>
+        {canCreate
+          ? "只读扫描不会读取文件正文、不会创建草稿、不会写入或删除所选目录中的任何文件。"
+          : "浏览器入口只能打开授权文件夹；只读磁盘结构扫描和新建任意本机文件夹请使用桌面 App。"}
+      </footer>
     </aside>
   );
 }
@@ -2599,6 +2918,11 @@ export function buildDraftChanges(baseFiles: NoteFile[], files: NoteFile[]): Dra
   return changes.sort((left, right) => left.path.localeCompare(right.path, "zh-Hans-CN", { numeric: true }));
 }
 
+export function selectAutoSaveChanges(changes: DraftChange[]): DraftChange[] {
+  // Removal stays behind the explicit 30-day trash confirmation flow.
+  return changes.filter((change) => change.kind === "created" || change.kind === "modified");
+}
+
 function draftKindLabel(kind: DraftChangeKind): string {
   if (kind === "created") return "新建";
   if (kind === "modified") return "修改";
@@ -2726,6 +3050,17 @@ function parseRequestedCount(input: string): number | null {
   if (/二十/.test(input)) return 20;
   if (/十/.test(input)) return 10;
   return null;
+}
+
+export function agentMutationApprovalFor(input: string): AgentMutationApproval {
+  const normalized = input.toLowerCase();
+  const mentionsDocument = /文件|文档|笔记|markdown|\bmd\b/.test(normalized);
+  const restoreRequested = /恢复|撤回|还原|回溯/.test(normalized);
+  return {
+    create: mentionsDocument && /新建|创建|生成|建立|写入|产出/.test(normalized),
+    delete: !restoreRequested && mentionsDocument && /删除|移除|清除|清理/.test(normalized),
+    restore: restoreRequested && (mentionsDocument || /删除|刚才|上次|回收/.test(normalized))
+  };
 }
 
 function normalizeAgentModel(model: string, canRunModel: boolean): string {

@@ -1714,6 +1714,14 @@ body.resizing-columns {
   opacity: 0.12;
 }
 
+.graph-selection-box {
+  fill: rgba(141, 104, 236, 0.12);
+  pointer-events: none;
+  stroke: #a786ff;
+  stroke-dasharray: 5 4;
+  stroke-width: 1.2;
+}
+
 .graph-node {
   cursor: pointer;
   transition: opacity 140ms ease;
@@ -1762,8 +1770,20 @@ body.resizing-columns {
   stroke-width: 2;
 }
 
+.graph-node.selected .graph-node-dot {
+  fill: #f3efff;
+  filter: drop-shadow(0 0 5px rgba(167, 134, 255, 0.72));
+  stroke: #b99bff;
+  stroke-width: 2.5;
+}
+
 .graph-node.active text {
   fill: #ffffff;
+}
+
+.graph-node.selected text {
+  fill: #f6f1ff;
+  opacity: 1;
 }
 
 .graph-node.dimmed {

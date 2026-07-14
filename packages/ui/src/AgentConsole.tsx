@@ -1,6 +1,6 @@
 import type { AgentDiff, AgentMessage } from "@knowledge-agent/agent";
 import { FolderUp, History, RefreshCw, SlidersHorizontal, SquarePlus } from "lucide-react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
 export interface AgentSelectOption {
@@ -16,6 +16,7 @@ export interface AgentConsoleProps {
   diffs: AgentDiff[];
   input: string;
   running: boolean;
+  readOnly?: boolean;
   modelLabel?: string;
   modelShortLabel?: string;
   reasoningEffort?: "low" | "medium" | "high";
@@ -63,6 +64,7 @@ export function AgentConsole({
   diffs,
   input,
   running,
+  readOnly = false,
   modelLabel = "offline",
   modelShortLabel,
   reasoningEffort = "medium",
@@ -89,6 +91,14 @@ export function AgentConsole({
   onRun,
   onApply
 }: AgentConsoleProps) {
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages, diffs, running]);
+
   function submitFromKeyboard(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key !== "Enter" ||
@@ -97,6 +107,7 @@ export function AgentConsole({
       event.altKey ||
       event.metaKey ||
       event.nativeEvent.isComposing ||
+      readOnly ||
       running ||
       input.trim() === ""
     ) {
@@ -137,6 +148,7 @@ export function AgentConsole({
             aria-expanded={settingsOpen}
             aria-label="Agent 设置"
             className="agent-settings-toggle agent-settings-icon"
+            disabled={readOnly}
             onClick={onToggleSettings}
             title="Agent 设置：模型、推理强度和权限"
             type="button"
@@ -150,7 +162,8 @@ export function AgentConsole({
         </section>
       </header>
 
-      <div className="agent-messages">
+      <div className="agent-messages" ref={messagesRef}>
+        {readOnly ? <article className="agent-message tool">只读磁盘结构模式：Agent 已暂停，不会读取正文、创建草稿或执行本地操作。</article> : null}
         {messages.map((message) => (
           <article className={`agent-message ${message.role}${message.status ? ` ${message.status}` : ""}`} key={message.id}>
             {message.content}
@@ -164,7 +177,7 @@ export function AgentConsole({
             <h3>{diff.summary}</h3>
             <p>{diff.path}</p>
             <pre>{diffPreview(diff)}</pre>
-            <button disabled={diff.permission === "blocked"} onClick={() => onApply(diff)} type="button">
+            <button disabled={readOnly || diff.permission === "blocked"} onClick={() => onApply(diff)} type="button">
               {diff.permission === "confirm" ? "Confirm apply" : diff.permission === "blocked" ? "Blocked" : "Apply"}
             </button>
           </section>
@@ -180,6 +193,7 @@ export function AgentConsole({
                   aria-current={session.id === activeSessionId ? "true" : undefined}
                   aria-label={`切换到子 Agent ${session.label}`}
                   className={[session.id === activeSessionId ? "active" : "", session.running ? "running" : ""].filter(Boolean).join(" ")}
+                  disabled={readOnly}
                   key={session.id}
                   onClick={() => onSelectSession?.(session.id)}
                   title={`子 Agent ${session.label}`}
@@ -192,15 +206,15 @@ export function AgentConsole({
             </div>
           ) : null}
         <div className="agent-footer-tools" aria-label="Agent 工具">
-          <button aria-label="新建子智能体" onClick={onNewSession} title="新建子智能体：开启一个独立聊天" type="button">
+          <button aria-label="新建子智能体" disabled={readOnly} onClick={onNewSession} title="新建子智能体：开启一个独立聊天" type="button">
             <SquarePlus size={15} />
           </button>
-          <button aria-label="刷新当前聊天" onClick={onResetSession} title="刷新当前聊天：清空当前 Agent 会话" type="button">
+          <button aria-label="刷新当前聊天" disabled={readOnly} onClick={onResetSession} title="刷新当前聊天：清空当前 Agent 会话" type="button">
             <RefreshCw size={14} />
           </button>
           <button
             aria-label="回溯最近聊天"
-            disabled={!canRestoreSession}
+            disabled={readOnly || !canRestoreSession}
             onClick={onRestoreSession}
             title="回溯最近聊天：恢复上一段 Agent 会话和记忆"
             type="button"
@@ -211,12 +225,13 @@ export function AgentConsole({
         </div>
         <textarea
           aria-label="Agent prompt"
+          disabled={readOnly}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={submitFromKeyboard}
-          placeholder="Try: summarize current note / suggest links / generate MOC / organize current note"
+          placeholder={readOnly ? "只读磁盘结构模式已暂停 Agent" : "Try: summarize current note / suggest links / generate MOC / organize current note"}
           value={input}
         />
-        <button className="agent-send-button" disabled={running || input.trim() === ""} onClick={onRun} type="button">
+        <button className="agent-send-button" disabled={readOnly || running || input.trim() === ""} onClick={onRun} type="button">
           {running ? "Running" : "Send"}
         </button>
         <div className="agent-status-strip" aria-label="模型状态">
@@ -229,7 +244,7 @@ export function AgentConsole({
             <i style={{ "--context-percent": `${contextUsage?.percent ?? 0}%` } as CSSProperties} />
             <strong>{contextUsage?.percent ?? 0}%</strong>
           </span>
-          <button className="agent-context-upload" onClick={onUploadContext} title={contextUploadLabel} type="button">
+          <button className="agent-context-upload" disabled={readOnly} onClick={onUploadContext} title={contextUploadLabel} type="button">
             <FolderUp size={14} />
           </button>
         </div>
