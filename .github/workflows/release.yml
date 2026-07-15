@@ -55,3 +55,19 @@ jobs:
           releaseBody: "Windows 日用内测版。该版本接入签名自动更新；后续版本会在客户端内主动提醒并可下载安装。详细改动见仓库 CHANGELOG.md。"
           releaseDraft: false
           prerelease: false
+
+      - name: Validate updater manifest and use stable download URL
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = node -p "require('./apps/desktop/package.json').version"
+          $tag = "app-v$version"
+          $dir = ".artifacts/release-$version"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          gh release download $tag --pattern latest.json --dir $dir --clobber
+          $installer = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("-setup.exe")) | .name'
+          if (-not $installer) { throw "Published installer asset was not found." }
+          $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$installer"
+          node scripts/normalize-release-manifest.mjs "$dir/latest.json" $downloadUrl
+          gh release upload $tag "$dir/latest.json" --clobber

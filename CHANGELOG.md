@@ -14,6 +14,7 @@
 - Restored desktop settings and model-secret loading when Windows writes UTF-8 JSON with a byte-order mark.
 - Removed the stale three-note desktop fallback and the mismatched Web-only demo that caused App/Web graph drift.
 - Locked the public demo baseline to 36 notes, 12 domains, 36 cross-domain relations, and zero excluded synthetic files.
+- Added a post-publish UTF-8 manifest check and stable installer URL so signed in-app updates are verified before a release is considered complete.
 
 ### Privacy
 
