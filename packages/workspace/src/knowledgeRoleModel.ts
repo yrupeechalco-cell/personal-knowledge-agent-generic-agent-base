@@ -99,11 +99,19 @@ function assignDomains(notes: ParsedNote[]): Map<string, string> {
 
   const result = new Map<string, string>();
   for (const note of notes) {
+    const explicitDomain = explicitDomainFor(note);
     const semanticDomain = inferSemanticDomain(note);
     const primaryTag = [...note.tags].sort((a, b) => (tagCount.get(b) ?? 0) - (tagCount.get(a) ?? 0))[0];
-    result.set(note.path, semanticDomain || primaryTag || cleanFolderLabel(topLevelFolder(note.path)) || "未分类");
+    result.set(note.path, explicitDomain || semanticDomain || primaryTag || cleanFolderLabel(topLevelFolder(note.path)) || "未分类");
   }
   return result;
+}
+
+function explicitDomainFor(note: ParsedNote): string | null {
+  const value = note.frontmatter.domain;
+  if (typeof value === "string") return value.trim() || null;
+  if (Array.isArray(value)) return String(value[0] ?? "").trim() || null;
+  return null;
 }
 
 function buildDomain(id: string, notes: ParsedNote[], index: VaultIndex, maxDegree: number): KnowledgeDomain {

@@ -65,7 +65,7 @@ const EXPLORER_TAB_ID = "vault-explorer";
 type CenterMode = "graph" | "edit" | "explorer";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
-type SourceKind = "empty" | "browser-directory" | "desktop" | "structure";
+type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
 
@@ -189,6 +189,8 @@ export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
   loadInitialVault(): Promise<LoadedVault> | LoadedVault;
   openVault(): Promise<LoadedVault>;
+  openPublicGitHubRepo?(repository: string): Promise<LoadedVault>;
+  publicGitHubExampleRepository?: string;
   openReadOnlyStructure?(): Promise<LoadedVault>;
   openReadOnlyRoot?(root: string): Promise<LoadedVault>;
   listStorageRoots?(): Promise<StorageRoot[]> | StorageRoot[];
@@ -367,6 +369,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [readOnlyPreview, setReadOnlyPreview] = useState<ReadOnlyFilePreview | null>(null);
   const [readOnlyBusy, setReadOnlyBusy] = useState(false);
   const [newVaultName, setNewVaultName] = useState("新知识库");
+  const [publicGitHubRepository, setPublicGitHubRepository] = useState(adapter.publicGitHubExampleRepository ?? "");
   const [treeContextMenu, setTreeContextMenu] = useState<TreeContextMenu | null>(null);
   const [graphDeleteTarget, setGraphDeleteTarget] = useState<PendingGraphDelete | null>(null);
   const [selectedGraphPaths, setSelectedGraphPaths] = useState<string[]>([]);
@@ -451,6 +454,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           ["path", "content"]
         ),
         async run(input) {
+          if (sourceKindRef.current === "github-public") {
+            return "The current GitHub public repository is read-only. Open a local vault before creating notes.";
+          }
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           const safety = buildSafetyManifest([notePath]);
@@ -484,6 +490,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           ["path", "content"]
         ),
         run(input) {
+          if (sourceKindRef.current === "github-public") {
+            return "The current GitHub public repository is read-only. Open a local vault before editing notes.";
+          }
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           if (!isVaultRelativeNotePath(notePath)) return `Blocked invalid note path: ${notePath || "(empty)"}`;
@@ -629,6 +638,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         description: "Delete an existing note. When the current user message explicitly authorizes deletion, the desktop App moves it to the 30-day trash directly; otherwise it opens the usual deletion confirmation dialog.",
         parameters: objectSchema({ path: stringSchema("Vault-relative Markdown path to request deletion for.") }, ["path"]),
         async run(input) {
+          if (sourceKindRef.current === "github-public") {
+            return "The current GitHub public repository is read-only. Open a local vault before deleting notes.";
+          }
           const { path } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           if (!isVaultRelativeNotePath(notePath)) return `Blocked invalid note path: ${notePath || "(empty)"}`;
@@ -689,7 +701,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         if (!cancelled) {
           const initialStatus = vault.sourceKind === "empty"
             ? vault.unsupportedReason ?? "尚未连接知识库。请选择一个 Markdown 文件夹开始使用。"
-            : vault.unsupportedReason ?? "知识库已载入。";
+            : vault.sourceKind === "github-public"
+              ? `已只读载入 ${vault.sourceName}：${vault.files.length} 篇 Markdown。`
+              : vault.unsupportedReason ?? "知识库已载入。";
           applyLoadedVault(vault, initialStatus);
         }
       })
@@ -784,6 +798,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }, [adapter, storageOpen, storageRoots.length]);
 
   const isReadOnlyStructure = sourceKind === "structure";
+  const isReadOnlyRepository = sourceKind === "github-public";
+  const isReadOnlyContent = isReadOnlyStructure || isReadOnlyRepository;
   const index = useMemo(
     () => buildVaultIndex(files, { includeExcludedPaths: isReadOnlyStructure }),
     [files, isReadOnlyStructure]
@@ -1006,6 +1022,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setCenterMode(vault.sourceKind === "structure" ? "explorer" : "graph");
     setEditorMode("preview");
     setSelectedGraphPaths([]);
+    setTreeContextMenu(null);
+    setGraphDeleteTarget(null);
     if (vault.sourceKind === "structure") {
       setAgentKeyDialogOpen(false);
       setAgentSettingsOpen(false);
@@ -1071,6 +1089,33 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStorageOpen(false);
     } catch (error) {
       setStatus(error instanceof Error ? `未连接本地文件夹：${error.message}` : "未连接本地文件夹。");
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function openPublicGitHubRepository(repository = publicGitHubRepository) {
+    if (!adapter.openPublicGitHubRepo) {
+      setStatus("当前入口不支持读取 GitHub 公开仓库。");
+      return;
+    }
+    const target = repository.trim();
+    if (!target) {
+      setStatus("请输入 GitHub 公开仓库地址或 owner/repo。");
+      return;
+    }
+    setPublicGitHubRepository(target);
+    setStatus("正在从 GitHub 读取公开知识库的文件树和 Markdown 正文...");
+    setStorageBusy(true);
+    try {
+      const vault = await adapter.openPublicGitHubRepo(target);
+      applyLoadedVault(
+        vault,
+        `已只读载入 ${vault.sourceName}：${vault.files.length} 篇 Markdown，排除 ${vault.safetyManifest.excluded.length} 个路径。`
+      );
+      setStorageOpen(false);
+    } catch (error) {
+      setStatus(error instanceof Error ? `GitHub 公开库读取失败：${error.message}` : "GitHub 公开库读取失败。");
     } finally {
       setStorageBusy(false);
     }
@@ -1174,8 +1219,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStorageOpen(true);
       return;
     }
-    if (isReadOnlyStructure) {
-      setStatus("当前是只读磁盘结构模式，不能新建或修改本地文件。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式。请打开本地知识库后再新建或修改文档。");
       return;
     }
     const path = nextUntitledPath(files);
@@ -1189,8 +1234,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function createNoteInContext(target: TreeContextMenu | null) {
-    if (isReadOnlyStructure) {
-      setStatus("当前是只读磁盘结构模式，不能新建或修改本地文件。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式。请打开本地知识库后再新建或修改文档。");
       return;
     }
     const folder = target?.type === "folder" ? target.folder.path : target?.type === "note" ? noteStemPath(target.note.path) : "Inbox";
@@ -1206,6 +1251,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function renameContextTarget(target: TreeContextMenu) {
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能重命名文档或文件夹。");
+      return;
+    }
     if (target.type === "note") {
       renameNoteInSession(target.note.path);
       return;
@@ -1268,6 +1317,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function pasteClipboard(target: TreeContextMenu) {
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能粘贴或移动文档。");
+      return;
+    }
     if (!noteClipboard) return;
     const targetFolder = target.type === "folder" ? target.folder.path : folderPathOf(target.note.path);
     const clipboardFiles = noteClipboard.paths
@@ -1301,6 +1354,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function deleteContextTarget(target: TreeContextMenu) {
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能删除文档。");
+      return;
+    }
     if (target.type === "note") {
       setGraphDeleteTarget({
         paths: [target.note.path],
@@ -1327,6 +1384,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function updateCurrentNote(content: string) {
+    if (isReadOnlyContent) return;
     if (!currentPath) return;
     setFiles((current) => current.map((file) => (file.path === currentPath ? { ...file, content } : file)));
     markDirty(currentPath);
@@ -1703,6 +1761,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function applyDiff(diff: AgentDiff) {
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，Agent 提案可以查看，但不能应用到该仓库。");
+      return;
+    }
     if (diff.permission === "blocked") {
       setStatus(`已阻止：${diff.path}，原因：${diff.reason}`);
       return;
@@ -1750,8 +1812,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       return;
     }
 
-    if (isReadOnlyStructure) {
-      setStatus("只读磁盘结构模式只能打开已扫描的结构条目，不能创建新文件。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，只能打开已有文档，不能创建新文件。");
       return;
     }
 
@@ -1893,8 +1955,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function requestGraphDelete(path: string) {
-    if (isReadOnlyStructure) {
-      setStatus("只读磁盘结构模式不支持删除。原始文件未被修改。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不支持删除。原始文件未被修改。");
       return;
     }
     const normalized = normalizePath(path);
@@ -1911,8 +1973,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function requestGraphDeleteMany(paths: string[]) {
-    if (isReadOnlyStructure) {
-      setStatus("只读磁盘结构模式不支持删除。原始文件未被修改。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不支持删除。原始文件未被修改。");
       return;
     }
     const selectedNotes = paths
@@ -1976,8 +2038,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   async function writeDraftChanges() {
-    if (isReadOnlyStructure) {
-      setStatus("只读磁盘结构模式不能写回本地文件。");
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能写回文件。");
       return;
     }
     if (!adapter.writeChanges) {
@@ -2127,9 +2189,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <button
             aria-label="New note tab"
             className="tab-plus"
-            disabled={isReadOnlyStructure}
+            disabled={isReadOnlyContent}
             onClick={createSessionNote}
-            title={isReadOnlyStructure ? "只读结构模式不能新建笔记" : "新建笔记"}
+            title={isReadOnlyContent ? "只读来源不能新建笔记" : "新建笔记"}
             type="button"
           >
             +
@@ -2153,10 +2215,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           canOpen={adapter.canOpenVault}
           canReadStructure={Boolean(adapter.openReadOnlyStructure)}
           folderName={newVaultName}
+          githubRepository={publicGitHubRepository}
+          officialExampleRepository={adapter.publicGitHubExampleRepository}
           onClose={() => setStorageOpen(false)}
           onCreate={createLocalVaultFolder}
           onFolderNameChange={setNewVaultName}
+          onGitHubRepositoryChange={setPublicGitHubRepository}
           onOpen={openLocalVault}
+          onOpenGitHub={() => void openPublicGitHubRepository()}
+          onOpenOfficialExample={adapter.publicGitHubExampleRepository ? () => void openPublicGitHubRepository(adapter.publicGitHubExampleRepository) : undefined}
           onReadStructure={openReadOnlyStructure}
           onReadRoot={openReadOnlyRoot}
           roots={storageRoots}
@@ -2186,14 +2253,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <button onClick={openLocalVault} disabled={!directoryPickerAvailable} title="打开本地知识库" type="button">
             <FolderOpen size={16} />
           </button>
-          <button disabled={isReadOnlyStructure} onClick={createSessionNote} title={isReadOnlyStructure ? "只读结构模式不能新建笔记" : "新建会话笔记"} type="button">
+          <button disabled={isReadOnlyContent} onClick={createSessionNote} title={isReadOnlyContent ? "只读来源不能新建笔记" : "新建会话笔记"} type="button">
             <FilePlus2 size={16} />
           </button>
         </div>
 
         <section className="vault-panel file-card">
           <div className="section-heading">
-            <h2>{isReadOnlyStructure ? "磁盘结构" : "读书"}</h2>
+            <h2>{isReadOnlyStructure ? "磁盘结构" : isReadOnlyRepository ? "公开知识库" : "读书"}</h2>
             <span>{filteredNotes.length}/{index.notes.length}</span>
           </div>
           <label className="search-box">
@@ -2216,8 +2283,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             <FileTree
               currentPath={currentPath}
               notes={filteredNotes}
-              onFolderContextMenu={(folder, event) => openTreeFolderMenu(folder, event)}
-              onNoteContextMenu={(note, event) => openTreeNoteMenu(note, event)}
+              onFolderContextMenu={isReadOnlyContent ? undefined : (folder, event) => openTreeFolderMenu(folder, event)}
+              onNoteContextMenu={isReadOnlyContent ? undefined : (note, event) => openTreeNoteMenu(note, event)}
               onSelect={selectNote}
             />
           )}
@@ -2236,11 +2303,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <section className="vault-panel compact-panel safety-card">
           <div className="section-heading">
             <h2>安全状态</h2>
-            <span>{isReadOnlyStructure ? "只读" : sourceSafety.excluded.length === 0 ? "OK" : "已排除"}</span>
+            <span>{isReadOnlyContent ? "只读" : sourceSafety.excluded.length === 0 ? "OK" : "已排除"}</span>
           </div>
           <p>
             <ShieldCheck size={13} />
-            {isReadOnlyStructure ? "仅枚举名称、路径和层级；正文读取与写入均已关闭。" : `允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`}
+            {isReadOnlyStructure
+              ? "仅枚举名称、路径和层级；正文读取与写入均已关闭。"
+              : isReadOnlyRepository
+                ? `公开仓库只读：允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`
+                : `允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`}
           </p>
           <p>
             <CheckCircle2 size={13} />
@@ -2254,7 +2325,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
       {changesOpen ? (
         <DraftChangesPanelWithTrash
-          canWrite={Boolean(adapter.writeChanges) && !isReadOnlyStructure}
+          canWrite={Boolean(adapter.writeChanges) && !isReadOnlyContent}
           changes={draftChanges}
           hasDraftChanges={draftChanges.length > 0}
           onClose={() => setChangesOpen(false)}
@@ -2269,7 +2340,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      {treeContextMenu ? (
+      {treeContextMenu && !isReadOnlyContent ? (
         <TreeContextMenuPanel
           clipboard={noteClipboard}
           menu={treeContextMenu}
@@ -2381,8 +2452,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               <StarGraph
                 filterText={graphFilter}
                 graph={graph}
-                onDelete={isReadOnlyStructure ? undefined : requestGraphDelete}
-                onDeleteMany={isReadOnlyStructure ? undefined : requestGraphDeleteMany}
+                onDelete={isReadOnlyContent ? undefined : requestGraphDelete}
+                onDeleteMany={isReadOnlyContent ? undefined : requestGraphDeleteMany}
                 onSelect={selectGraphNode}
                 onSelectionChange={setSelectedGraphPaths}
                 onViewportChange={setGraphViewport}
@@ -2473,12 +2544,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         ) : (
           <NoteEditor
             miniGraph={currentNoteGraph}
-            mode={isReadOnlyStructure ? "preview" : editorMode}
+            mode={isReadOnlyContent ? "preview" : editorMode}
             note={currentNote}
-            onChange={isReadOnlyStructure ? () => undefined : updateCurrentNote}
-            onModeChange={isReadOnlyStructure ? () => undefined : setEditorMode}
+            onChange={isReadOnlyContent ? () => undefined : updateCurrentNote}
+            onModeChange={isReadOnlyContent ? () => undefined : setEditorMode}
             onSelectGraphNode={selectNote}
-            readOnly={isReadOnlyStructure}
+            readOnly={isReadOnlyContent}
           />
         )}
       </main>
@@ -2709,10 +2780,15 @@ interface StoragePanelProps {
   canOpen: boolean;
   canReadStructure: boolean;
   folderName: string;
+  githubRepository: string;
+  officialExampleRepository?: string;
   onClose(): void;
   onCreate(): void;
   onFolderNameChange(value: string): void;
+  onGitHubRepositoryChange(value: string): void;
   onOpen(): void;
+  onOpenGitHub(): void;
+  onOpenOfficialExample?(): void;
   onReadStructure(): void;
   onReadRoot(root: string): void;
   roots: StorageRoot[];
@@ -2726,10 +2802,15 @@ function StoragePanel({
   canOpen,
   canReadStructure,
   folderName,
+  githubRepository,
+  officialExampleRepository,
   onClose,
   onCreate,
   onFolderNameChange,
+  onGitHubRepositoryChange,
   onOpen,
+  onOpenGitHub,
+  onOpenOfficialExample,
   onReadStructure,
   onReadRoot,
   roots,
@@ -2774,6 +2855,36 @@ function StoragePanel({
           <HardDrive size={15} />
           选择其他位置只读浏览
         </button>
+
+        <div className="storage-github">
+          <div className="storage-github-heading">
+            <span>GitHub 公开知识库</span>
+            <small>只读 · 无需登录</small>
+          </div>
+          <div className="storage-github-input">
+            <input
+              aria-label="GitHub 公开仓库地址"
+              disabled={busy}
+              onChange={(event) => onGitHubRepositoryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && githubRepository.trim()) onOpenGitHub();
+              }}
+              placeholder="owner/repo 或 GitHub 仓库网址"
+              value={githubRepository}
+            />
+            <button disabled={busy || githubRepository.trim() === ""} onClick={onOpenGitHub} type="button">
+              <GitBranch size={15} />
+              打开
+            </button>
+          </div>
+          {officialExampleRepository && onOpenOfficialExample ? (
+            <button className="storage-example-button" disabled={busy} onClick={onOpenOfficialExample} type="button">
+              <Network size={15} />
+              打开官方示例知识库
+            </button>
+          ) : null}
+          <p>读取公开仓库中的安全 Markdown 并建立文件树与图谱；不会提交、删除或改写仓库内容。</p>
+        </div>
 
         <div className={canCreate ? "storage-create" : "storage-create disabled"}>
           <label htmlFor="new-vault-name">新建文件夹名称</label>

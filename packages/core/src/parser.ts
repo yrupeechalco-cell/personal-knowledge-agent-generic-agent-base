@@ -11,7 +11,12 @@ export function parseNote(file: NoteFile): ParsedNote {
   const { body, frontmatter } = parseFrontmatter(file.content);
   const title = titleFromBodyOrPath(body, normalizedPath);
   const headings = [...body.matchAll(HEADING_RE)].map((match) => match[1].trim());
-  const tags = [...new Set([...body.matchAll(TAG_RE)].map((match) => match[2]))].sort();
+  const frontmatterTags = Array.isArray(frontmatter.tags)
+    ? frontmatter.tags.map(String)
+    : typeof frontmatter.tags === "string"
+      ? [frontmatter.tags]
+      : [];
+  const tags = [...new Set([...frontmatterTags, ...[...body.matchAll(TAG_RE)].map((match) => match[2])])].sort();
   const links = [...parseWikiLinks(body), ...parseMarkdownLinks(body)];
   const excerpt = body
     .replace(HEADING_RE, "")

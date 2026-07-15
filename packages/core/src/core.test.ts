@@ -17,6 +17,7 @@ Also [read](../Other.md#Part).
 
     expect(note.title).toBe("Index");
     expect(note.frontmatter.tags).toEqual(["aigc", "music"]);
+    expect(note.tags).toEqual(["aigc", "music", "tag-one"]);
     expect(note.frontmatter.published).toBe(true);
     expect(note.tags).toContain("tag-one");
     expect(note.headings).toContain("Index");

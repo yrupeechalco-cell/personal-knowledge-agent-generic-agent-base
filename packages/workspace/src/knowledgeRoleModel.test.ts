@@ -41,4 +41,17 @@ describe("buildKnowledgeRoleModel", () => {
 
     expect(model.domains[0]).toMatchObject({ id: "AI 与智能体", kind: "topic" });
   });
+
+  it("honors an explicit frontmatter domain before heuristic classification", () => {
+    const model = buildKnowledgeRoleModel(
+      buildVaultIndex([
+        {
+          path: "03-重要性度量/PageRank.md",
+          content: "---\ndomain: 重要性度量\ntags: [中心性, 算法]\n---\n# PageRank\n\n项目中的递归影响力算法。"
+        }
+      ])
+    );
+
+    expect(model.domains[0]).toMatchObject({ id: "重要性度量" });
+  });
 });

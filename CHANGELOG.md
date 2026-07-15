@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added a read-only Web data source for public GitHub Markdown repositories using the repository default branch.
+- Added repository URL parsing, GitHub API error handling, safety filtering, bounded concurrent Markdown loading, and browser memory limits.
+- Added an optional one-click public example source while preserving the zero-content first-run contract.
+- Added an optional repository-side static manifest so public demonstrations remain available when anonymous GitHub API quota is exhausted.
+- Added YAML frontmatter tag indexing and explicit `domain` metadata support for authored macro-graph taxonomy.
+
+### Safety
+
+- Public GitHub sources cannot create, edit, rename, delete, apply Agent diffs, or write changes back to the repository.
+- Sensitive paths continue to be excluded before Markdown content is fetched.
+- Static manifests are validated for version, Markdown-only paths, duplicates, declared sizes, actual response sizes, file count, and total byte limits.
+- Private repositories are not requested; authenticated GitHub write access remains outside the current release.
+
 ## 0.2.2 - 2026-07-15
 
 ### Changed

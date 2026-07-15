@@ -46,15 +46,29 @@
 ### Web 版
 
 - 通过 Chrome 或 Edge 的文件夹选择器读取用户主动授权的文件夹。
+- 可以输入 `owner/repo` 或 GitHub 仓库网址，只读载入任意公开 Markdown 仓库。
+- GitHub 来源会复用同一套安全过滤、文件树、双链、图谱和笔记阅读界面，但禁用新建、编辑、重命名与删除。
 - 文件只在浏览器当前页面中解析，不上传到本项目服务器。
 - 不具备桌面端的任意磁盘访问、系统安全存储和后台文件监听能力。
 - 每次新打开网站仍从空工作区开始，不保存笔记全文作为预置内容。
 
+### 公开示例知识库
+
+主项目不再内置演示笔记。需要体验复杂知识图谱时，可以在“存储空间”中点击“打开官方示例知识库”，或直接访问[公开示例链接](https://personal-knowledge-agent.pages.dev/?repo=yrupeechalco-cell%2Fknowledge-agent-public-demo-vault)。
+
+示例内容存放在独立仓库 [`knowledge-agent-public-demo-vault`](https://github.com/yrupeechalco-cell/knowledge-agent-public-demo-vault)：
+
+- 以“复杂网络如何帮助衡量知识影响力”为主题，包含图论基础、网络模型、中心性、网络动力学、知识系统和产品实验。
+- 33 篇原创中文知识笔记通过 114 条可解析双链组成复杂关系网络；连同仓库说明与许可，共载入 35 篇 Markdown。
+- 外部论文、教材与 W3C 规范只提供来源链接和原创摘要，不复制受版权保护的全文。
+- Web 端只读获取内容，不保存 GitHub 凭证，也不向仓库提交任何更改。
+- 示例库带有静态文件清单，频繁刷新时不依赖 GitHub 匿名 API 配额；其他公开仓库没有清单时仍可自动发现默认分支。
+
 ## 三栏工作台
 
-![打开外部示例文件夹后的知识地形](docs/images/workspace-graph.png)
+![从 GitHub 公开示例库读取的八领域知识地形](docs/images/workspace-graph.png)
 
-上图中的“外部示例研究库”只在截图测试的浏览器内存中临时生成，用于展示 36 篇文档和 12 个知识领域的复杂状态。它没有写入网站构建产物、Windows 安装包或运行时源码。
+上图由 Web 版实时只读加载独立 GitHub 示例仓库生成，展示 35 篇 Markdown、八个知识领域和 24 条跨域依据。示例内容不在网站构建产物、Windows 安装包或运行时源码中；普通主站网址仍从零内容工作区开始。
 
 ### 左侧：文件、标签与安全状态
 
@@ -165,6 +179,7 @@ App 和 Web 使用同一个 React 工作台、同一套图谱、文件树和 Age
 | --- | --- | --- |
 | 空启动，无预置笔记 | 支持 | 支持 |
 | 打开用户授权的 Markdown 文件夹 | 支持 | 支持 |
+| 只读打开 GitHub 公开 Markdown 仓库 | 暂不提供 | 支持 |
 | 任意位置新建知识库文件夹 | 支持 | 不支持 |
 | 真实磁盘写入与文件监听 | 支持 | 受浏览器权限限制 |
 | 只读浏览磁盘结构 | 支持 | 不支持 |
@@ -187,9 +202,10 @@ App 和 Web 使用同一个 React 工作台、同一套图谱、文件树和 Age
 ### Web
 
 1. 使用最新版 Chrome 或 Edge 打开[主网站](https://personal-knowledge-agent.pages.dev/)。
-2. 点击“打开本地知识库”。
-3. 在浏览器系统窗口中选择要读取的 Markdown 文件夹。
-4. 页面关闭后授权与内存索引随浏览器会话结束，不会变成网站预置内容。
+2. 点击左上角文件夹图标打开“存储空间”。
+3. 可以选择本地 Markdown 文件夹，也可以输入 GitHub 公开仓库地址后只读打开。
+4. 点击“打开官方示例知识库”可查看独立维护的复杂网络研究示例。
+5. 页面关闭后本地授权与内存索引随浏览器会话结束，不会变成网站预置内容。
 
 完整操作细节见[使用指南](docs/USAGE_GUIDE.md)，安装与数据边界见[隐私说明](docs/AGENT_INSTALL_AND_PRIVACY.md)。
 
@@ -217,7 +233,7 @@ npm run deploy:web
 
 ```text
 apps/desktop        Tauri 桌面入口，本地文件、设置、模型密钥与写回
-apps/web            浏览器入口，只读取用户主动授权的文件夹
+apps/web            浏览器入口，读取用户授权文件夹或 GitHub 公开仓库
 packages/workspace  App 与 Web 共用的三栏工作台和空启动流程
 packages/core       Markdown、双链、标签、图谱与安全规则
 packages/agent      笔记 Agent、工具调用、模型 Provider 与权限
