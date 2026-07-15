@@ -34,6 +34,13 @@ const ROLE_LABELS: Record<KnowledgeNoteRole, string> = {
 
 const ROLE_ORDER: KnowledgeNoteRole[] = ["question", "evidence", "decision", "output", "reference"];
 
+interface InkDomainNode {
+  root: THREE.Group;
+  wash: THREE.Sprite;
+  rim: THREE.Sprite;
+  core: THREE.Sprite;
+}
+
 export function KnowledgeRoleMap({ index, onSelectNote }: KnowledgeRoleMapProps) {
   const model = useMemo(() => buildKnowledgeRoleModel(index), [index]);
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
@@ -84,7 +91,8 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x1e1e1e, 0.045);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    camera.position.set(0, 1.7, 10.8);
+    const terrainRadius = domainTerrainRadius(model.domains.length);
+    camera.position.set(0, terrainRadius * 0.16, terrainRadius * 3.15);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     renderer.setClearColor(0x1e1e1e, 1);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -96,8 +104,8 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
     controls.dampingFactor = 0.075;
     controls.rotateSpeed = 0.48;
     controls.zoomSpeed = 0.66;
-    controls.minDistance = 3.4;
-    controls.maxDistance = 18;
+    controls.minDistance = Math.max(3.4, terrainRadius * 0.72);
+    controls.maxDistance = terrainRadius * 5.4;
     controls.target.set(0, 0, 0);
 
     scene.add(new THREE.HemisphereLight(0xd8d3ff, 0x171719, 1.4));
@@ -111,7 +119,10 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
     const group = new THREE.Group();
     scene.add(group);
     const positions = domainPositions(model.domains);
-    const meshes = new Map<string, THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>>();
+    const inkTexture = createInkWashTexture();
+    const rimTexture = createInkRimTexture();
+    const coreTexture = createInkCoreTexture();
+    const nodes = new Map<string, InkDomainNode>();
     const labels = new Map<string, HTMLDivElement>();
     const related = new Map<string, Set<string>>();
 
@@ -137,22 +148,45 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
     }
 
     for (const domain of model.domains) {
-      const radius = 0.16 + domain.importance * 0.22;
-      const geometry = new THREE.SphereGeometry(radius, 36, 24);
-      const material = new THREE.MeshStandardMaterial({
-        color: DOMAIN_COLORS[domain.kind],
-        emissive: DOMAIN_COLORS[domain.kind],
-        emissiveIntensity: 0.06,
-        metalness: 0.05,
-        roughness: 0.34,
+      const baseScale = 0.76 + domain.importance * 0.58;
+      const washColor = new THREE.Color(DOMAIN_COLORS[domain.kind]).multiplyScalar(0.58);
+      const washMaterial = new THREE.SpriteMaterial({
+        map: inkTexture,
+        color: washColor,
         transparent: true,
-        opacity: 0.94
+        opacity: 0.9,
+        depthWrite: false
       });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.copy(positions.get(domain.id) ?? new THREE.Vector3());
-      mesh.userData = { id: domain.id, radius };
-      meshes.set(domain.id, mesh);
-      group.add(mesh);
+      const coreMaterial = new THREE.SpriteMaterial({
+        map: coreTexture,
+        color: 0xe8e4ee,
+        transparent: true,
+        opacity: 0.86,
+        depthWrite: false
+      });
+      const rimMaterial = new THREE.SpriteMaterial({
+        map: rimTexture,
+        color: new THREE.Color(DOMAIN_COLORS[domain.kind]).lerp(new THREE.Color(0xe6e2ea), 0.34),
+        transparent: true,
+        opacity: 0.4,
+        depthWrite: false
+      });
+      const wash = new THREE.Sprite(washMaterial);
+      wash.scale.setScalar(baseScale);
+      wash.userData = { id: domain.id };
+      const rim = new THREE.Sprite(rimMaterial);
+      rim.scale.setScalar(baseScale * 0.9);
+      rim.position.z = 0.004;
+      rim.userData = { id: domain.id };
+      const core = new THREE.Sprite(coreMaterial);
+      core.scale.setScalar(0.044 + domain.importance * 0.022);
+      core.position.z = 0.008;
+      core.userData = { id: domain.id };
+      const root = new THREE.Group();
+      root.position.copy(positions.get(domain.id) ?? new THREE.Vector3());
+      root.add(wash, rim, core);
+      nodes.set(domain.id, { root, wash, rim, core });
+      group.add(root);
 
       const label = document.createElement("div");
       label.className = "knowledge-domain-label";
@@ -171,7 +205,8 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
       pointer.x = ((clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1;
       pointer.y = -((clientY - rect.top) / Math.max(rect.height, 1)) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObjects([...meshes.values()], false)[0];
+      const hitTargets = [...nodes.values()].flatMap((node) => [node.wash, node.rim, node.core]);
+      const hit = raycaster.intersectObjects(hitTargets, false)[0];
       return (hit?.object.userData.id as string | undefined) ?? null;
     }
 
@@ -182,17 +217,15 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
       renderer.domElement.style.cursor = nextId ? "pointer" : "grab";
       const relatedIds = nextId ? related.get(nextId) ?? new Set([nextId]) : null;
 
-      for (const [id, mesh] of meshes) {
+      for (const [id, node] of nodes) {
         const active = id === nextId;
         const connected = !relatedIds || relatedIds.has(id);
-        mesh.material.opacity = connected ? 0.96 : 0.16;
-        mesh.material.emissiveIntensity = active ? 0.38 : connected ? 0.08 : 0.01;
-        const base = mesh.userData.radius as number;
-        mesh.scale.setScalar(active ? 1.18 : 1);
-        mesh.geometry.computeBoundingSphere();
+        node.wash.material.opacity = connected ? (active ? 1 : 0.9) : 0.07;
+        node.rim.material.opacity = connected ? (active ? 0.78 : 0.4) : 0.06;
+        node.core.material.opacity = connected ? (active ? 0.94 : 0.68) : 0.1;
+        node.root.scale.setScalar(active ? 1.16 : 1);
         const label = labels.get(id);
         if (label) label.classList.toggle("dimmed", !connected);
-        mesh.userData.radius = base;
       }
 
       for (const child of group.children) {
@@ -225,11 +258,27 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointerleave", () => applyFocus(null));
 
+    let cameraWasAdjusted = false;
+    controls.addEventListener("start", () => {
+      cameraWasAdjusted = true;
+    });
+
     function resize() {
       const rect = measuredHost.getBoundingClientRect();
       renderer.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false);
       camera.aspect = Math.max(1, rect.width) / Math.max(1, rect.height);
-      camera.position.z = camera.aspect < 1.05 ? 14.4 : camera.aspect < 1.35 ? 12.4 : 10.8;
+      const verticalFit = terrainRadius / Math.sin(THREE.MathUtils.degToRad(camera.fov * 0.5));
+      const narrowFit = camera.aspect < 1 ? 1 / Math.max(camera.aspect, 0.62) : 1;
+      const fitDistance = verticalFit * 1.14 * narrowFit;
+      if (!cameraWasAdjusted) {
+        camera.position.set(0, terrainRadius * 0.16, fitDistance);
+      } else {
+        const currentDistance = camera.position.distanceTo(controls.target);
+        if (currentDistance < fitDistance) {
+          const viewDirection = camera.position.clone().sub(controls.target).normalize();
+          camera.position.copy(controls.target).addScaledVector(viewDirection, fitDistance);
+        }
+      }
       camera.updateProjectionMatrix();
     }
 
@@ -244,8 +293,8 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
       controls.update();
       renderer.render(scene, camera);
       const rect = renderer.domElement.getBoundingClientRect();
-      for (const [id, mesh] of meshes) {
-        projected.copy(mesh.position).project(camera);
+      for (const [id, node] of nodes) {
+        projected.copy(node.root.position).project(camera);
         const label = labels.get(id);
         if (!label) continue;
         label.style.transform = `translate(-50%, -50%) translate(${(projected.x * 0.5 + 0.5) * rect.width}px, ${(-projected.y * 0.5 + 0.5) * rect.height}px)`;
@@ -266,8 +315,13 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
           object.geometry.dispose();
           const materials = Array.isArray(object.material) ? object.material : [object.material];
           for (const material of materials) material.dispose();
+        } else if (object instanceof THREE.Sprite) {
+          object.material.dispose();
         }
       });
+      inkTexture.dispose();
+      rimTexture.dispose();
+      coreTexture.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       labelLayer.replaceChildren();
@@ -454,17 +508,173 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function domainPositions(domains: KnowledgeDomain[]): Map<string, THREE.Vector3> {
   const positions = new Map<string, THREE.Vector3>();
-  const columns = Math.min(5, Math.max(3, Math.ceil(Math.sqrt(domains.length * 1.6))));
-  const rows = Math.ceil(domains.length / columns);
+  const radius = domainTerrainRadius(domains.length);
+  const directions = maximizeAngularDirections(domains.length);
   domains.forEach((domain, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const x = (column - (columns - 1) / 2) * 2.7;
-    const y = ((rows - 1) / 2 - row) * 2 + Math.sin(index * 1.31) * 0.34;
-    const z = Math.cos(index * 1.73) * 2.4;
-    positions.set(domain.id, new THREE.Vector3(x, y, z));
+    positions.set(domain.id, directions[index].clone().multiplyScalar(radius));
   });
   return positions;
+}
+
+function createInkWashTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 160;
+  const context = canvas.getContext("2d");
+  if (!context) return new THREE.CanvasTexture(canvas);
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  const layers = [
+    { x: 80, y: 80, radius: 68, alpha: 0.58 },
+    { x: 72, y: 75, radius: 51, alpha: 0.28 },
+    { x: 89, y: 86, radius: 44, alpha: 0.2 },
+    { x: 83, y: 68, radius: 32, alpha: 0.14 }
+  ];
+
+  for (const layer of layers) {
+    const gradient = context.createRadialGradient(layer.x, layer.y, 0, layer.x, layer.y, layer.radius);
+    gradient.addColorStop(0, `rgba(255,255,255,${layer.alpha})`);
+    gradient.addColorStop(0.34, `rgba(255,255,255,${layer.alpha * 0.82})`);
+    gradient.addColorStop(0.72, `rgba(255,255,255,${layer.alpha * 0.25})`);
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createInkCoreTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 48;
+  canvas.height = 48;
+  const context = canvas.getContext("2d");
+  if (!context) return new THREE.CanvasTexture(canvas);
+
+  const gradient = context.createRadialGradient(24, 24, 0, 24, 24, 22);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.26, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.42, "rgba(255,255,255,0.72)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createInkRimTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 160;
+  const context = canvas.getContext("2d");
+  if (!context) return new THREE.CanvasTexture(canvas);
+
+  const gradient = context.createRadialGradient(80, 80, 57, 80, 80, 66);
+  gradient.addColorStop(0, "rgba(255,255,255,0)");
+  gradient.addColorStop(0.38, "rgba(255,255,255,0.18)");
+  gradient.addColorStop(0.56, "rgba(255,255,255,0.82)");
+  gradient.addColorStop(0.72, "rgba(255,255,255,0.24)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function domainTerrainRadius(count: number): number {
+  return Math.min(7.2, 3.9 + Math.sqrt(Math.max(1, count)) * 0.42);
+}
+
+export function maximizeAngularDirections(count: number): THREE.Vector3[] {
+  if (count <= 0) return [];
+  const directions = regularSolidDirections(count) ?? fibonacciSphereDirections(count);
+
+  if (count > 8) {
+    for (let iteration = 0; iteration < 180; iteration += 1) {
+      const step = 0.024 * (1 - iteration / 220);
+      const next = directions.map((point, index) => {
+        const force = new THREE.Vector3();
+        for (let otherIndex = 0; otherIndex < directions.length; otherIndex += 1) {
+          if (index === otherIndex) continue;
+          const delta = point.clone().sub(directions[otherIndex]);
+          const distanceSq = Math.max(delta.lengthSq(), 0.035);
+          force.addScaledVector(delta, 1 / (distanceSq * Math.sqrt(distanceSq)));
+        }
+        force.addScaledVector(point, -force.dot(point));
+        return point.clone().addScaledVector(force, step).normalize();
+      });
+      directions.splice(0, directions.length, ...next);
+    }
+  }
+
+  const orientation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.38, 0.56, 0.14));
+  return directions.map((point) => point.applyQuaternion(orientation).normalize());
+}
+
+function fibonacciSphereDirections(count: number): THREE.Vector3[] {
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  return Array.from({ length: count }, (_, index) => {
+    const y = 1 - (2 * (index + 0.5)) / count;
+    const radial = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = index * goldenAngle;
+    return new THREE.Vector3(Math.cos(theta) * radial, y, Math.sin(theta) * radial);
+  });
+}
+
+function regularSolidDirections(count: number): THREE.Vector3[] | null {
+  if (count === 1) return [new THREE.Vector3(0, 0, 0)];
+  if (count === 2) return [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0)];
+  if (count === 3) return ringDirections(3);
+  if (count === 4) {
+    return normalizeDirections([
+      [1, 1, 1],
+      [1, -1, -1],
+      [-1, 1, -1],
+      [-1, -1, 1]
+    ]);
+  }
+  if (count === 5) return [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0), ...ringDirections(3)];
+  if (count === 6) {
+    return normalizeDirections([
+      [1, 0, 0], [-1, 0, 0],
+      [0, 1, 0], [0, -1, 0],
+      [0, 0, 1], [0, 0, -1]
+    ]);
+  }
+  if (count === 7) return [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0), ...ringDirections(5)];
+  if (count === 8) {
+    return normalizeDirections([
+      [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
+      [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]
+    ]);
+  }
+  return null;
+}
+
+function ringDirections(count: number): THREE.Vector3[] {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2;
+    return new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+  });
+}
+
+function normalizeDirections(values: Array<[number, number, number]>): THREE.Vector3[] {
+  return values.map(([x, y, z]) => new THREE.Vector3(x, y, z).normalize());
 }
 
 function contributionPositions(contributions: KnowledgeContribution[]): Map<string, { x: number; y: number }> {

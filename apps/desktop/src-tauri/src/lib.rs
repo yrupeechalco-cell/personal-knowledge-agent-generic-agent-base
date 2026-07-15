@@ -1,6 +1,6 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -453,7 +453,7 @@ fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
         return Ok(AppSettings::default());
     }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&text).map_err(|error| error.to_string())
+    parse_json_document(&text)
 }
 
 #[tauri::command]
@@ -1807,10 +1807,14 @@ fn load_deepseek_api_key(app: &tauri::AppHandle) -> Result<Option<String>, Strin
         return Ok(None);
     }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let secrets: AppSecrets = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let secrets: AppSecrets = parse_json_document(&text)?;
     Ok(secrets
         .deep_seek_api_key
         .filter(|key| !key.trim().is_empty()))
+}
+
+fn parse_json_document<T: DeserializeOwned>(text: &str) -> Result<T, String> {
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|error| error.to_string())
 }
 
 fn normalize_model_role(role: &str) -> &'static str {
@@ -1935,6 +1939,17 @@ mod trash_tests {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn parses_windows_utf8_settings_with_or_without_bom() {
+        let json = r#"{"vaultPath":"F:\\demo","githubRepo":null}"#;
+        let plain: AppSettings = parse_json_document(json).expect("plain JSON should parse");
+        let with_bom: AppSettings =
+            parse_json_document(&format!("\u{feff}{json}")).expect("BOM JSON should parse");
+
+        assert_eq!(plain.vault_path.as_deref(), Some("F:\\demo"));
+        assert_eq!(with_bom.vault_path.as_deref(), Some("F:\\demo"));
+    }
 
     #[test]
     fn rejects_invalid_vault_folder_names() {

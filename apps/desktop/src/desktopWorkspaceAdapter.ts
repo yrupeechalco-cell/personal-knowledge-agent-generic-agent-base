@@ -13,6 +13,7 @@ import type {
   TrashEntry,
   WriteChangesResult
 } from "@knowledge-agent/workspace";
+import { demoVaultFiles } from "@knowledge-agent/workspace";
 
 interface AppSettings {
   vaultPath?: string;
@@ -22,22 +23,6 @@ interface AppSettings {
   agentMode?: string;
   deepSeekApiKeyConfigured?: boolean;
 }
-
-const demoFiles: NoteFile[] = [
-  {
-    path: "App内测/桌面App v0.1.md",
-    content:
-      "# 桌面App v0.1\n\n这是桌面端没有载入真实 vault 时的本地 Demo。\n\n[[App内测/草稿写回]]\n[[App内测/GitHub同步]]\n#app"
-  },
-  {
-    path: "App内测/草稿写回.md",
-    content: "# 草稿写回\n\n新建、修改、删除先进入草稿层，确认 diff 和安全摘要后才写回磁盘。\n\n[[App内测/桌面App v0.1]]\n#安全"
-  },
-  {
-    path: "App内测/GitHub同步.md",
-    content: "# GitHub同步\n\nv0.1 先保留 git status、commit、push 命令入口，后续再接进 Agent 工作流。\n\n[[App内测/桌面App v0.1]]\n#github"
-  }
-];
 
 let activeVaultPath = "";
 
@@ -208,10 +193,10 @@ async function loadReadOnlyRoot(root: string): Promise<LoadedVault> {
 
 function loadDesktopDemoVault(): LoadedVault {
   return {
-    files: demoFiles,
-    sourceName: "desktop demo vault",
+    files: demoVaultFiles,
+    sourceName: "个人知识库 Agent 演示库",
     sourceKind: "demo",
-    safetyManifest: buildSafetyManifest(demoFiles.map((file) => file.path))
+    safetyManifest: buildSafetyManifest(demoVaultFiles.map((file) => file.path))
   };
 }
 

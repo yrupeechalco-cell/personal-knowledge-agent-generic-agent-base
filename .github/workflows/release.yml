@@ -1,0 +1,57 @@
+name: Release Windows App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "app-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release version
+        run: npm run version:check
+
+      - name: Test workspace
+        run: npm test
+
+      - name: Typecheck workspace
+        run: npm run typecheck
+
+      - name: Build and publish signed installer
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: app-v__VERSION__
+          releaseName: "Knowledge Agent v__VERSION__"
+          releaseBody: "Windows 日用内测版。该版本接入签名自动更新；后续版本会在客户端内主动提醒并可下载安装。详细改动见仓库 CHANGELOG.md。"
+          releaseDraft: false
+          prerelease: false

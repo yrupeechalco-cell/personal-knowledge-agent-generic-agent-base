@@ -6,8 +6,8 @@ import {
   type NoteFile,
   type SafetyManifest
 } from "@knowledge-agent/core";
+import { demoVaultFiles } from "@knowledge-agent/workspace";
 import type { BrowserFileSystemDirectoryHandle, BrowserFileSystemFileHandle, DirectoryPickerWindow } from "./browserTypes";
-import { demoVaultFiles } from "./demoVault";
 
 export interface LoadedVault {
   files: NoteFile[];
@@ -24,7 +24,7 @@ export function isDirectoryPickerSupported(win: Window = window): boolean {
 export function loadDemoVault(): LoadedVault {
   return {
     files: filterSafeMarkdownFiles(demoVaultFiles),
-    sourceName: "demo vault",
+    sourceName: "个人知识库 Agent 演示库",
     sourceKind: "demo",
     safetyManifest: buildSafetyManifest(demoVaultFiles.map((file) => file.path))
   };

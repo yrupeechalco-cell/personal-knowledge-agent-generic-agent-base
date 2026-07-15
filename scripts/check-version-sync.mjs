@@ -6,6 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const json = async (relativePath) => JSON.parse(await readFile(path.join(root, relativePath), "utf8"));
 const rootPackage = await json("package.json");
 const desktopPackage = await json("apps/desktop/package.json");
+const webPackage = await json("apps/web/package.json");
 const tauriConfig = await json("apps/desktop/src-tauri/tauri.conf.json");
 const cargoToml = await readFile(path.join(root, "apps/desktop/src-tauri/Cargo.toml"), "utf8");
 const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
@@ -13,6 +14,7 @@ const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 const versions = {
   root: rootPackage.version,
   desktop: desktopPackage.version,
+  web: webPackage.version,
   tauri: tauriConfig.version,
   cargo: cargoVersion
 };

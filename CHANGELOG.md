@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.1 - 2026-07-15
+
+### Improved
+
+- Unified the Windows App and public Web workspace around one shared 36-note, 12-domain knowledge terrain demo.
+- Refined the 3D knowledge terrain with wider angular separation, responsive camera fitting, ink-wash nodes, clearer hover focus, and softer node boundaries.
+- Added Cloudflare Pages security headers, immutable asset caching, and a guarded one-command deployment path for the canonical public site.
+- Added Web/App release version parity checks so the two product surfaces cannot silently ship different versions.
+
+### Fixed
+
+- Restored desktop settings and model-secret loading when Windows writes UTF-8 JSON with a byte-order mark.
+- Removed the stale three-note desktop fallback and the mismatched Web-only demo that caused App/Web graph drift.
+- Locked the public demo baseline to 36 notes, 12 domains, 36 cross-domain relations, and zero excluded synthetic files.
+
+### Privacy
+
+- Cloud deployments fail before upload if the generated Web bundle contains an API key, private key marker, Windows user path, or the private F-drive demo path.
+- Local visual artifacts, OMX state, vault content, API keys, and updater signing material remain excluded from source control.
+
 ## 0.2.0 - 2026-07-14
 
 ### Added

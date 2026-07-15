@@ -79,6 +79,8 @@
 4. 打开右侧 Agent 设置，选择模型与工作模式，并在需要时填写自己的 API Key。
 5. 编辑笔记或让 Agent 提出整理方案；在“改动与回收站”检查变更后，确认写回本地文件夹。
 
+浏览器体验入口：[个人知识库 Agent Web](https://personal-knowledge-agent.pages.dev/)。Web 与桌面 App 共用工作台和公开演示库，但浏览器不会获得桌面端的任意磁盘写入、系统安全存储或本机模型配置。
+
 完整操作说明见 [使用指南](docs/USAGE_GUIDE.md)，安装与数据边界见 [隐私说明](docs/AGENT_INSTALL_AND_PRIVACY.md)。
 
 ## 当前平台与范围
@@ -108,6 +110,7 @@ npm run tauri:dev     # Tauri 桌面 App
 npm run typecheck
 npm test
 npm run tauri:build   # Windows 安装包
+npm run deploy:web    # 构建、隐私扫描并发布主 Cloudflare Pages 站点
 ```
 
 ## 项目结构

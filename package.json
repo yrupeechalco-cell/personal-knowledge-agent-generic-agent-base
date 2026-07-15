@@ -1,7 +1,7 @@
 {
   "name": "personal-knowledge-agent-generic-agent-base",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "GitHub-native Obsidian-like personal knowledge base Agent.",
   "type": "module",
   "workspaces": [
@@ -16,6 +16,7 @@
     "tauri:build": "npm run tauri -w apps/desktop -- build",
     "build:web": "npm run build -w apps/web",
     "build:desktop": "npm run build -w apps/desktop",
+    "deploy:web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-cloudflare-pages.ps1",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
