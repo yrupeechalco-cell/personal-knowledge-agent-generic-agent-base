@@ -22,12 +22,12 @@ describe("buildKnowledgeRoleModel", () => {
     expect(model.noteRelations.some((relation) => relation.basis === "shared-tag")).toBe(true);
   });
 
-  it("uses tags as provisional domains when a tiny demo vault has no useful folders", () => {
+  it("uses tags as provisional domains when a tiny fixture vault has no useful folders", () => {
     const model = buildKnowledgeRoleModel(
       buildVaultIndex([
-        { path: "Demo/A.md", content: "# A\n#甲" },
-        { path: "Demo/B.md", content: "# B\n#乙" },
-        { path: "Demo/C.md", content: "# C\n#丙" }
+        { path: "Fixture/A.md", content: "# A\n#甲" },
+        { path: "Fixture/B.md", content: "# B\n#乙" },
+        { path: "Fixture/C.md", content: "# C\n#丙" }
       ])
     );
 

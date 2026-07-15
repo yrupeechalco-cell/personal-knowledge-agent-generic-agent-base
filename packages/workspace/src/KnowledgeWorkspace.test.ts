@@ -4,12 +4,25 @@ import {
   buildDraftChanges,
   buildStressGraphNotes,
   agentMutationApprovalFor,
+  createEmptyVault,
   detectInterlinkedVaultRequest,
   detectWordDocumentRequest,
   removeAgentConversationSession,
   selectAutoSaveChanges,
   updateConversationById
 } from "./KnowledgeWorkspace";
+
+describe("createEmptyVault", () => {
+  it("contains no bundled notes or allowed paths", () => {
+    const vault = createEmptyVault();
+
+    expect(vault.sourceKind).toBe("empty");
+    expect(vault.sourceName).toBe("未连接知识库");
+    expect(vault.files).toEqual([]);
+    expect(vault.safetyManifest.allowed).toEqual([]);
+    expect(vault.safetyManifest.excluded).toEqual([]);
+  });
+});
 
 describe("buildDraftChanges", () => {
   it("classifies created, modified, and deleted notes", () => {

@@ -1,7 +1,7 @@
 {
   "name": "personal-knowledge-agent-generic-agent-base",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "GitHub-native Obsidian-like personal knowledge base Agent.",
   "type": "module",
   "workspaces": [
@@ -21,7 +21,8 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "version:check": "node scripts/check-version-sync.mjs"
+    "version:check": "node scripts/check-version-sync.mjs",
+    "content:check": "node scripts/check-no-bundled-notes.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

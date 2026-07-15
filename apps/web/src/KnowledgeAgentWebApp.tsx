@@ -1,13 +1,12 @@
 import { KnowledgeWorkspace, type KnowledgeWorkspaceAdapter } from "@knowledge-agent/workspace";
-import { isDirectoryPickerSupported, loadBrowserDirectoryVault, loadDemoVault } from "./vaultSources";
+import { isDirectoryPickerSupported, loadBrowserDirectoryVault, loadEmptyVault } from "./vaultSources";
 
 const webWorkspaceAdapter: KnowledgeWorkspaceAdapter = {
   canOpenVault: isDirectoryPickerSupported(),
-  loadInitialVault: loadDemoVault,
+  loadInitialVault: loadEmptyVault,
   openVault: loadBrowserDirectoryVault,
-  loadDemoVault,
   getSourceLabel(sourceKind) {
-    return sourceKind === "demo" ? "Demo" : "本地 vault";
+    return sourceKind === "empty" ? "未连接" : "本地知识库";
   }
 };
 

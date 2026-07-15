@@ -15,6 +15,8 @@ Push-Location $root
 try {
   npm run build:web
   if ($LASTEXITCODE -ne 0) { throw "Web build failed." }
+  npm run content:check -- --web
+  if ($LASTEXITCODE -ne 0) { throw "Bundled-content check failed." }
 
   $dist = Join-Path $root "apps/web/dist"
   $sensitivePatterns = @(

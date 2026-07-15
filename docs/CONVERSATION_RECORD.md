@@ -80,7 +80,7 @@ The central product requirement is that the knowledge base cannot be a one-sessi
 - A selected desktop vault is a real local folder, remembered by the App between launches.
 - Safe Markdown creation and editing autosave to that folder after a short debounce.
 - Reopening the App reloads the actual files from disk and rebuilds the index and graph.
-- Demo mode has no real writable folder, so persistent stress-graph generation is blocked there instead of pretending data was saved.
+- Empty startup and read-only structure modes have no writable folder, so persistent stress-graph generation is blocked instead of pretending data was saved.
 - A separate read-only structure scan can enumerate folders and file names from a selected local location without opening file bodies or modifying source files.
 
 The current connected vault path is intentionally not published here. It is local user configuration, represented in this record as `[LOCAL_PATH_REDACTED]`.

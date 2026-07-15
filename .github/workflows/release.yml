@@ -42,6 +42,9 @@ jobs:
       - name: Typecheck workspace
         run: npm run typecheck
 
+      - name: Reject bundled demonstration notes
+        run: npm run content:check -- --source
+
       - name: Build and publish signed installer
         uses: tauri-apps/tauri-action@v1
         env:

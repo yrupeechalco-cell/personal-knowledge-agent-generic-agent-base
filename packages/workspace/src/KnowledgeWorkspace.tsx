@@ -65,7 +65,7 @@ const EXPLORER_TAB_ID = "vault-explorer";
 type CenterMode = "graph" | "edit" | "explorer";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
-type SourceKind = "demo" | "browser-directory" | "desktop" | "structure";
+type SourceKind = "empty" | "browser-directory" | "desktop" | "structure";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
 
@@ -112,6 +112,16 @@ export interface LoadedVault {
     listing?: ReadOnlyDirectoryListing;
   };
   unsupportedReason?: string;
+}
+
+export function createEmptyVault(unsupportedReason?: string): LoadedVault {
+  return {
+    files: [],
+    sourceName: "未连接知识库",
+    sourceKind: "empty",
+    safetyManifest: buildSafetyManifest([]),
+    unsupportedReason
+  };
 }
 
 export interface StorageRoot {
@@ -184,7 +194,6 @@ export interface KnowledgeWorkspaceAdapter {
   listStorageRoots?(): Promise<StorageRoot[]> | StorageRoot[];
   listReadOnlyDirectory?(root: string, path: string): Promise<ReadOnlyDirectoryListing>;
   readReadOnlyFile?(root: string, path: string): Promise<ReadOnlyFilePreview>;
-  loadDemoVault(): LoadedVault;
   createVaultFolder?(folderName: string): Promise<LoadedVault>;
   createInterlinkedVault?(options: InterlinkedVaultRequest): Promise<LoadedVault>;
   createWordDocumentOnDesktop?(request: WordDocumentRequest): Promise<WordDocumentResult>;
@@ -304,11 +313,11 @@ export function removeAgentConversationSession<T extends { id: string; label: st
 }
 
 export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAdapter }) {
-  const initialVault = useMemo(() => adapter.loadDemoVault(), [adapter]);
-  const [files, setFiles] = useState<NoteFile[]>([]);
+  const initialVault = useMemo(() => createEmptyVault(), []);
+  const [files, setFiles] = useState<NoteFile[]>(initialVault.files);
   const [baseFiles, setBaseFiles] = useState<NoteFile[]>(initialVault.files);
-  const [sourceName, setSourceName] = useState("demo vault");
-  const [sourceKind, setSourceKind] = useState<SourceKind>("demo");
+  const [sourceName, setSourceName] = useState(initialVault.sourceName);
+  const [sourceKind, setSourceKind] = useState<SourceKind>(initialVault.sourceKind);
   const [currentPath, setCurrentPath] = useState("");
   const [centerMode, setCenterMode] = useState<CenterMode>("graph");
   const [editorMode, setEditorMode] = useState<EditorMode>("preview");
@@ -334,7 +343,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentKeyDialogOpen, setAgentKeyDialogOpen] = useState(false);
   const [agentKeyDialogDismissed, setAgentKeyDialogDismissed] = useState(false);
-  const [status, setStatus] = useState("Demo 已载入。真实 vault 只会在浏览器本地读取，不上传。");
+  const [status, setStatus] = useState("尚未连接知识库。请选择一个 Markdown 文件夹开始使用。");
   const [sourceSafety, setSourceSafety] = useState(initialVault.safetyManifest);
   const [leftVisible, setLeftVisible] = useState(true);
   const [noteFilter, setNoteFilter] = useState("");
@@ -509,7 +518,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         async run(input) {
           const { folderName, count, topic } = parseAgentToolArguments(input);
           if (sourceKindRef.current !== "desktop") {
-            return "A persistent local vault must be opened or created before generating a stress graph. Demo and read-only structure sources do not have a writable document folder.";
+            return "A persistent local vault must be opened or created before generating a stress graph. Empty and read-only structure sources do not have a writable document folder.";
           }
           const requestedFolder = normalizePath(String(folderName ?? "复杂关系图谱测试")).replace(/\/+$/g, "");
           if (!isVaultRelativeNotePath(`${requestedFolder}/index.md`)) {
@@ -678,12 +687,16 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     Promise.resolve(adapter.loadInitialVault())
       .then((vault) => {
         if (!cancelled) {
-          applyLoadedVault(vault, vault.unsupportedReason ?? "知识库已载入。");
+          const initialStatus = vault.sourceKind === "empty"
+            ? vault.unsupportedReason ?? "尚未连接知识库。请选择一个 Markdown 文件夹开始使用。"
+            : vault.unsupportedReason ?? "知识库已载入。";
+          applyLoadedVault(vault, initialStatus);
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          applyLoadedVault(adapter.loadDemoVault(), error instanceof Error ? error.message : "未能载入知识库，已切换到 Demo。");
+          const message = error instanceof Error ? error.message : "未能载入知识库。";
+          applyLoadedVault(createEmptyVault(message), message);
         }
       });
     return () => {
@@ -714,6 +727,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   useEffect(() => {
     if (
+      sourceKind !== "empty" &&
       sourceKind !== "structure" &&
       modelSettingsLoaded &&
       adapter.saveDeepSeekApiKey &&
@@ -786,7 +800,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const dirtyPaths = useMemo(() => draftChanges.map((change) => change.path), [draftChanges]);
   const dirtySafety = buildSafetyManifest(dirtyPaths);
   const directoryPickerAvailable = adapter.canOpenVault;
-  const sourceLabel = adapter.getSourceLabel?.(sourceKind) ?? (sourceKind === "demo" ? "Demo" : "本地 vault");
+  const sourceLabel = adapter.getSourceLabel?.(sourceKind) ?? (sourceKind === "empty" ? "未连接" : "本地 vault");
   const activeAgentSession = agentSessions.find((session) => session.id === activeAgentSessionId) ?? agentSessions[0];
   const activeAgentSessionKey = activeAgentSession?.id ?? "";
   const messages = activeAgentSession?.messages ?? [];
@@ -1154,12 +1168,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
   }
 
-  function useDemoVault() {
-    applyLoadedVault(adapter.loadDemoVault(), "已切换到 Demo。Demo 中的敏感路径会被安全规则排除。");
-    setStorageOpen(false);
-  }
-
   function createSessionNote() {
+    if (sourceKind === "empty") {
+      setStatus("请先打开或新建一个知识库文件夹，再创建文档。");
+      setStorageOpen(true);
+      return;
+    }
     if (isReadOnlyStructure) {
       setStatus("当前是只读磁盘结构模式，不能新建或修改本地文件。");
       return;
@@ -2128,7 +2142,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </button>
           ) : null}
           <span>{sourceLabel}</span>
-          <span>{sourceName}</span>
+          {sourceKind === "empty" ? null : <span>{sourceName}</span>}
         </div>
       </header>
 
@@ -2145,7 +2159,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           onOpen={openLocalVault}
           onReadStructure={openReadOnlyStructure}
           onReadRoot={openReadOnlyRoot}
-          onUseDemo={useDemoVault}
           roots={storageRoots}
           sourceLabel={sourceLabel}
           sourceName={sourceName}
@@ -2323,12 +2336,19 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{centerMode === "explorer" ? sourceName : currentPath.split("/").slice(0, -1).join(" / ") || "关系图谱"}</span>
-            <strong>{centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? (isReadOnlyStructure ? "只读文件浏览" : "资源查询") : leafName(currentPath)}</strong>
+            <span>{sourceKind === "empty" ? "开始" : centerMode === "explorer" ? sourceName : currentPath.split("/").slice(0, -1).join(" / ") || "关系图谱"}</span>
+            <strong>{sourceKind === "empty" ? "未连接知识库" : centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? (isReadOnlyStructure ? "只读文件浏览" : "资源查询") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{status}</div>
-        {centerMode === "graph" ? (
+        {sourceKind === "empty" ? (
+          <WorkspaceEmptyState
+            canCreate={Boolean(adapter.createVaultFolder)}
+            canOpen={adapter.canOpenVault}
+            onCreate={() => setStorageOpen(true)}
+            onOpen={() => void openLocalVault()}
+          />
+        ) : centerMode === "graph" ? (
           <div className="graph-workspace">
             <div className="graph-perspective-switch" aria-label="图谱观察方式" role="tablist">
               <button
@@ -2695,7 +2715,6 @@ interface StoragePanelProps {
   onOpen(): void;
   onReadStructure(): void;
   onReadRoot(root: string): void;
-  onUseDemo(): void;
   roots: StorageRoot[];
   sourceLabel: string;
   sourceName: string;
@@ -2713,7 +2732,6 @@ function StoragePanel({
   onOpen,
   onReadStructure,
   onReadRoot,
-  onUseDemo,
   roots,
   sourceLabel,
   sourceName
@@ -2773,10 +2791,6 @@ function StoragePanel({
           </div>
         </div>
 
-        <button disabled={busy} onClick={onUseDemo} type="button">
-          <BookOpen size={15} />
-          使用 Demo
-        </button>
       </section>
 
       <footer>
@@ -2981,6 +2995,41 @@ function IconButton({
     <button aria-label={label} className={active ? "icon-button active" : "icon-button"} onClick={onClick} title={label} type="button">
       {children}
     </button>
+  );
+}
+
+function WorkspaceEmptyState({
+  canCreate,
+  canOpen,
+  onCreate,
+  onOpen
+}: {
+  canCreate: boolean;
+  canOpen: boolean;
+  onCreate(): void;
+  onOpen(): void;
+}) {
+  return (
+    <section className="workspace-empty-state">
+      <div className="workspace-empty-icon" aria-hidden="true">
+        <FolderOpen size={24} />
+      </div>
+      <h1>连接你的知识库</h1>
+      <p>打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。</p>
+      <div className="workspace-empty-actions">
+        <button className="primary" disabled={!canOpen} onClick={onOpen} type="button">
+          <FolderOpen size={16} />
+          打开本地知识库
+        </button>
+        {canCreate ? (
+          <button onClick={onCreate} type="button">
+            <FilePlus2 size={16} />
+            新建知识库文件夹
+          </button>
+        ) : null}
+      </div>
+      <small>{canOpen ? "只有你主动选择的文件夹会被读取。" : "当前浏览器不支持文件夹选择器，请使用最新版 Chrome 或 Edge。"}</small>
+    </section>
   );
 }
 

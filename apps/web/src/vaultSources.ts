@@ -3,40 +3,23 @@ import {
   isMarkdownFile,
   normalizePath,
   safetyDecisionForPath,
-  type NoteFile,
-  type SafetyManifest
+  type NoteFile
 } from "@knowledge-agent/core";
-import { demoVaultFiles } from "@knowledge-agent/workspace";
+import { createEmptyVault, type LoadedVault } from "@knowledge-agent/workspace";
 import type { BrowserFileSystemDirectoryHandle, BrowserFileSystemFileHandle, DirectoryPickerWindow } from "./browserTypes";
-
-export interface LoadedVault {
-  files: NoteFile[];
-  sourceName: string;
-  sourceKind: "demo" | "browser-directory";
-  safetyManifest: SafetyManifest;
-  unsupportedReason?: string;
-}
 
 export function isDirectoryPickerSupported(win: Window = window): boolean {
   return typeof (win as DirectoryPickerWindow).showDirectoryPicker === "function";
 }
 
-export function loadDemoVault(): LoadedVault {
-  return {
-    files: filterSafeMarkdownFiles(demoVaultFiles),
-    sourceName: "个人知识库 Agent 演示库",
-    sourceKind: "demo",
-    safetyManifest: buildSafetyManifest(demoVaultFiles.map((file) => file.path))
-  };
+export function loadEmptyVault(): LoadedVault {
+  return createEmptyVault();
 }
 
 export async function loadBrowserDirectoryVault(win: Window = window): Promise<LoadedVault> {
   const picker = (win as DirectoryPickerWindow).showDirectoryPicker;
   if (!picker) {
-    return {
-      ...loadDemoVault(),
-      unsupportedReason: "当前浏览器不支持文件夹选择器，已切换到 demo vault。建议使用 Chrome 或 Edge。"
-    };
+    return createEmptyVault("当前浏览器不支持文件夹选择器。请使用最新版 Chrome 或 Edge。");
   }
 
   const root = await picker();

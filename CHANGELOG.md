@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.2 - 2026-07-15
+
+### Changed
+
+- Removed the bundled 36-note demonstration vault from the shared workspace package and all App/Web startup paths.
+- Replaced Demo fallback behavior with an explicit empty source containing zero notes and zero allowed files.
+- Added a focused first-run screen that asks the user to open or create a Markdown folder without implying any bundled content.
+- Rebuilt the public README around first-run privacy, real local-folder behavior, graph semantics, Agent permissions, recovery, and App/Web differences.
+- Replaced public screenshots with the current interface. Complex graph screenshots use a browser-memory external fixture that is never included in production bundles.
+
+### Fixed
+
+- New desktop installations no longer load fallback documents when no vault is configured or settings cannot be read.
+- Unsupported browsers remain empty and show a compatibility message instead of receiving fallback notes.
+- Empty startup no longer reports that a knowledge base has already loaded or repeats the disconnected source label.
+- API-key onboarding no longer opens before a real knowledge source is connected.
+
+### Verification
+
+- Added Web, shared-workspace, and Desktop adapter tests that require zero bundled notes at startup.
+- Public build checks now include source scans for removed Demo loaders and production-bundle scans for synthetic note titles.
+
 ## 0.2.1 - 2026-07-15
 
 ### Improved

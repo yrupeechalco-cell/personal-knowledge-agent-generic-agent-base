@@ -77,7 +77,7 @@ Both Desktop and Web inject a `KnowledgeWorkspaceAdapter`:
 
 - `loadInitialVault`
 - `openVault`
-- `loadDemoVault`
+- empty startup source (zero bundled notes)
 - `writeChanges`
 - `getSourceLabel`
 

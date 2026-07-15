@@ -1,7 +1,6 @@
-import { buildVaultGraph, buildVaultIndex, type NoteFile } from "@knowledge-agent/core";
-import { buildKnowledgeRoleModel } from "@knowledge-agent/workspace";
+import { type NoteFile } from "@knowledge-agent/core";
 import { describe, expect, it } from "vitest";
-import { filterSafeMarkdownFiles, isDirectoryPickerSupported, loadDemoVault } from "./vaultSources";
+import { filterSafeMarkdownFiles, isDirectoryPickerSupported, loadBrowserDirectoryVault, loadEmptyVault } from "./vaultSources";
 
 describe("web vault sources", () => {
   it("filters non-markdown and sensitive paths before indexing", () => {
@@ -16,28 +15,21 @@ describe("web vault sources", () => {
     expect(filterSafeMarkdownFiles(files).map((file) => file.path)).toEqual(["Inbox/Idea.md"]);
   });
 
-  it("ships only safe public files in the built-in demo", () => {
-    const vault = loadDemoVault();
+  it("starts without any built-in notes", () => {
+    const vault = loadEmptyVault();
 
-    expect(vault.files).toHaveLength(36);
-    expect(vault.safetyManifest.allowed).toHaveLength(36);
+    expect(vault.sourceKind).toBe("empty");
+    expect(vault.files).toHaveLength(0);
+    expect(vault.safetyManifest.allowed).toHaveLength(0);
     expect(vault.safetyManifest.excluded).toHaveLength(0);
   });
 
-  it("ships a dense demo graph with cross-linked topic clusters", () => {
-    const vault = loadDemoVault();
-    const index = buildVaultIndex(vault.files);
-    const graph = buildVaultGraph(index);
-    const roleModel = buildKnowledgeRoleModel(index);
+  it("keeps an unsupported browser empty instead of injecting fallback documents", async () => {
+    const vault = await loadBrowserDirectoryVault({} as Window);
 
-    expect(index.notes).toHaveLength(36);
-    expect(graph.nodes).toHaveLength(36);
-    expect(graph.edges.length).toBeGreaterThanOrEqual(110);
-    expect(new Set(index.notes.map((note) => note.path.split("/")[0]))).toHaveLength(12);
-    expect(roleModel.domains).toHaveLength(12);
-    expect(roleModel.domainRelations).toHaveLength(36);
-    expect(index.backlinks.get("08-生态网络/生态网络-关键节点.md")?.length).toBeGreaterThanOrEqual(3);
-    expect(index.unresolvedLinks.some((edge) => edge.target.includes("共识边界"))).toBe(true);
+    expect(vault.sourceKind).toBe("empty");
+    expect(vault.files).toEqual([]);
+    expect(vault.unsupportedReason).toContain("不支持文件夹选择器");
   });
 
   it("detects browser directory picker support from the supplied window object", () => {

@@ -2,18 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { ModelRequest, ModelTurnResponse } from "@knowledge-agent/agent";
 import { buildSafetyManifest, type NoteFile } from "@knowledge-agent/core";
-import type {
-  DraftChange,
-  KnowledgeWorkspaceAdapter,
-  LoadedVault,
-  ModelConnectionSettings,
-  ReadOnlyDirectoryListing,
-  ReadOnlyFilePreview,
-  StorageRoot,
-  TrashEntry,
-  WriteChangesResult
+import {
+  createEmptyVault,
+  type DraftChange,
+  type KnowledgeWorkspaceAdapter,
+  type LoadedVault,
+  type ModelConnectionSettings,
+  type ReadOnlyDirectoryListing,
+  type ReadOnlyFilePreview,
+  type StorageRoot,
+  type TrashEntry,
+  type WriteChangesResult
 } from "@knowledge-agent/workspace";
-import { demoVaultFiles } from "@knowledge-agent/workspace";
 
 interface AppSettings {
   vaultPath?: string;
@@ -40,15 +40,9 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
         if (settings.vaultPath) {
           return await loadVault(settings.vaultPath);
         }
-        return {
-          ...loadDesktopDemoVault(),
-          unsupportedReason: "请选择一个本地知识库文件夹；桌面端会记住上次路径。"
-        };
+        return createEmptyVault("请选择一个本地知识库文件夹；桌面端会记住上次路径。");
       } catch (error) {
-        return {
-          ...loadDesktopDemoVault(),
-          unsupportedReason: `桌面设置暂不可用，已载入 Demo：${String(error)}`
-        };
+        return createEmptyVault(`桌面设置暂不可用：${String(error)}`);
       }
     },
     async openVault() {
@@ -102,7 +96,6 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       const path = await invoke<string>("create_word_document_on_desktop", { name: request.name });
       return { path };
     },
-    loadDemoVault: loadDesktopDemoVault,
     async watchVault(onChange) {
       if (!activeVaultPath) return () => undefined;
       const watchedRoot = activeVaultPath;
@@ -169,7 +162,7 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
     getSourceLabel(sourceKind) {
       if (sourceKind === "desktop") return "桌面 vault";
       if (sourceKind === "structure") return "只读磁盘结构";
-      return "Demo";
+      return sourceKind === "empty" ? "未连接" : "本地知识库";
     }
   };
 }
@@ -188,15 +181,6 @@ async function loadReadOnlyRoot(root: string): Promise<LoadedVault> {
       truncated: listing.truncated,
       listing
     }
-  };
-}
-
-function loadDesktopDemoVault(): LoadedVault {
-  return {
-    files: demoVaultFiles,
-    sourceName: "个人知识库 Agent 演示库",
-    sourceKind: "demo",
-    safetyManifest: buildSafetyManifest(demoVaultFiles.map((file) => file.path))
   };
 }
 
