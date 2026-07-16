@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.4 - 2026-07-16
+
+### Fixed
+
+- Fixed the Windows updater manifest workflow so multiple release installers can never be concatenated into one invalid download URL.
+- Matched the selected installer to the manifest's actual signature instead of relying on ambiguous release asset ordering.
+- Repaired the published `v0.2.3` manifest immediately, allowing existing clients to retry without waiting for this release.
+- Separated update-check failures from update-installation failures and made installation errors retry the same signed update.
+- Preserved string and object error details so the update window reports the real failure instead of a generic fallback.
+
+### Verification
+
+- Added release-manifest regression tests for exact URLs, whitespace rejection, and required signatures.
+- Added a desktop updater regression test for installation failure, visible diagnostics, and successful retry.
+
 ## 0.2.3 - 2026-07-16
 
 ### Added

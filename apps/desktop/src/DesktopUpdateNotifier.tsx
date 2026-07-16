@@ -9,7 +9,7 @@ type UpdateState =
   | { status: "available"; update: Update }
   | { status: "downloading"; update: Update; progress: number | null }
   | { status: "ready"; version: string }
-  | { status: "error"; message: string };
+  | { status: "error"; phase: "check" | "install"; message: string; update?: Update };
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const SNOOZE_MS = 6 * 60 * 60 * 1000;
@@ -17,11 +17,19 @@ let startupCheck: Promise<Update | null> | null = null;
 
 function checkOnce() {
   startupCheck ??= check({ timeout: 15_000 });
-  return startupCheck.finally(() => {
-    window.setTimeout(() => {
-      startupCheck = null;
-    }, 1_000);
+  const currentCheck = startupCheck;
+  return currentCheck.finally(() => {
+    if (startupCheck === currentCheck) startupCheck = null;
   });
+}
+
+export function updateErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+  return fallback;
 }
 
 function progressFromEvent(
@@ -68,7 +76,8 @@ export function DesktopUpdateNotifier() {
       if (!quiet) {
         setState({
           status: "error",
-          message: error instanceof Error ? error.message : t("暂时无法检查更新")
+          phase: "check",
+          message: updateErrorMessage(error, t("暂时无法检查更新"))
         });
       }
     }
@@ -93,9 +102,12 @@ export function DesktopUpdateNotifier() {
       });
       setState({ status: "ready", version: update.version });
     } catch (error) {
+      console.warn("Update installation failed", error);
       setState({
         status: "error",
-        message: error instanceof Error ? error.message : t("更新安装失败，请稍后再试")
+        phase: "install",
+        message: updateErrorMessage(error, t("更新安装失败，请稍后再试")),
+        update
       });
     }
   }, [t]);
@@ -104,11 +116,13 @@ export function DesktopUpdateNotifier() {
 
   const update = state.status === "available" || state.status === "downloading"
     ? state.update
+    : state.status === "error"
+      ? state.update ?? null
     : null;
   const title = state.status === "ready"
     ? locale === "en" ? `v${state.version} installed` : `v${state.version} 已安装`
     : state.status === "error"
-      ? t("更新检查未完成")
+      ? state.phase === "install" ? t("更新安装失败") : t("更新检查失败")
       : locale === "en" ? `Version v${update?.version} is available` : `发现新版本 v${update?.version}`;
 
   return (
@@ -162,8 +176,14 @@ export function DesktopUpdateNotifier() {
             </>
           )}
           {state.status === "error" && (
-            <button className="desktop-update-primary" type="button" onClick={() => void runCheck(false)}>
-              <RefreshCw size={16} />{t("重新检查")}
+            <button
+              className="desktop-update-primary"
+              type="button"
+              onClick={() => state.phase === "install" && state.update
+                ? void install(state.update)
+                : void runCheck(false)}
+            >
+              <RefreshCw size={16} />{state.phase === "install" ? t("重试安装") : t("重新检查")}
             </button>
           )}
           {state.status === "ready" && (

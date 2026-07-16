@@ -46,4 +46,35 @@ describe("DesktopUpdateNotifier", () => {
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
     expect(screen.getByText("v0.2.1 已安装")).toBeTruthy();
   });
+
+  it("keeps an install error distinct and retries the same update", async () => {
+    const downloadAndInstall = vi
+      .fn()
+      .mockRejectedValueOnce("Updater URL contains two installer names")
+      .mockResolvedValueOnce(undefined);
+    checkMock.mockResolvedValue({
+      version: "0.2.4",
+      body: "Updater repair",
+      downloadAndInstall
+    });
+
+    render(<DesktopUpdateNotifier />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    });
+
+    expect(screen.getByText("更新安装失败")).toBeTruthy();
+    expect(screen.getByText("Updater URL contains two installer names")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "重试安装" }));
+    });
+
+    expect(downloadAndInstall).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("v0.2.4 已安装")).toBeTruthy();
+  });
 });

@@ -69,8 +69,15 @@ jobs:
           $dir = ".artifacts/release-$version"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           gh release download $tag --pattern latest.json --dir $dir --clobber
-          $installer = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("-setup.exe")) | .name'
-          if (-not $installer) { throw "Published installer asset was not found." }
+          gh release download $tag --pattern "*.exe.sig" --dir $dir --clobber
+          $manifest = Get-Content -LiteralPath "$dir/latest.json" -Raw | ConvertFrom-Json
+          $expectedSignatures = @($manifest.platforms.PSObject.Properties.Value.signature | Sort-Object -Unique)
+          if ($expectedSignatures.Count -ne 1) { throw "Updater manifest must use one Windows installer signature." }
+          $matchingSignatures = @(Get-ChildItem -LiteralPath $dir -Filter "*.exe.sig" | Where-Object {
+            (Get-Content -LiteralPath $_.FullName -Raw).Trim() -eq $expectedSignatures[0]
+          })
+          if ($matchingSignatures.Count -ne 1) { throw "Could not uniquely match the updater manifest to one signed installer asset." }
+          $installer = $matchingSignatures[0].Name -replace '\.sig$', ''
           $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$installer"
           node scripts/normalize-release-manifest.mjs "$dir/latest.json" $downloadUrl
           gh release upload $tag "$dir/latest.json" --clobber
