@@ -1,5 +1,9 @@
 # 个人知识库 Agent
 
+**文档语言：** [简体中文](README.md) | [English](README_EN.md)
+
+## 中文介绍
+
 个人知识库 Agent 是一款本地优先的 Windows 知识库应用。它直接使用普通 Markdown 文件夹，把文件管理、知识关系、笔记阅读编辑和 AI Agent 放在同一个三栏工作台中。
 
 它借鉴了 Obsidian 的双链、图谱和本地文件理念，但与 Obsidian 相互独立。应用不要求专用数据库，也不会把笔记锁进私有格式。已有 Markdown 文件夹或 Obsidian vault 可以直接打开；离开本应用后，所有内容仍然是用户自己拥有的普通文件。
@@ -207,7 +211,7 @@ App 和 Web 使用同一个 React 工作台、同一套图谱、文件树和 Age
 4. 点击“打开官方示例知识库”可查看独立维护的复杂网络研究示例。
 5. 页面关闭后本地授权与内存索引随浏览器会话结束，不会变成网站预置内容。
 
-完整操作细节见[使用指南](docs/USAGE_GUIDE.md)，安装与数据边界见[隐私说明](docs/AGENT_INSTALL_AND_PRIVACY.md)。
+完整操作细节见[中文使用指南](docs/USAGE_GUIDE.md)或[English User Guide](docs/USAGE_GUIDE_EN.md)，安装与数据边界见[隐私说明](docs/AGENT_INSTALL_AND_PRIVACY.md)。
 
 ## 当前范围
 

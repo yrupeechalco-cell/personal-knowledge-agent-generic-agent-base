@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import type { GraphEdge, GraphNode, NoteGraph } from "@knowledge-agent/core";
+import { useLocalization } from "./localization";
 
 interface SimNode extends GraphNode {
   x: number;
@@ -80,6 +81,7 @@ export function StarGraph({
   showSecondHop = true,
   viewport: controlledViewport
 }: StarGraphProps) {
+  const { t } = useLocalization();
   const initialViewport = controlledViewport ?? DEFAULT_VIEWPORT;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const trashRef = useRef<HTMLButtonElement | null>(null);
@@ -549,14 +551,14 @@ export function StarGraph({
       </svg>
       {onDelete ? (
         <button
-          aria-label="拖拽图谱节点到这里删除"
+          aria-label={t("拖拽图谱节点到这里删除")}
           className={trashArmed || selectedPaths.length > 0 ? "graph-trash active" : "graph-trash"}
           disabled={selectedPaths.length > 0 && !onDeleteMany}
           onClick={() => {
             if (selectedPaths.length > 0) onDeleteMany?.(selectedPaths);
           }}
           ref={trashRef}
-          title={selectedPaths.length > 0 ? `删除已框选的 ${selectedPaths.length} 个文档` : "将单个图谱节点拖到这里删除"}
+          title={selectedPaths.length > 0 ? `${t("删除")} ${selectedPaths.length} ${t("文档")}` : t("将单个图谱节点拖到这里删除")}
           type="button"
         >
           <svg aria-hidden="true" className="graph-trash-icon" fill="none" height="14" viewBox="0 0 24 24" width="14">

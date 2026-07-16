@@ -1,4 +1,5 @@
 import { KnowledgeWorkspace, type KnowledgeWorkspaceAdapter } from "@knowledge-agent/workspace";
+import { LanguageProvider } from "@knowledge-agent/ui";
 import {
   githubRepositorySlug,
   loadPublicGitHubVault,
@@ -42,5 +43,9 @@ function clearRepositoryQuery() {
 }
 
 export function KnowledgeAgentWebApp() {
-  return <KnowledgeWorkspace adapter={webWorkspaceAdapter} />;
+  return (
+    <LanguageProvider>
+      <KnowledgeWorkspace adapter={webWorkspaceAdapter} />
+    </LanguageProvider>
+  );
 }

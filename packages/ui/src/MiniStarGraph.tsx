@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { GraphEdge, GraphNode, NoteGraph } from "@knowledge-agent/core";
+import { useLocalization } from "./localization";
 
 interface PositionedMiniNode extends GraphNode {
   x: number;
@@ -17,6 +18,7 @@ const CENTER = { x: MINI_VIEWBOX.width / 2, y: 66 };
 const MAX_RELATED_NODES = 18;
 
 export function MiniStarGraph({ graph, currentPath, onSelect }: MiniStarGraphProps) {
+  const { t } = useLocalization();
   const [hoveredId, setHoveredId] = useState<string | undefined>();
   const layout = useMemo(() => layoutMiniGraph(graph, currentPath), [graph, currentPath]);
   const adjacency = useMemo(() => buildAdjacency(layout.edges), [layout.edges]);
@@ -24,7 +26,7 @@ export function MiniStarGraph({ graph, currentPath, onSelect }: MiniStarGraphPro
   if (layout.nodes.length === 0) return null;
 
   return (
-    <aside className="mini-graph-panel" aria-label="当前笔记关系小图">
+    <aside className="mini-graph-panel" aria-label={t("当前笔记关系小图")}>
       <svg viewBox={`0 0 ${MINI_VIEWBOX.width} ${MINI_VIEWBOX.height}`} role="img">
         {layout.edges.map((edge, index) => {
           const source = layout.nodeById.get(edge.source);
@@ -58,7 +60,7 @@ export function MiniStarGraph({ graph, currentPath, onSelect }: MiniStarGraphPro
               <circle className="mini-graph-hitbox" cx={node.x} cy={node.y} r={current ? 18 : 14} />
               <circle className="mini-graph-dot" cx={node.x} cy={node.y} r={current ? 7 : node.depth === 1 ? 5 : 4} />
               {unresolved ? <circle className="mini-graph-unresolved-ring" cx={node.x} cy={node.y} r={node.depth === 1 ? 8 : 7} /> : null}
-              <title>{unresolved ? `待创建：${node.label}` : node.label}</title>
+              <title>{unresolved ? `${t("待创建")}: ${node.label}` : node.label}</title>
               {directlyInvolved || hoveredId === node.id ? (
                 <text x={node.x} y={node.y + (current ? 20 : 16)}>
                   {shortLabel(node.label)}

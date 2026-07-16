@@ -1,6 +1,6 @@
 [package]
 name = "knowledge-agent-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "Personal knowledge base Agent desktop shell"
 edition = "2021"
 

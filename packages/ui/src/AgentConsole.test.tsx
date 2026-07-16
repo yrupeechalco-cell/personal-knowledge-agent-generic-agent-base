@@ -4,6 +4,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentConsole } from "./AgentConsole";
+import { LanguageProvider } from "./localization";
 
 afterEach(() => cleanup());
 
@@ -117,6 +118,24 @@ describe("AgentConsole", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "切换到子 Agent 2" }));
     expect(onDeleteSession).toHaveBeenCalledWith("agent-2");
     expect(onSelectSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the Agent controls in English when the workspace language is English", () => {
+    render(
+      <LanguageProvider initialLocale="en">
+        {baseAgentConsole({
+          settingsOpen: true,
+          selectedModel: "deepseek-v4-pro",
+          selectedAgentMode: "daily",
+          modelOptions: [{ value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }],
+          agentModeOptions: [{ value: "daily", label: "Daily note Agent" }]
+        })}
+      </LanguageProvider>
+    );
+
+    expect(screen.getByRole("dialog", { name: "Agent settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New sub-agent" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Model connection status" })).toBeTruthy();
   });
 });
 

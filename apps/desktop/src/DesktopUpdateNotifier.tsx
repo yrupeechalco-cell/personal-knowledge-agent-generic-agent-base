@@ -2,6 +2,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { Download, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useLocalization } from "@knowledge-agent/ui";
 
 type UpdateState =
   | { status: "idle" | "checking" }
@@ -43,6 +44,7 @@ function progressFromEvent(
 }
 
 export function DesktopUpdateNotifier() {
+  const { locale, t } = useLocalization();
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const snoozed = useRef<{ version: string; until: number } | null>(null);
   const downloaded = useRef(0);
@@ -66,11 +68,11 @@ export function DesktopUpdateNotifier() {
       if (!quiet) {
         setState({
           status: "error",
-          message: error instanceof Error ? error.message : "暂时无法检查更新"
+          message: error instanceof Error ? error.message : t("暂时无法检查更新")
         });
       }
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -93,10 +95,10 @@ export function DesktopUpdateNotifier() {
     } catch (error) {
       setState({
         status: "error",
-        message: error instanceof Error ? error.message : "更新安装失败，请稍后再试"
+        message: error instanceof Error ? error.message : t("更新安装失败，请稍后再试")
       });
     }
-  }, []);
+  }, [t]);
 
   if (state.status === "idle" || state.status === "checking") return null;
 
@@ -104,10 +106,10 @@ export function DesktopUpdateNotifier() {
     ? state.update
     : null;
   const title = state.status === "ready"
-    ? `v${state.version} 已安装`
+    ? locale === "en" ? `v${state.version} installed` : `v${state.version} 已安装`
     : state.status === "error"
-      ? "更新检查未完成"
-      : `发现新版本 v${update?.version}`;
+      ? t("更新检查未完成")
+      : locale === "en" ? `Version v${update?.version} is available` : `发现新版本 v${update?.version}`;
 
   return (
     <div className="desktop-update-layer" role="presentation">
@@ -115,7 +117,7 @@ export function DesktopUpdateNotifier() {
         <button
           className="desktop-update-close"
           type="button"
-          aria-label="稍后提醒"
+          aria-label={t("稍后提醒")}
           onClick={() => {
             if (update) snoozed.current = { version: update.version, until: Date.now() + SNOOZE_MS };
             setState({ status: "idle" });
@@ -128,17 +130,17 @@ export function DesktopUpdateNotifier() {
           <span className="desktop-update-kicker">Knowledge Agent Update</span>
           <h2 id="desktop-update-title">{title}</h2>
           {state.status === "available" && (
-            <p>{update?.body?.trim() || "包含最新功能、体验改进与问题修复。"}</p>
+            <p>{update?.body?.trim() || t("包含最新功能、体验改进与问题修复。")}</p>
           )}
           {state.status === "downloading" && (
             <>
-              <p>{state.progress === null ? "正在下载安装包…" : `正在下载安装包 ${state.progress}%`}</p>
-              <div className="desktop-update-progress" aria-label="更新下载进度">
+              <p>{state.progress === null ? t("正在下载安装包…") : locale === "en" ? `Downloading update ${state.progress}%` : `正在下载安装包 ${state.progress}%`}</p>
+              <div className="desktop-update-progress" aria-label={t("更新下载进度")}>
                 <span style={{ width: `${state.progress ?? 18}%` }} />
               </div>
             </>
           )}
-          {state.status === "ready" && <p>更新将在应用重新启动后完整生效。</p>}
+          {state.status === "ready" && <p>{t("更新将在应用重新启动后完整生效。")}</p>}
           {state.status === "error" && <p>{state.message}</p>}
         </div>
         <div className="desktop-update-actions">
@@ -152,21 +154,21 @@ export function DesktopUpdateNotifier() {
                   setState({ status: "idle" });
                 }}
               >
-                稍后
+                {t("稍后")}
               </button>
               <button className="desktop-update-primary" type="button" onClick={() => void install(state.update)}>
-                <Download size={16} />立即更新
+                <Download size={16} />{t("立即更新")}
               </button>
             </>
           )}
           {state.status === "error" && (
             <button className="desktop-update-primary" type="button" onClick={() => void runCheck(false)}>
-              <RefreshCw size={16} />重新检查
+              <RefreshCw size={16} />{t("重新检查")}
             </button>
           )}
           {state.status === "ready" && (
             <button className="desktop-update-primary" type="button" onClick={() => setState({ status: "idle" })}>
-              知道了
+              {t("知道了")}
             </button>
           )}
         </div>

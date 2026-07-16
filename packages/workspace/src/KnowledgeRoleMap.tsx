@@ -3,6 +3,7 @@ import { ArrowLeft, Orbit, Sparkles } from "lucide-react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { VaultIndex } from "@knowledge-agent/core";
+import { useLocalization } from "@knowledge-agent/ui";
 import {
   buildKnowledgeRoleModel,
   type KnowledgeContribution,
@@ -42,6 +43,7 @@ interface InkDomainNode {
 }
 
 export function KnowledgeRoleMap({ index, onSelectNote }: KnowledgeRoleMapProps) {
+  const { t } = useLocalization();
   const model = useMemo(() => buildKnowledgeRoleModel(index), [index]);
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const selectedDomain = model.domains.find((domain) => domain.id === selectedDomainId);
@@ -56,8 +58,8 @@ export function KnowledgeRoleMap({ index, onSelectNote }: KnowledgeRoleMapProps)
     return (
       <div className="knowledge-empty">
         <Orbit size={28} />
-        <strong>知识地形尚未形成</strong>
-        <span>当前知识库没有可分析的 Markdown 文档。</span>
+        <strong>{t("知识地形尚未形成")}</strong>
+        <span>{t("当前知识库没有可分析的 Markdown 文档。")}</span>
       </div>
     );
   }
@@ -77,6 +79,7 @@ export function KnowledgeRoleMap({ index, onSelectNote }: KnowledgeRoleMapProps)
 }
 
 function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRoleModel; onSelectDomain(id: string): void }) {
+  const { runtime, t } = useLocalization();
   const sceneHostRef = useRef<HTMLDivElement | null>(null);
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
   const [hoveredDomainId, setHoveredDomainId] = useState<string | null>(null);
@@ -329,19 +332,19 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
   }, [model, onSelectDomain]);
 
   return (
-    <section className="knowledge-terrain" aria-label="宏观知识地形">
+    <section className="knowledge-terrain" aria-label={t("宏观知识地形")}>
       <div className="knowledge-terrain-scene" ref={sceneHostRef} />
       <div className="knowledge-label-layer" ref={labelLayerRef} />
       <header className="knowledge-map-heading">
-        <span><Sparkles size={13} /> 知识作用图谱</span>
-        <strong>宏观知识地形</strong>
-        <small>{model.domains.length} 个领域 · {model.domainRelations.length} 条跨域依据</small>
+        <span><Sparkles size={13} /> {t("知识作用图谱")}</span>
+        <strong>{t("宏观知识地形")}</strong>
+        <small>{runtime(`${model.domains.length} 个领域 · ${model.domainRelations.length} 条跨域依据`)}</small>
       </header>
-      <div className="knowledge-legend" aria-label="知识领域类型">
-        <span><i className="project" />项目</span>
-        <span><i className="topic" />专题</span>
-        <span><i className="method" />方法</span>
-        <span><i className="archive" />资料</span>
+      <div className="knowledge-legend" aria-label={t("知识领域类型")}>
+        <span><i className="project" />{t("项目")}</span>
+        <span><i className="topic" />{t("专题")}</span>
+        <span><i className="method" />{t("方法")}</span>
+        <span><i className="archive" />{t("资料")}</span>
       </div>
       {hoveredDomain ? <DomainInsight domain={hoveredDomain} /> : null}
     </section>
@@ -359,6 +362,7 @@ function DomainRootMap({
   onBack(): void;
   onSelectNote(path: string): void;
 }) {
+  const { runtime, t } = useLocalization();
   const contributions = domain.contributions.slice(0, 12);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const positions = useMemo(() => contributionPositions(contributions), [contributions]);
@@ -379,20 +383,20 @@ function DomainRootMap({
   }, [hoveredPath, relations]);
 
   return (
-    <section className="knowledge-root-map" aria-label={`${domain.label} 知识根系`}>
+    <section className="knowledge-root-map" aria-label={`${domain.label} ${t("知识根系")}`}>
       <header className="knowledge-root-heading">
-        <button onClick={onBack} title="返回宏观知识地形" type="button"><ArrowLeft size={16} /></button>
+        <button onClick={onBack} title={t("返回宏观知识地形")} type="button"><ArrowLeft size={16} /></button>
         <div>
-          <span>{domainKindLabel(domain.kind)} · 关系置信度 {Math.round(domain.confidence * 100)}%</span>
+          <span>{t(domainKindLabel(domain.kind))} · {t("关系置信度")} {Math.round(domain.confidence * 100)}%</span>
           <strong>{domain.label}</strong>
         </div>
         <div className="knowledge-root-score">
-          <small>领域影响</small>
+          <small>{t("领域影响")}</small>
           <b>{Math.round(domain.importance * 100)}</b>
         </div>
       </header>
 
-      <svg className="knowledge-root-canvas" viewBox="0 0 980 620" role="img" aria-label={`${domain.label} 的问题、证据、决策与成果根系`}>
+      <svg className="knowledge-root-canvas" viewBox="0 0 980 620" role="img" aria-label={`${domain.label} ${t("知识根系")}`}>
         <g className="knowledge-root-trunk">
           {[...rolePositions.entries()].map(([role, position]) => (
             <path d={`M 126 310 C 210 310, 220 ${position.y}, ${position.x - 26} ${position.y}`} key={role} />
@@ -426,7 +430,7 @@ function DomainRootMap({
               })}
               <g className={`knowledge-role-node role-${role}`} transform={`translate(${rolePosition.x} ${rolePosition.y})`}>
                 <circle r="18" />
-                <text y="4">{ROLE_LABELS[role]}</text>
+                <text y="4">{t(ROLE_LABELS[role])}</text>
               </g>
             </g>
           ))}
@@ -436,7 +440,7 @@ function DomainRootMap({
           <circle r="48" />
           <circle className="root-ring" r="60" />
           <text y="-4">{trimLabel(domain.label, 10)}</text>
-          <text className="root-count" y="16">{domain.notePaths.length} 篇</text>
+          <text className="root-count" y="16">{runtime(`${domain.notePaths.length} 篇`)}</text>
         </g>
 
         <g className="knowledge-contribution-nodes">
@@ -466,8 +470,8 @@ function DomainRootMap({
       </svg>
 
       <div className="knowledge-relation-key">
-        <span><i className="solid" />原文双链</span>
-        <span><i className="dashed" />待确认关联</span>
+        <span><i className="solid" />{t("原文双链")}</span>
+        <span><i className="dashed" />{t("待确认关联")}</span>
       </div>
       {hoveredContribution ? <ContributionInsight contribution={hoveredContribution} /> : null}
     </section>
@@ -475,28 +479,30 @@ function DomainRootMap({
 }
 
 function DomainInsight({ domain }: { domain: KnowledgeDomain }) {
+  const { runtime, t } = useLocalization();
   const leading = domain.contributions[0];
   return (
     <aside className="knowledge-insight domain-insight">
-      <span>{domainKindLabel(domain.kind)}</span>
+      <span>{t(domainKindLabel(domain.kind))}</span>
       <strong>{domain.label}</strong>
-      <p>{domain.notePaths.length} 篇文档 · 影响 {Math.round(domain.importance * 100)} · 依据置信度 {Math.round(domain.confidence * 100)}%</p>
-      {leading ? <small>当前核心：{leading.title}</small> : null}
+      <p>{runtime(`${domain.notePaths.length} 篇文档 · 影响 ${Math.round(domain.importance * 100)} · 依据置信度 ${Math.round(domain.confidence * 100)}%`)}</p>
+      {leading ? <small>{runtime(`当前核心：${leading.title}`)}</small> : null}
     </aside>
   );
 }
 
 function ContributionInsight({ contribution }: { contribution: KnowledgeContribution }) {
+  const { runtime, t } = useLocalization();
   return (
     <aside className="knowledge-insight contribution-insight">
-      <span>{ROLE_LABELS[contribution.role]} · 相对贡献 {Math.round(contribution.score * 100)}</span>
+      <span>{t(ROLE_LABELS[contribution.role])} · {t("相对贡献")} {Math.round(contribution.score * 100)}</span>
       <strong>{contribution.title}</strong>
-      <p>{contribution.explanation}</p>
+      <p>{runtime(contribution.explanation)}</p>
       <div className="contribution-metrics">
-        <Metric label="结构" value={contribution.structural} />
-        <Metric label="项目" value={contribution.projectUse} />
-        <Metric label="证据" value={contribution.evidence} />
-        <Metric label="独特" value={contribution.uniqueness} />
+        <Metric label={t("结构")} value={contribution.structural} />
+        <Metric label={t("项目")} value={contribution.projectUse} />
+        <Metric label={t("证据")} value={contribution.evidence} />
+        <Metric label={t("独特")} value={contribution.uniqueness} />
       </div>
     </aside>
   );

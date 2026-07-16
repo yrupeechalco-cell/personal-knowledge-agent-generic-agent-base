@@ -177,6 +177,33 @@ body.resizing-columns {
   white-space: nowrap;
 }
 
+.language-switch {
+  align-items: center;
+  background: #292929;
+  border: 1px solid #454545;
+  border-radius: 5px;
+  color: #d8d8dc;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  height: 26px;
+  justify-content: center;
+  min-width: 48px;
+  padding: 0 7px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.language-switch:hover {
+  background: #343434;
+  border-color: #68578b;
+  color: #ffffff;
+}
+
+.language-switch span {
+  overflow: visible;
+}
+
 .changes-pill {
   background: #242424;
   border: 1px solid #424242;

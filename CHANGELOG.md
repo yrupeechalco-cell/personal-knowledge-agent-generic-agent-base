@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 - 2026-07-16
 
 ### Added
 
+- Added a complete Chinese/English workspace language system shared by the Web App and Windows App, with browser-language detection, a persistent language switch, and URL overrides through `?lang=en` or `?lang=zh`.
+- Added English product documentation and an English user guide while keeping the Chinese and English introductions clearly separated.
+- Added localized graph terminology, Agent controls, storage panels, Trash details, safety summaries, live context labels, and desktop update dialogs.
 - Added a read-only Web data source for public GitHub Markdown repositories using the repository default branch.
 - Added repository URL parsing, GitHub API error handling, safety filtering, bounded concurrent Markdown loading, and browser memory limits.
 - Added an optional one-click public example source while preserving the zero-content first-run contract.
@@ -16,6 +19,11 @@
 - Sensitive paths continue to be excluded before Markdown content is fetched.
 - Static manifests are validated for version, Markdown-only paths, duplicates, declared sizes, actual response sizes, file count, and total byte limits.
 - Private repositories are not requested; authenticated GitHub write access remains outside the current release.
+
+### Verification
+
+- Added localization tests for language priority, browser defaults, static labels, and dynamic graph summaries.
+- Added an English Agent interface regression test and a real-browser DOM check for the empty English workspace.
 
 ## 0.2.2 - 2026-07-15
 

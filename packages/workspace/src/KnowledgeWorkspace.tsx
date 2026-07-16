@@ -20,7 +20,7 @@ import {
   type ParsedNote,
   type SafetyManifest
 } from "@knowledge-agent/core";
-import { AgentConsole, FileTree, NoteEditor, StarGraph, type FileTreeFolder, type Viewport } from "@knowledge-agent/ui";
+import { AgentConsole, FileTree, NoteEditor, StarGraph, useLocalization, type FileTreeFolder, type Viewport } from "@knowledge-agent/ui";
 import {
   ArrowUp,
   BookOpen,
@@ -35,6 +35,7 @@ import {
   FolderOpen,
   GitBranch,
   HardDrive,
+  Languages,
   Network,
   PanelLeft,
   Search,
@@ -315,6 +316,7 @@ export function removeAgentConversationSession<T extends { id: string; label: st
 }
 
 export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAdapter }) {
+  const { locale, runtime, setLocale, t } = useLocalization();
   const initialVault = useMemo(() => createEmptyVault(), []);
   const [files, setFiles] = useState<NoteFile[]>(initialVault.files);
   const [baseFiles, setBaseFiles] = useState<NoteFile[]>(initialVault.files);
@@ -393,6 +395,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const agentModelOptions = adapter.runModel
     ? AGENT_MODEL_OPTIONS
     : [{ value: "offline", label: "Offline tools", description: "仅使用本地笔记工具，不调用在线模型。" }];
+  const localizedAgentModelOptions = agentModelOptions.map((option) => ({
+    ...option,
+    description: option.description ? t(option.description) : option.description
+  }));
+  const localizedAgentModeOptions = AGENT_MODE_OPTIONS.map((option) => ({
+    ...option,
+    label: t(option.label),
+    description: option.description ? t(option.description) : option.description
+  }));
 
   async function writeApprovedAgentChanges(changes: DraftChange[]): Promise<WriteChangesResult | null> {
     const approval = agentMutationApprovalRef.current;
@@ -1599,7 +1610,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setAgentSessionRunning(sessionId, true);
     agentMutationApprovalRef.current = agentMutationApprovalFor(input);
     try {
-      const result = await agent.run(input, { currentPath, files, index, messages: [...messages, userMessage], pinnedPaths: agentPinnedPaths });
+      const agentInput = locale === "en"
+        ? `Response language: English. Keep file names and quoted note content unchanged.\n\n${input}`
+        : input;
+      const result = await agent.run(agentInput, { currentPath, files, index, messages: [...messages, userMessage], pinnedPaths: agentPinnedPaths });
       updateAgentSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.flatMap((message) =>
@@ -2142,16 +2156,16 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     <div ref={shellRef} className={leftVisible ? "obsidian-shell" : "obsidian-shell left-collapsed"} style={shellStyle}>
       <header className="app-chrome">
         <div className="chrome-left">
-          <IconButton active={leftVisible} label="切换侧栏" onClick={() => setLeftVisible((visible) => !visible)}>
+          <IconButton active={leftVisible} label={t("切换侧栏")} onClick={() => setLeftVisible((visible) => !visible)}>
             <PanelLeft />
           </IconButton>
-          <IconButton active={storageOpen} label="存储空间" onClick={() => setStorageOpen((open) => !open)}>
+          <IconButton active={storageOpen} label={t("存储空间")} onClick={() => setStorageOpen((open) => !open)}>
             <FolderOpen />
           </IconButton>
-          <IconButton label="搜索" onClick={focusSearch}>
+          <IconButton label={t("搜索")} onClick={focusSearch}>
             <Search />
           </IconButton>
-          <IconButton label="笔记" onClick={() => (currentPath ? openNoteTab(currentPath) : undefined)}>
+          <IconButton label={t("笔记")} onClick={() => (currentPath ? openNoteTab(currentPath) : undefined)}>
             <BookOpen />
           </IconButton>
         </div>
@@ -2168,7 +2182,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 title={tab.path ?? "Graph"}
               >
                 {tab.mode === "graph" ? <GitBranch size={13} /> : tab.mode === "explorer" ? <HardDrive size={13} /> : <BookOpen size={13} />}
-                <span>{tabTitle(tab, index)}</span>
+                <span>{t(tabTitle(tab, index))}</span>
                 {tab.path && dirtyPaths.includes(tab.path) ? <b className="tab-dirty" aria-label="Unsaved changes" /> : null}
                 {tab.id !== GRAPH_TAB_ID && tab.id !== EXPLORER_TAB_ID ? (
                   <button
@@ -2191,7 +2205,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             className="tab-plus"
             disabled={isReadOnlyContent}
             onClick={createSessionNote}
-            title={isReadOnlyContent ? "只读来源不能新建笔记" : "新建笔记"}
+            title={isReadOnlyContent ? t("只读来源不能新建笔记") : t("新建笔记")}
             type="button"
           >
             +
@@ -2200,11 +2214,21 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <div className="chrome-right">
           {draftChanges.length > 0 || trashEntries.length > 0 || autoSaving ? (
             <button className="changes-pill" onClick={() => setChangesOpen((open) => !open)} type="button">
-              {autoSaving ? "保存中 · " : ""}改动 {draftChanges.length} · 回收站 {trashEntries.length}
+              {autoSaving ? `${t("保存中")} · ` : ""}{t("改动")} {draftChanges.length} · {t("回收站")} {trashEntries.length}
             </button>
           ) : null}
-          <span>{sourceLabel}</span>
-          {sourceKind === "empty" ? null : <span>{sourceName}</span>}
+          <button
+            aria-label={locale === "en" ? "Switch to Chinese" : "切换到英文"}
+            className="language-switch"
+            onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}
+            title={locale === "en" ? "Switch to Chinese" : "Switch to English"}
+            type="button"
+          >
+            <Languages size={14} />
+            <span>{locale === "en" ? "中" : "EN"}</span>
+          </button>
+          <span>{t(sourceLabel)}</span>
+          {sourceKind === "empty" ? null : <span>{runtime(sourceName)}</span>}
         </div>
       </header>
 
@@ -2232,44 +2256,44 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      <aside className="vault-ribbon" aria-label="工具栏">
-        <IconButton active={centerMode === "graph"} label="关系图谱" onClick={openGraphTab}>
+      <aside className="vault-ribbon" aria-label={t("工具栏")}>
+        <IconButton active={centerMode === "graph"} label={t("关系图谱")} onClick={openGraphTab}>
           <Network />
         </IconButton>
-        <IconButton active={centerMode === "explorer"} label="资源查询" onClick={openExplorerTab}>
+        <IconButton active={centerMode === "explorer"} label={t("资源查询")} onClick={openExplorerTab}>
           <HardDrive />
         </IconButton>
         <div className="ribbon-spacer" />
         <IconButton label="Agent" onClick={focusAgent}>
           <Bot />
         </IconButton>
-        <IconButton active={graphSettingsOpen} label="设置" onClick={() => setGraphSettingsOpen((open) => !open)}>
+        <IconButton active={graphSettingsOpen} label={t("设置")} onClick={() => setGraphSettingsOpen((open) => !open)}>
           <Settings />
         </IconButton>
       </aside>
 
       <aside className="left-rail">
         <div className="rail-toolbar">
-          <button onClick={openLocalVault} disabled={!directoryPickerAvailable} title="打开本地知识库" type="button">
+          <button onClick={openLocalVault} disabled={!directoryPickerAvailable} title={t("打开本地知识库")} type="button">
             <FolderOpen size={16} />
           </button>
-          <button disabled={isReadOnlyContent} onClick={createSessionNote} title={isReadOnlyContent ? "只读来源不能新建笔记" : "新建会话笔记"} type="button">
+          <button disabled={isReadOnlyContent} onClick={createSessionNote} title={isReadOnlyContent ? t("只读来源不能新建笔记") : t("新建会话笔记")} type="button">
             <FilePlus2 size={16} />
           </button>
         </div>
 
         <section className="vault-panel file-card">
           <div className="section-heading">
-            <h2>{isReadOnlyStructure ? "磁盘结构" : isReadOnlyRepository ? "公开知识库" : "读书"}</h2>
+            <h2>{isReadOnlyStructure ? t("磁盘结构") : isReadOnlyRepository ? t("公开知识库") : t("读书")}</h2>
             <span>{filteredNotes.length}/{index.notes.length}</span>
           </div>
           <label className="search-box">
             <Search size={13} />
             <input
               ref={searchInputRef}
-              aria-label="筛选笔记"
+              aria-label={t("筛选笔记")}
               onChange={(event) => setNoteFilter(event.target.value)}
-              placeholder="筛选笔记"
+              placeholder={t("筛选笔记")}
               value={noteFilter}
             />
           </label>
@@ -2292,30 +2316,30 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
         {!isReadOnlyStructure ? <section className="vault-panel compact-panel">
           <div className="section-heading">
-            <h2>标签</h2>
+            <h2>{t("标签")}</h2>
             <span>{tags.length}</span>
           </div>
           <div className="tag-list">
-            {tags.length === 0 ? <p className="muted">暂无标签</p> : tags.map((tag) => <span key={tag.name}>#{tag.name} {tag.count}</span>)}
+            {tags.length === 0 ? <p className="muted">{t("暂无标签")}</p> : tags.map((tag) => <span key={tag.name}>#{tag.name} {tag.count}</span>)}
           </div>
         </section> : null}
 
         <section className="vault-panel compact-panel safety-card">
           <div className="section-heading">
-            <h2>安全状态</h2>
-            <span>{isReadOnlyContent ? "只读" : sourceSafety.excluded.length === 0 ? "OK" : "已排除"}</span>
+            <h2>{t("安全状态")}</h2>
+            <span>{isReadOnlyContent ? t("只读") : sourceSafety.excluded.length === 0 ? "OK" : t("已排除")}</span>
           </div>
           <p>
             <ShieldCheck size={13} />
             {isReadOnlyStructure
-              ? "仅枚举名称、路径和层级；正文读取与写入均已关闭。"
+              ? t("仅枚举名称、路径和层级；正文读取与写入均已关闭。")
               : isReadOnlyRepository
-                ? `公开仓库只读：允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`
-                : `允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`}
+                ? runtime(`公开仓库只读：允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`)
+                : runtime(`允许 ${sourceSafety.allowed.length} / 排除 ${sourceSafety.excluded.length}`)}
           </p>
           <p>
             <CheckCircle2 size={13} />
-            会话改动 {dirtySafety.allowed.length} / 阻止 {dirtySafety.excluded.length}
+            {runtime(`会话改动 ${dirtySafety.allowed.length} / 阻止 ${dirtySafety.excluded.length}`)}
           </p>
           {sourceSafety.excluded.slice(0, 3).map((item) => (
             <small key={item.path}>{item.path} · {item.reason}</small>
@@ -2380,7 +2404,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
       {leftVisible ? (
         <div
-          aria-label="调整左侧栏宽度"
+          aria-label={t("调整左侧栏宽度")}
           aria-orientation="vertical"
           className="column-resizer column-resizer-left"
           onPointerDown={(event) => startColumnResize("left", event)}
@@ -2389,7 +2413,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       ) : null}
 
       <div
-        aria-label="调整右侧 Agent 栏宽度"
+        aria-label={t("调整右侧 Agent 栏宽度")}
         aria-orientation="vertical"
         className="column-resizer column-resizer-agent"
         onPointerDown={(event) => startColumnResize("agent", event)}
@@ -2399,19 +2423,19 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       <main className="workspace">
         <header className="workspace-toolbar">
           <div className="nav-controls">
-            <IconButton label="后退">
+            <IconButton label={t("后退")}>
               <ChevronLeft />
             </IconButton>
-            <IconButton label="前进">
+            <IconButton label={t("前进")}>
               <ChevronRight />
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{sourceKind === "empty" ? "开始" : centerMode === "explorer" ? sourceName : currentPath.split("/").slice(0, -1).join(" / ") || "关系图谱"}</span>
-            <strong>{sourceKind === "empty" ? "未连接知识库" : centerMode === "graph" ? (graphPerspective === "knowledge" ? "知识作用图谱" : "文件关系图谱") : centerMode === "explorer" ? (isReadOnlyStructure ? "只读文件浏览" : "资源查询") : leafName(currentPath)}</strong>
+            <span>{sourceKind === "empty" ? t("开始") : centerMode === "explorer" ? runtime(sourceName) : currentPath.split("/").slice(0, -1).join(" / ") || t("关系图谱")}</span>
+            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("知识作用图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : leafName(currentPath)}</strong>
           </div>
         </header>
-        <div className="status-line">{status}</div>
+        <div className="status-line">{runtime(status)}</div>
         {sourceKind === "empty" ? (
           <WorkspaceEmptyState
             canCreate={Boolean(adapter.createVaultFolder)}
@@ -2421,7 +2445,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           />
         ) : centerMode === "graph" ? (
           <div className="graph-workspace">
-            <div className="graph-perspective-switch" aria-label="图谱观察方式" role="tablist">
+            <div className="graph-perspective-switch" aria-label={t("图谱观察方式")} role="tablist">
               <button
                 aria-selected={graphPerspective === "knowledge"}
                 className={graphPerspective === "knowledge" ? "active" : ""}
@@ -2432,7 +2456,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 role="tab"
                 type="button"
               >
-                知识地形
+                {t("知识地形")}
               </button>
               <button
                 aria-selected={graphPerspective === "files"}
@@ -2441,11 +2465,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 role="tab"
                 type="button"
               >
-                文件关系
+                {t("文件关系")}
               </button>
             </div>
             {graphPerspective === "knowledge" ? (
-              <Suspense fallback={<div className="knowledge-empty"><strong>正在构建知识地形</strong></div>}>
+              <Suspense fallback={<div className="knowledge-empty"><strong>{t("正在构建知识地形")}</strong></div>}>
                 <KnowledgeRoleMap index={index} onSelectNote={selectNote} />
               </Suspense>
             ) : (
@@ -2465,30 +2489,30 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               />
             )}
             {graphSettingsOpen && graphPerspective === "files" ? (
-              <aside className="graph-settings-panel" aria-label="图谱设置">
+              <aside className="graph-settings-panel" aria-label={t("图谱设置")}>
                 <header>
-                  <span>图谱设置</span>
+                  <span>{t("图谱设置")}</span>
                   <button onClick={() => setGraphSettingsOpen(false)} type="button">
                     ×
                   </button>
                 </header>
                 <section>
-                  <h3>筛选</h3>
+                  <h3>{t("筛选")}</h3>
                   <input
-                    aria-label="筛选图谱节点"
+                    aria-label={t("筛选图谱节点")}
                     onChange={(event) => {
                       setGraphViewport(null);
                       setGraphFilter(event.target.value);
                     }}
-                    placeholder="节点标题或路径"
+                    placeholder={t("节点标题或路径")}
                     value={graphFilter}
                   />
                 </section>
                 <section>
-                  <h3>显示</h3>
+                  <h3>{t("显示")}</h3>
                   <label>
                     <input checked={graphShowLabels} onChange={(event) => setGraphShowLabels(event.target.checked)} type="checkbox" />
-                    显示标签
+                    {t("显示标签")}
                   </label>
                   <label>
                     <input
@@ -2499,15 +2523,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                       }}
                       type="checkbox"
                     />
-                    显示孤立节点
+                    {t("显示孤立节点")}
                   </label>
                 </section>
                 <section>
-                  <h3>力</h3>
+                  <h3>{t("力")}</h3>
                   <label>
-                    关系半径
+                    {t("关系半径")}
                     <input
-                      aria-label="图谱关系半径"
+                      aria-label={t("图谱关系半径")}
                       max="1.35"
                       min="0.7"
                       onChange={(event) => setGraphRadius(Number(event.target.value))}
@@ -2556,19 +2580,19 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
       <AgentConsole
         activeSessionId={activeAgentSessionKey}
-        agentModeOptions={AGENT_MODE_OPTIONS}
+        agentModeOptions={localizedAgentModeOptions}
         canConfigureModel={Boolean(adapter.saveDeepSeekApiKey)}
         diffs={diffs}
         input={prompt}
         readOnly={isReadOnlyStructure}
         messages={messages}
         canRestoreSession={agentSessionHistory.length > 0}
-        contextUploadLabel={currentPath ? `把 ${currentPath} 加入 Agent 上下文` : "当前没有可上传的笔记"}
+        contextUploadLabel={currentPath ? `${t("加入 Agent 上下文")}: ${currentPath}` : t("当前没有可上传的笔记")}
         contextUsage={agentContextUsage}
         modelConfigured={modelSettings.deepSeekApiKeyConfigured}
         modelLabel={`${modelSettings.provider}:${modelSettings.model}`}
         modelShortLabel={modelShortLabel(selectedAgentModel)}
-        modelOptions={agentModelOptions}
+        modelOptions={localizedAgentModelOptions}
         onApply={applyDiff}
         onAgentModeChange={(mode) => void updateAgentMode(mode)}
         onDeleteSession={deleteAgentSession}
@@ -2618,6 +2642,7 @@ function TreeContextMenuPanel({
   onPaste,
   onRename
 }: TreeContextMenuPanelProps) {
+  const { t } = useLocalization();
   const title = menu.type === "note" ? menu.note.title : menu.folder.name;
   return (
     <div
@@ -2629,33 +2654,33 @@ function TreeContextMenuPanel({
     >
       <header>
         <strong>{title}</strong>
-        <button aria-label="关闭菜单" onClick={onClose} type="button">
+        <button aria-label={t("关闭菜单")} onClick={onClose} type="button">
           <X size={12} />
         </button>
       </header>
       <button onClick={onCreate} role="menuitem" type="button">
         <FilePlus2 size={14} />
-        在本文档中新建
+        {t("在本文档中新建")}
       </button>
       <button onClick={onRename} role="menuitem" type="button">
         <FileText size={14} />
-        重命名
+        {t("重命名")}
       </button>
       <button onClick={() => onCopy("copy")} role="menuitem" type="button">
         <BookOpen size={14} />
-        复制
+        {t("复制")}
       </button>
       <button onClick={() => onCopy("cut")} role="menuitem" type="button">
         <ScissorsIcon />
-        剪切
+        {t("剪切")}
       </button>
       <button disabled={!clipboard} onClick={onPaste} role="menuitem" type="button">
         <FolderOpen size={14} />
-        粘贴到这里
+        {t("粘贴到这里")}
       </button>
       <button className="danger" onClick={onDelete} role="menuitem" type="button">
         <Trash2 size={14} />
-        删除
+        {t("删除")}
       </button>
     </div>
   );
@@ -2668,6 +2693,7 @@ interface GraphDeleteConfirmDialogProps {
 }
 
 function GraphDeleteConfirmDialog({ target, onCancel, onConfirm }: GraphDeleteConfirmDialogProps) {
+  const { runtime, t } = useLocalization();
   return (
     <div
       className="graph-delete-overlay"
@@ -2676,26 +2702,26 @@ function GraphDeleteConfirmDialog({ target, onCancel, onConfirm }: GraphDeleteCo
       }}
       role="presentation"
     >
-      <section aria-label="确认删除图谱文档" aria-modal="true" className="graph-delete-dialog" role="dialog">
-        <button aria-label="关闭" className="graph-delete-close" onClick={onCancel} type="button">
+      <section aria-label={t("确认删除图谱文档")} aria-modal="true" className="graph-delete-dialog" role="dialog">
+        <button aria-label={t("关闭")} className="graph-delete-close" onClick={onCancel} type="button">
           <X size={14} />
         </button>
         <div className="graph-delete-icon">
           <Trash2 size={20} />
         </div>
         <div className="graph-delete-copy">
-          <p>{target.paths.length > 1 ? "确认移除这些文档？" : "确认移除这个文档？"}</p>
+          <p>{target.paths.length > 1 ? t("确认移除这些文档？") : t("确认移除这个文档？")}</p>
           <h2>{target.title}</h2>
-          <span>{target.paths.length > 1 ? `${target.paths.length} 个已框选路径` : target.paths[0]}</span>
+          <span>{target.paths.length > 1 ? runtime(`${target.paths.length} 个已框选路径`) : target.paths[0]}</span>
         </div>
         <pre>{target.preview}</pre>
-        <p className="graph-delete-note">这一步只会加入回收站待写回；写回本地后会移入 .knowledge-agent-trash，并保留 30 天。</p>
+        <p className="graph-delete-note">{t("这一步只会加入回收站待写回；写回本地后会移入 .knowledge-agent-trash，并保留 30 天。")}</p>
         <div className="graph-delete-actions">
           <button onClick={onCancel} type="button">
-            取消
+            {t("取消")}
           </button>
           <button className="danger" onClick={onConfirm} type="button">
-            加入回收站
+            {t("加入回收站")}
           </button>
         </div>
       </section>
@@ -2720,6 +2746,7 @@ function AgentApiKeyDialog({
   onCancel,
   onSubmit
 }: AgentApiKeyDialogProps) {
+  const { runtime, t } = useLocalization();
   return (
     <div
       className="agent-key-overlay"
@@ -2728,20 +2755,20 @@ function AgentApiKeyDialog({
       }}
       role="presentation"
     >
-      <form aria-label="配置 DeepSeek API key" aria-modal="true" className="agent-key-dialog" onSubmit={onSubmit} role="dialog">
-        <button aria-label="关闭" className="agent-key-close" onClick={onCancel} type="button">
+      <form aria-label={t("配置 DeepSeek API key")} aria-modal="true" className="agent-key-dialog" onSubmit={onSubmit} role="dialog">
+        <button aria-label={t("关闭")} className="agent-key-close" onClick={onCancel} type="button">
           <X size={14} />
         </button>
         <div className="agent-key-icon">
           <Bot size={20} />
         </div>
         <div className="agent-key-copy">
-          <p>首次使用在线 Agent</p>
-          <h2>填写你的 DeepSeek API key</h2>
-          <span>当前模型：{modelLabel}</span>
+          <p>{t("首次使用在线 Agent")}</p>
+          <h2>{t("填写你的 DeepSeek API key")}</h2>
+          <span>{runtime(`当前模型：${modelLabel}`)}</span>
         </div>
         <label>
-          <span>API key 只保存在本机 AppData，不会写入知识库或 GitHub。</span>
+          <span>{t("API key 只保存在本机 AppData，不会写入知识库或 GitHub。")}</span>
           <input
             autoFocus
             aria-label="DeepSeek API key"
@@ -2753,10 +2780,10 @@ function AgentApiKeyDialog({
         </label>
         <div className="agent-key-actions">
           <button onClick={onCancel} type="button">
-            稍后
+            {t("稍后")}
           </button>
           <button className="primary" disabled={saving || apiKeyInput.trim() === ""} type="submit">
-            {saving ? "保存中" : "保存并启用"}
+            {saving ? t("保存中") : t("保存并启用")}
           </button>
         </div>
       </form>
@@ -2817,24 +2844,25 @@ function StoragePanel({
   sourceLabel,
   sourceName
 }: StoragePanelProps) {
+  const { runtime, t } = useLocalization();
   return (
-    <aside className="storage-panel" aria-label="本地存储空间">
+    <aside className="storage-panel" aria-label={t("本地存储空间")}>
       <header>
         <div>
-          <h2>存储空间</h2>
+          <h2>{t("存储空间")}</h2>
           <p>
-            {sourceLabel} · {sourceName}
+            {t(sourceLabel)} · {runtime(sourceName)}
           </p>
         </div>
-        <button aria-label="关闭存储面板" onClick={onClose} type="button">
+        <button aria-label={t("关闭存储面板")} onClick={onClose} type="button">
           <X size={14} />
         </button>
       </header>
 
       <section className="storage-actions">
         {roots.length > 0 ? (
-          <div className="storage-roots" aria-label="本机磁盘">
-            <span>此电脑</span>
+          <div className="storage-roots" aria-label={t("本机磁盘")}>
+            <span>{t("此电脑")}</span>
             <div>
               {roots.map((root) => (
                 <button disabled={busy} key={root.path} onClick={() => onReadRoot(root.path)} type="button">
@@ -2848,46 +2876,46 @@ function StoragePanel({
         ) : null}
         <button disabled={!canOpen || busy} onClick={onOpen} type="button">
           <FolderOpen size={15} />
-          打开已有文件夹
+          {t("打开已有文件夹")}
         </button>
 
         <button disabled={!canReadStructure || busy} onClick={onReadStructure} type="button">
           <HardDrive size={15} />
-          选择其他位置只读浏览
+          {t("选择其他位置只读浏览")}
         </button>
 
         <div className="storage-github">
           <div className="storage-github-heading">
-            <span>GitHub 公开知识库</span>
-            <small>只读 · 无需登录</small>
+            <span>{t("GitHub 公开知识库")}</span>
+            <small>{t("只读 · 无需登录")}</small>
           </div>
           <div className="storage-github-input">
             <input
-              aria-label="GitHub 公开仓库地址"
+              aria-label={t("GitHub 公开仓库地址")}
               disabled={busy}
               onChange={(event) => onGitHubRepositoryChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && githubRepository.trim()) onOpenGitHub();
               }}
-              placeholder="owner/repo 或 GitHub 仓库网址"
+              placeholder={t("owner/repo 或 GitHub 仓库网址")}
               value={githubRepository}
             />
             <button disabled={busy || githubRepository.trim() === ""} onClick={onOpenGitHub} type="button">
               <GitBranch size={15} />
-              打开
+              {t("打开")}
             </button>
           </div>
           {officialExampleRepository && onOpenOfficialExample ? (
             <button className="storage-example-button" disabled={busy} onClick={onOpenOfficialExample} type="button">
               <Network size={15} />
-              打开官方示例知识库
+              {t("打开官方示例知识库")}
             </button>
           ) : null}
-          <p>读取公开仓库中的安全 Markdown 并建立文件树与图谱；不会提交、删除或改写仓库内容。</p>
+          <p>{t("读取公开仓库中的安全 Markdown 并建立文件树与图谱；不会提交、删除或改写仓库内容。")}</p>
         </div>
 
         <div className={canCreate ? "storage-create" : "storage-create disabled"}>
-          <label htmlFor="new-vault-name">新建文件夹名称</label>
+          <label htmlFor="new-vault-name">{t("新建文件夹名称")}</label>
           <div>
             <input
               disabled={!canCreate || busy}
@@ -2897,7 +2925,7 @@ function StoragePanel({
             />
             <button disabled={!canCreate || busy || folderName.trim() === ""} onClick={onCreate} type="button">
               <FilePlus2 size={15} />
-              选择位置并新建
+              {t("选择位置并新建")}
             </button>
           </div>
         </div>
@@ -2906,8 +2934,8 @@ function StoragePanel({
 
       <footer>
         {canCreate
-          ? "只读扫描不会读取文件正文、不会创建草稿、不会写入或删除所选目录中的任何文件。"
-          : "浏览器入口只能打开授权文件夹；只读磁盘结构扫描和新建任意本机文件夹请使用桌面 App。"}
+          ? t("只读扫描不会读取文件正文、不会创建草稿、不会写入或删除所选目录中的任何文件。")
+          : t("浏览器入口只能打开授权文件夹；只读磁盘结构扫描和新建任意本机文件夹请使用桌面 App。")}
       </footer>
     </aside>
   );
@@ -2928,28 +2956,29 @@ export function DraftChangesPanel({
   safety: SafetyManifest;
   writing: boolean;
 }) {
+  const { runtime, t } = useLocalization();
   const blocked = safety.excluded.length > 0;
   return (
     <aside className="draft-panel" aria-label="Draft changes">
       <header>
         <div>
-          <h2>改动</h2>
+          <h2>{t("改动")}</h2>
           <p>
-            {changes.length} 个草稿 路 允许 {safety.allowed.length} / 阻止 {safety.excluded.length}
+            {runtime(`${changes.length} 个草稿 · 允许 ${safety.allowed.length} / 阻止 ${safety.excluded.length}`)}
           </p>
         </div>
-        <button aria-label="关闭改动面板" onClick={onClose} type="button">
+        <button aria-label={t("关闭改动面板")} onClick={onClose} type="button">
           <X size={14} />
         </button>
       </header>
       <div className="draft-list">
         {changes.length === 0 ? (
-          <p className="draft-empty">当前没有草稿改动。</p>
+          <p className="draft-empty">{t("当前没有草稿改动。")}</p>
         ) : (
           changes.map((change) => (
             <article className={`draft-card ${change.kind}`} key={`${change.kind}:${change.path}`}>
               <div className="draft-card-heading">
-                <span>{draftKindLabel(change.kind)}</span>
+                <span>{t(draftKindLabel(change.kind))}</span>
                 <strong>{change.path}</strong>
               </div>
               <pre>{diffPreview(change)}</pre>
@@ -2960,12 +2989,15 @@ export function DraftChangesPanel({
       {blocked ? (
         <div className="draft-warning">
           <ShieldCheck size={14} />
-          <span>{safety.excluded[0]?.path} 被安全规则阻止：{safety.excluded[0]?.reason}</span>
+          <span>{t("{path} 被安全规则阻止：{reason}", {
+            path: safety.excluded[0]?.path ?? "",
+            reason: runtime(safety.excluded[0]?.reason ?? "")
+          })}</span>
         </div>
       ) : null}
       <footer>
         <button disabled={!canWrite || blocked || changes.length === 0 || writing} onClick={onWrite} type="button">
-          {writing ? "正在写回..." : canWrite ? "写回本地" : "仅桌面端可写回"}
+          {writing ? t("正在写回...") : canWrite ? t("写回本地") : t("仅桌面端可写回")}
         </button>
       </footer>
     </aside>
@@ -2999,28 +3031,29 @@ function DraftChangesPanelWithTrash({
   trashEntries: TrashEntry[];
   writing: boolean;
 }) {
+  const { locale, runtime, t } = useLocalization();
   const blocked = safety.excluded.length > 0;
   return (
-    <aside className="draft-panel" aria-label="改动与回收站">
+    <aside className="draft-panel" aria-label={t("改动与回收站")}>
       <header>
         <div>
-          <h2>改动与回收站</h2>
+          <h2>{t("改动与回收站")}</h2>
           <p>
-            待写回 {changes.length} · 回收站 {trashEntries.length} · 允许 {safety.allowed.length} / 阻止 {safety.excluded.length}
+            {runtime(`待写回 ${changes.length} · 回收站 ${trashEntries.length} · 允许 ${safety.allowed.length} / 阻止 ${safety.excluded.length}`)}
           </p>
         </div>
-        <button aria-label="关闭改动与回收站面板" onClick={onClose} type="button">
+        <button aria-label={t("关闭改动与回收站面板")} onClick={onClose} type="button">
           <X size={14} />
         </button>
       </header>
       <div className="draft-list">
         {changes.length === 0 ? (
-          <p className="draft-empty">当前没有待写回改动。</p>
+          <p className="draft-empty">{t("当前没有待写回改动。")}</p>
         ) : (
           changes.map((change) => (
             <article className={`draft-card ${change.kind}`} key={`${change.kind}:${change.path}`}>
               <div className="draft-card-heading">
-                <span>{draftKindLabel(change.kind)}</span>
+                <span>{t(draftKindLabel(change.kind))}</span>
                 <strong>{change.path}</strong>
               </div>
               <pre>{diffPreview(change)}</pre>
@@ -3031,12 +3064,12 @@ function DraftChangesPanelWithTrash({
       <section className="trash-section">
         <header>
           <div>
-            <h3>回收站</h3>
-            <p>.knowledge-agent-trash · 保留 30 天，到期自动清理</p>
+            <h3>{t("回收站")}</h3>
+            <p>{t(".knowledge-agent-trash · 保留 30 天，到期自动清理")}</p>
           </div>
         </header>
         {trashEntries.length === 0 ? (
-          <p className="trash-empty">回收站为空。</p>
+          <p className="trash-empty">{t("回收站为空。")}</p>
         ) : (
           <div className="trash-list">
             {trashEntries.map((entry) => {
@@ -3047,27 +3080,28 @@ function DraftChangesPanelWithTrash({
                 <article className={blocked ? "trash-card blocked" : authorized ? "trash-card authorized" : "trash-card"} key={entry.id}>
                   <div>
                     <strong>{entry.originalPath}</strong>
-                    <span>
-                      删除：{formatTrashTime(entry.deletedAtMs)} · 到期：{formatTrashTime(entry.purgeAfterMs)}
-                    </span>
-                    <small>{authorization ? `Agent：${authorization.reason}` : trashRemainingLabel(entry.purgeAfterMs)}</small>
+                    <span>{t("删除时间：{deleted} · 到期时间：{expires}", {
+                      deleted: formatTrashTime(entry.deletedAtMs, locale),
+                      expires: formatTrashTime(entry.purgeAfterMs, locale)
+                    })}</span>
+                    <small>{authorization ? `Agent: ${runtime(authorization.reason)}` : runtime(trashRemainingLabel(entry.purgeAfterMs))}</small>
                   </div>
                   {blocked ? (
                     <button disabled title={authorization.reason} type="button">
-                      已阻止
+                      {t("已阻止")}
                     </button>
                   ) : authorized ? (
                     <button
                       disabled={hasDraftChanges || restoringTrashId === entry.id}
                       onClick={() => onRestoreTrash(entry)}
-                      title={hasDraftChanges ? "请先处理待写回改动，再恢复回收站文档" : "Agent 已授权，恢复到原路径"}
+                      title={hasDraftChanges ? t("请先处理待写回改动，再恢复回收站文档") : t("Agent 已授权，恢复到原路径")}
                       type="button"
                     >
-                      {restoringTrashId === entry.id ? "恢复中" : "恢复"}
+                      {restoringTrashId === entry.id ? t("恢复中") : t("恢复")}
                     </button>
                   ) : (
-                    <button onClick={() => onAuthorizeTrash(entry)} title="交给 Agent 审核回溯权限" type="button">
-                      Agent 审核
+                    <button onClick={() => onAuthorizeTrash(entry)} title={t("交给 Agent 审核回溯权限")} type="button">
+                      {t("Agent 审核")}
                     </button>
                   )}
                 </article>
@@ -3079,12 +3113,15 @@ function DraftChangesPanelWithTrash({
       {blocked ? (
         <div className="draft-warning">
           <ShieldCheck size={14} />
-          <span>{safety.excluded[0]?.path} 被安全规则阻止：{safety.excluded[0]?.reason}</span>
+          <span>{t("{path} 被安全规则阻止：{reason}", {
+            path: safety.excluded[0]?.path ?? "",
+            reason: runtime(safety.excluded[0]?.reason ?? "")
+          })}</span>
         </div>
       ) : null}
       <footer>
         <button disabled={!canWrite || blocked || changes.length === 0 || writing} onClick={onWrite} type="button">
-          {writing ? "正在写回..." : canWrite ? "写回本地" : "仅桌面端可写回"}
+          {writing ? t("正在写回...") : canWrite ? t("写回本地") : t("仅桌面端可写回")}
         </button>
       </footer>
     </aside>
@@ -3120,26 +3157,27 @@ function WorkspaceEmptyState({
   onCreate(): void;
   onOpen(): void;
 }) {
+  const { t } = useLocalization();
   return (
     <section className="workspace-empty-state">
       <div className="workspace-empty-icon" aria-hidden="true">
         <FolderOpen size={24} />
       </div>
-      <h1>连接你的知识库</h1>
-      <p>打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。</p>
+      <h1>{t("连接你的知识库")}</h1>
+      <p>{t("打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。")}</p>
       <div className="workspace-empty-actions">
         <button className="primary" disabled={!canOpen} onClick={onOpen} type="button">
           <FolderOpen size={16} />
-          打开本地知识库
+          {t("打开本地知识库")}
         </button>
         {canCreate ? (
           <button onClick={onCreate} type="button">
             <FilePlus2 size={16} />
-            新建知识库文件夹
+            {t("新建知识库文件夹")}
           </button>
         ) : null}
       </div>
-      <small>{canOpen ? "只有你主动选择的文件夹会被读取。" : "当前浏览器不支持文件夹选择器，请使用最新版 Chrome 或 Edge。"}</small>
+      <small>{canOpen ? t("只有你主动选择的文件夹会被读取。") : t("当前浏览器不支持文件夹选择器，请使用最新版 Chrome 或 Edge。")}</small>
     </section>
   );
 }
@@ -3153,8 +3191,9 @@ function ReadOnlySidebarList({
   onOpenDirectory(path: string): void;
   onOpenFile(path: string): void;
 }) {
+  const { t } = useLocalization();
   return (
-    <div className="readonly-sidebar-list" aria-label="当前磁盘目录">
+    <div className="readonly-sidebar-list" aria-label={t("当前磁盘目录")}>
       {listing.entries.map((entry) => (
         <button
           key={`${entry.kind}:${entry.path}`}
@@ -3185,24 +3224,25 @@ export function ReadOnlyStorageExplorer({
   onOpenFile(path: string): void;
   preview: ReadOnlyFilePreview | null;
 }) {
+  const { locale, t } = useLocalization();
   const [query, setQuery] = useState("");
   const segments = listing.path ? listing.path.split("/").filter(Boolean) : [];
   const parentPath = segments.slice(0, -1).join("/");
   const filteredEntries = listing.entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
-    <section className={preview ? "readonly-explorer with-preview" : "readonly-explorer"} aria-label="只读文件浏览器">
+    <section className={preview ? "readonly-explorer with-preview" : "readonly-explorer"} aria-label={t("只读文件浏览器")}>
       <div className="readonly-browser-main">
         <header className="readonly-browser-toolbar">
           <div className="readonly-browser-actions">
-            <button disabled={busy || segments.length === 0} onClick={() => onOpenDirectory(parentPath)} title="上一级" type="button">
+            <button disabled={busy || segments.length === 0} onClick={() => onOpenDirectory(parentPath)} title={t("上一级")} type="button">
               <ArrowUp size={15} />
             </button>
-            <button disabled={busy} onClick={() => onOpenDirectory(listing.path)} title="刷新当前目录" type="button">
+            <button disabled={busy} onClick={() => onOpenDirectory(listing.path)} title={t("刷新当前目录")} type="button">
               <RefreshCw className={busy ? "spinning" : ""} size={15} />
             </button>
           </div>
-          <nav className="readonly-breadcrumb" aria-label="当前文件路径">
+          <nav className="readonly-breadcrumb" aria-label={t("当前文件路径")}>
             <button onClick={() => onOpenDirectory("")} type="button"><HardDrive size={14} />{listing.root}</button>
             {segments.map((segment, index) => {
               const path = segments.slice(0, index + 1).join("/");
@@ -3216,21 +3256,21 @@ export function ReadOnlyStorageExplorer({
           </nav>
           <label className="readonly-search">
             <Search size={14} />
-            <input onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前目录" value={query} />
+            <input onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索当前目录")} value={query} />
           </label>
         </header>
 
         <div className="readonly-location-summary">
           <strong>{segments.at(-1) ?? listing.root}</strong>
-          <span>{listing.entries.length} 项 · 只读</span>
+          <span>{listing.entries.length} {locale === "en" ? "items · read only" : "项 · 只读"}</span>
         </div>
 
-        <div className="readonly-file-table" role="table" aria-label="文件和文件夹">
+        <div className="readonly-file-table" role="table" aria-label={t("文件和文件夹")}>
           <div className="readonly-file-row header" role="row">
-            <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
+            <span>{t("名称")}</span><span>{t("类型")}</span><span>{t("大小")}</span><span>{t("修改时间")}</span>
           </div>
           {filteredEntries.length === 0 ? (
-            <div className="readonly-file-empty">当前目录没有匹配项。</div>
+            <div className="readonly-file-empty">{t("当前目录没有匹配项。")}</div>
           ) : filteredEntries.map((entry) => (
             <button
               className={`readonly-file-row ${entry.kind}`}
@@ -3241,32 +3281,32 @@ export function ReadOnlyStorageExplorer({
               type="button"
             >
               <span>{entry.kind === "directory" ? <Folder size={16} /> : <FileText size={16} />}<strong>{entry.name}</strong></span>
-              <span>{readOnlyEntryType(entry)}</span>
+              <span>{t(readOnlyEntryType(entry))}</span>
               <span>{entry.kind === "file" ? formatFileSize(entry.size ?? 0) : "—"}</span>
-              <span>{formatModifiedTime(entry.modifiedAtMs)}</span>
+              <span>{formatModifiedTime(entry.modifiedAtMs, locale)}</span>
             </button>
           ))}
         </div>
-        {listing.truncated ? <p className="readonly-limit">当前目录超过 1000 项，仅显示前 1000 项。进入子文件夹可继续浏览。</p> : null}
+        {listing.truncated ? <p className="readonly-limit">{t("当前目录超过 1000 项，仅显示前 1000 项。进入子文件夹可继续浏览。")}</p> : null}
       </div>
 
       {preview ? (
-        <aside className="readonly-preview" aria-label="只读文件预览">
+        <aside className="readonly-preview" aria-label={t("只读文件预览")}>
           <header>
-            <div><span>只读预览</span><strong>{preview.name}</strong></div>
-            <button aria-label="关闭预览" onClick={onClosePreview} type="button"><X size={15} /></button>
+            <div><span>{t("只读预览")}</span><strong>{preview.name}</strong></div>
+            <button aria-label={t("关闭预览")} onClick={onClosePreview} type="button"><X size={15} /></button>
           </header>
           <dl>
-            <div><dt>位置</dt><dd>{preview.root}{preview.path ? `\\${preview.path.replaceAll("/", "\\")}` : ""}</dd></div>
-            <div><dt>大小</dt><dd>{formatFileSize(preview.size)}</dd></div>
-            <div><dt>修改</dt><dd>{formatModifiedTime(preview.modifiedAtMs)}</dd></div>
+            <div><dt>{t("位置")}</dt><dd>{preview.root}{preview.path ? `\\${preview.path.replaceAll("/", "\\")}` : ""}</dd></div>
+            <div><dt>{t("大小")}</dt><dd>{formatFileSize(preview.size)}</dd></div>
+            <div><dt>{t("修改")}</dt><dd>{formatModifiedTime(preview.modifiedAtMs, locale)}</dd></div>
           </dl>
           {preview.content !== undefined ? (
-            <pre>{preview.content || "（文档没有可显示的文字内容）"}</pre>
+            <pre>{preview.content || t("（文档没有可显示的文字内容）")}</pre>
           ) : (
             <div className="readonly-preview-message"><File size={26} /><p>{preview.message}</p></div>
           )}
-          <footer><ShieldCheck size={13} />本视图没有写入、重命名或删除权限</footer>
+          <footer><ShieldCheck size={13} />{t("本视图没有写入、重命名或删除权限")}</footer>
         </aside>
       ) : null}
     </section>
@@ -3287,8 +3327,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
 }
 
-function formatModifiedTime(value?: number): string {
-  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+function formatModifiedTime(value?: number, locale: "zh-CN" | "en" = "zh-CN"): string {
+  return value ? new Date(value).toLocaleString(locale === "en" ? "en-US" : "zh-CN", { hour12: false }) : "—";
 }
 
 function VaultExplorer({
@@ -3308,23 +3348,24 @@ function VaultExplorer({
   scope: string;
   sourceName: string;
 }) {
+  const { locale, t } = useLocalization();
   return (
     <section className="vault-explorer" aria-label="Vault resource explorer">
       <header className="explorer-header">
         <div>
-          <h1>资源查询</h1>
-          <p>{sourceName} · {model.totalNotes} 篇文档 · {model.folderCount} 个文件夹</p>
+          <h1>{t("资源查询")}</h1>
+          <p>{sourceName} · {model.totalNotes} {locale === "en" ? "documents" : "篇文档"} · {model.folderCount} {locale === "en" ? "folders" : "个文件夹"}</p>
         </div>
         <label className="explorer-search">
           <Search size={15} />
-          <input onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索标题、路径、标签或正文" value={query} />
+          <input onChange={(event) => onQueryChange(event.target.value)} placeholder={t("搜索标题、路径、标签或正文")} value={query} />
         </label>
       </header>
 
       <div className="drive-grid">
         <button className={scope === "" ? "drive-card active" : "drive-card"} onClick={() => onScopeChange("")} type="button">
           <HardDrive size={18} />
-          <span>全部文档</span>
+          <span>{t("全部文档")}</span>
           <strong>{model.totalNotes}</strong>
         </button>
         {model.drives.map((drive) => (
@@ -3341,14 +3382,14 @@ function VaultExplorer({
         ))}
       </div>
 
-      <div className="explorer-table" role="table" aria-label="文档列表">
+      <div className="explorer-table" role="table" aria-label={t("文档列表")}>
         <div className="explorer-row header" role="row">
-          <span>名称</span>
-          <span>位置</span>
-          <span>标签</span>
+          <span>{t("名称")}</span>
+          <span>{t("位置")}</span>
+          <span>{t("标签")}</span>
         </div>
         {model.notes.length === 0 ? (
-          <div className="explorer-empty">没有匹配的文档。</div>
+          <div className="explorer-empty">{t("没有匹配的文档。")}</div>
         ) : (
           model.notes.map((note) => (
             <button className="explorer-row" key={note.path} onClick={() => onOpenNote(note.path)} role="row" type="button">
@@ -3607,9 +3648,9 @@ function agentModeLabel(mode: string): string {
   return AGENT_MODE_OPTIONS.find((option) => option.value === normalizeAgentMode(mode))?.label ?? "日常笔记 Agent";
 }
 
-function formatTrashTime(value: number): string {
+function formatTrashTime(value: number, locale: "zh-CN" | "en" = "zh-CN"): string {
   if (!Number.isFinite(value) || value <= 0) return "未知";
-  return new Date(value).toLocaleString("zh-CN", {
+  return new Date(value).toLocaleString(locale === "en" ? "en-US" : "zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

@@ -1,5 +1,6 @@
 import type { NoteGraph, ParsedNote } from "@knowledge-agent/core";
 import { MiniStarGraph } from "./MiniStarGraph";
+import { useLocalization } from "./localization";
 
 export interface NoteEditorProps {
   note?: ParsedNote;
@@ -12,8 +13,9 @@ export interface NoteEditorProps {
 }
 
 export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSelectGraphNode, readOnly = false }: NoteEditorProps) {
+  const { t } = useLocalization();
   if (!note) {
-    return <main className="note-editor empty">选择一篇笔记开始。</main>;
+    return <main className="note-editor empty">{t("选择一篇笔记开始。")}</main>;
   }
 
   return (
@@ -25,10 +27,10 @@ export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSe
         </div>
         <div className="segmented">
           <button disabled={readOnly} className={mode === "edit" ? "active" : ""} onClick={() => onModeChange("edit")} type="button">
-            编辑
+            {t("编辑")}
           </button>
           <button className={mode === "preview" ? "active" : ""} onClick={() => onModeChange("preview")} type="button">
-            阅读
+            {t("阅读")}
           </button>
         </div>
       </header>
