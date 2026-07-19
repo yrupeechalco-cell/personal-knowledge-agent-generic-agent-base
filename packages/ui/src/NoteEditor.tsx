@@ -1,5 +1,6 @@
-import type { NoteGraph, ParsedNote } from "@knowledge-agent/core";
+import type { NoteGraph, ParsedNote, TagGranularity } from "@knowledge-agent/core";
 import { MiniStarGraph } from "./MiniStarGraph";
+import { NoteTagCloud } from "./NoteTagCloud";
 import { useLocalization } from "./localization";
 
 export interface NoteEditorProps {
@@ -7,12 +8,15 @@ export interface NoteEditorProps {
   miniGraph?: NoteGraph;
   mode: "edit" | "preview";
   readOnly?: boolean;
+  tagExtracting?: boolean;
+  onExtractTags?(granularity: TagGranularity): void;
   onModeChange(mode: "edit" | "preview"): void;
   onChange(content: string): void;
+  onTagsChange?(tags: string[]): void;
   onSelectGraphNode?(path: string): void;
 }
 
-export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSelectGraphNode, readOnly = false }: NoteEditorProps) {
+export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSelectGraphNode, onExtractTags, onTagsChange, readOnly = false, tagExtracting = false }: NoteEditorProps) {
   const { t } = useLocalization();
   if (!note) {
     return <main className="note-editor empty">{t("选择一篇笔记开始。")}</main>;
@@ -34,6 +38,14 @@ export function NoteEditor({ note, miniGraph, mode, onModeChange, onChange, onSe
           </button>
         </div>
       </header>
+
+      <NoteTagCloud
+        extracting={tagExtracting}
+        note={note}
+        onExtract={onExtractTags}
+        onTagsChange={onTagsChange}
+        readOnly={readOnly}
+      />
 
       {mode === "edit" && !readOnly ? (
         <textarea className="markdown-input" value={note.content} onChange={(event) => onChange(event.target.value)} />

@@ -58,11 +58,7 @@ function parseFrontmatter(content: string): {
     const key = match[1].trim();
     const value = match[2].trim();
     if (value.startsWith("[") && value.endsWith("]")) {
-      frontmatter[key] = value
-        .slice(1, -1)
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
+      frontmatter[key] = parseFrontmatterArray(value);
     } else if (value === "true" || value === "false") {
       frontmatter[key] = value === "true";
     } else if (value !== "" && !Number.isNaN(Number(value))) {
@@ -73,6 +69,20 @@ function parseFrontmatter(content: string): {
   }
 
   return { body: content.slice(end + 4), frontmatter };
+}
+
+function parseFrontmatterArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) return parsed.map(String).map((item) => item.trim()).filter(Boolean);
+  } catch {
+    // Obsidian commonly uses unquoted YAML flow arrays, which are not JSON.
+  }
+  return value
+    .slice(1, -1)
+    .split(",")
+    .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
 }
 
 function titleFromBodyOrPath(body: string, path: string): string {

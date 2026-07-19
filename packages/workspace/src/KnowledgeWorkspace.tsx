@@ -1,5 +1,8 @@
 import {
+  buildTagExtractionRequest,
+  localExtractedTags,
   NoteAgentKernel,
+  parseExtractedTags,
   classifyRestore,
   type AgentDiff,
   type AgentMessage,
@@ -16,9 +19,12 @@ import {
   ensureMarkdownPath,
   getNote,
   normalizePath,
+  parseNote,
+  setNoteTags,
   type NoteFile,
   type ParsedNote,
-  type SafetyManifest
+  type SafetyManifest,
+  type TagGranularity
 } from "@knowledge-agent/core";
 import { AgentConsole, FileTree, NoteEditor, StarGraph, useLocalization, type FileTreeFolder, type Viewport } from "@knowledge-agent/ui";
 import {
@@ -58,7 +64,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 
-const KnowledgeRoleMap = lazy(() => import("./KnowledgeRoleMap").then((module) => ({ default: module.KnowledgeRoleMap })));
+const TagKnowledgeMap = lazy(() => import("./TagKnowledgeMap").then((module) => ({ default: module.TagKnowledgeMap })));
 
 const GRAPH_TAB_ID = "graph-overview";
 const EXPLORER_TAB_ID = "vault-explorer";
@@ -360,6 +366,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [graphRadius, setGraphRadius] = useState(1);
   const [graphShowLabels, setGraphShowLabels] = useState(true);
   const [graphShowRelated, setGraphShowRelated] = useState(true);
+  const [tagExtractingPath, setTagExtractingPath] = useState<string | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
   const [writingChanges, setWritingChanges] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -1460,6 +1467,39 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     };
   }
 
+  function updateCurrentNoteTags(nextTags: string[]) {
+    if (!currentNote || isReadOnlyContent) return;
+    updateCurrentNote(setNoteTags(currentNote.content, nextTags));
+  }
+
+  async function extractCurrentNoteTags(granularity: TagGranularity) {
+    if (!currentNote || isReadOnlyContent || tagExtractingPath) return;
+    const targetPath = currentNote.path;
+    setTagExtractingPath(targetPath);
+    setStatus(`正在按 ${granularity}/5 颗粒度拆解资料标签…`);
+    try {
+      let extracted = localExtractedTags(currentNote, granularity);
+      let usedOnlineAgent = false;
+      if (adapter.runModel && modelSettings.deepSeekApiKeyConfigured) {
+        const response = await adapter.runModel(buildTagExtractionRequest(currentNote, granularity, selectedAgentModel));
+        extracted = parseExtractedTags(response, currentNote, granularity);
+        usedOnlineAgent = true;
+      }
+      setFiles((current) => current.map((file) => {
+        if (file.path !== targetPath) return file;
+        const latestNote = parseNote(file);
+        const mergedTags = [...latestNote.tags, ...extracted];
+        return { ...file, content: setNoteTags(file.content, mergedTags), modifiedAt: new Date().toISOString() };
+      }));
+      markDirty(targetPath);
+      setStatus(`${usedOnlineAgent ? "Agent" : "本地分类器"} 已完成标签拆解：${extracted.length} 个标签，正在保存。`);
+    } catch (error) {
+      setStatus(error instanceof Error ? `标签拆解失败：${error.message}` : "标签拆解失败。");
+    } finally {
+      setTagExtractingPath(null);
+    }
+  }
+
   function saveAgentSnapshot(title: string, session = activeAgentSession) {
     const snapshot = snapshotAgentSession(title, session);
     if (!snapshot) return;
@@ -2432,7 +2472,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </div>
           <div className="breadcrumb">
             <span>{sourceKind === "empty" ? t("开始") : centerMode === "explorer" ? runtime(sourceName) : currentPath.split("/").slice(0, -1).join(" / ") || t("关系图谱")}</span>
-            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("知识作用图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : leafName(currentPath)}</strong>
+            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
@@ -2456,7 +2496,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 role="tab"
                 type="button"
               >
-                {t("知识地形")}
+                {t("标签体系")}
               </button>
               <button
                 aria-selected={graphPerspective === "files"}
@@ -2469,8 +2509,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               </button>
             </div>
             {graphPerspective === "knowledge" ? (
-              <Suspense fallback={<div className="knowledge-empty"><strong>{t("正在构建知识地形")}</strong></div>}>
-                <KnowledgeRoleMap index={index} onSelectNote={selectNote} />
+              <Suspense fallback={<div className="knowledge-empty"><strong>{t("正在构建标签知识图谱")}</strong></div>}>
+                <TagKnowledgeMap index={index} onSelectNote={selectNote} />
               </Suspense>
             ) : (
               <StarGraph
@@ -2571,9 +2611,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             mode={isReadOnlyContent ? "preview" : editorMode}
             note={currentNote}
             onChange={isReadOnlyContent ? () => undefined : updateCurrentNote}
+            onExtractTags={isReadOnlyContent ? undefined : (granularity) => void extractCurrentNoteTags(granularity)}
             onModeChange={isReadOnlyContent ? () => undefined : setEditorMode}
             onSelectGraphNode={selectNote}
+            onTagsChange={isReadOnlyContent ? undefined : updateCurrentNoteTags}
             readOnly={isReadOnlyContent}
+            tagExtracting={tagExtractingPath === currentNote?.path}
           />
         )}
       </main>

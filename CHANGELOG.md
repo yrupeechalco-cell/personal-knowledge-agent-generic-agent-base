@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added editable per-note word clouds backed by the existing tag metadata, with five extraction granularity levels.
+- Added local and model-assisted tag extraction that preserves user-confirmed tags and continues to work without a configured model.
+- Added a tag-first 3D knowledge map with classification, connection, application, and source domains.
+- Added tag detail cards with distribution, connection, application, and source-document evidence.
+
+### Improved
+
+- Separated the file-relationship graph from the new tag-system perspective instead of presenting folder structure as knowledge understanding.
+- Added responsive label ranking and center-panel container rules so dense graphs remain readable in narrow desktop windows.
+- Added wider three-axis layouts, smoother domain transitions, hover isolation, and evidence-backed relation highlighting.
+
+### Verification
+
+- Added parser, tag editing, extraction, relationship-model, and word-cloud interaction tests.
+- Verified the shared Web and Desktop builds against the same workspace implementation.
+
 ## 0.2.4 - 2026-07-16
 
 ### Fixed
