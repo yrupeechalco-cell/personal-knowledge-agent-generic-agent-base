@@ -1,4 +1,5 @@
 import { buildNoteTagCloud, classifyKnowledgeTag, normalizeTagKey, type KnowledgeTagKind, type VaultIndex } from "@knowledge-agent/core";
+import type { KnowledgeContribution, KnowledgeDomain, KnowledgeDomainKind, KnowledgeRoleModel } from "./knowledgeRoleModel";
 
 export type KnowledgeViewDomain = "classification" | "context" | "application" | "source";
 export type TagKnowledgeRelationBasis = "co-occurrence" | "explicit-link";
@@ -149,6 +150,42 @@ export function domainNodeWeight(node: TagKnowledgeNode, domain: KnowledgeViewDo
   if (domain === "application") return round(node.weight * 0.35 + node.application * 0.65);
   if (domain === "source") return round(Math.min(1, 0.25 + Math.sqrt(node.documentPaths.length) * 0.24));
   return node.weight;
+}
+
+export function globalNodeScale(node: TagKnowledgeNode): number {
+  return round(0.88 + Math.sqrt(Math.max(0, Math.min(1, node.weight))) * 0.28);
+}
+
+export function relationLineOpacity(strength: number): number {
+  return round(0.05 + Math.max(0, Math.min(1, strength)) * 0.2);
+}
+
+export function buildTagRootDomain(node: TagKnowledgeNode, roleModel: KnowledgeRoleModel): KnowledgeDomain {
+  const paths = new Set(node.documentPaths);
+  const contributions = new Map<string, KnowledgeContribution>();
+  for (const domain of roleModel.domains) {
+    for (const contribution of domain.contributions) {
+      if (!paths.has(contribution.path)) continue;
+      const current = contributions.get(contribution.path);
+      if (!current || contribution.score > current.score) contributions.set(contribution.path, contribution);
+    }
+  }
+  return {
+    id: `tag:${node.id}`,
+    label: node.label,
+    kind: tagKindToDomainKind(node.kind),
+    notePaths: [...node.documentPaths],
+    importance: node.weight,
+    confidence: round(Math.min(1, 0.45 + node.centrality * 0.42 + Math.min(0.13, node.documentPaths.length * 0.02))),
+    contributions: [...contributions.values()].sort((left, right) => right.score - left.score || left.title.localeCompare(right.title, "zh-CN"))
+  };
+}
+
+function tagKindToDomainKind(kind: KnowledgeTagKind): KnowledgeDomainKind {
+  if (kind === "method") return "method";
+  if (kind === "evidence") return "archive";
+  if (kind === "entity") return "project";
+  return "topic";
 }
 
 function addRelation(relations: Map<string, MutableRelation>, rawSource: string, rawTarget: string, evidence: string, explicit: boolean) {

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 - 2026-07-20
 
 ### Added
 
@@ -14,6 +14,9 @@
 - Separated the file-relationship graph from the new tag-system perspective instead of presenting folder structure as knowledge understanding.
 - Added responsive label ranking and center-panel container rules so dense graphs remain readable in narrow desktop windows.
 - Added wider three-axis layouts, smoother domain transitions, hover isolation, and evidence-backed relation highlighting.
+- Kept each tag's base sphere size and each relation's base brightness stable across domains; domain-specific importance now appears through position and outer-rim emphasis.
+- Restored the 3D-to-2D drill-down: clicking a tag sphere now opens its document root map, and returning reliably remounts the 3D canvas.
+- Compressed the global sphere-size range and compensated perspective depth so the same tag keeps a comparable on-screen size across domains.
 
 ### Verification
 

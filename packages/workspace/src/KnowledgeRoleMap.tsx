@@ -351,7 +351,7 @@ function MacroKnowledgeTerrain({ model, onSelectDomain }: { model: KnowledgeRole
   );
 }
 
-function DomainRootMap({
+export function DomainRootMap({
   domain,
   model,
   onBack,

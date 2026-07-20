@@ -1,16 +1,21 @@
 import type { KnowledgeTagKind, VaultIndex } from "@knowledge-agent/core";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useLocalization } from "@knowledge-agent/ui";
 import {
   buildTagKnowledgeModel,
+  buildTagRootDomain,
   domainNodeWeight,
+  globalNodeScale,
+  relationLineOpacity,
   type KnowledgeViewDomain,
   type TagKnowledgeModel,
   type TagKnowledgeNode
 } from "./tagKnowledgeModel";
+import { buildKnowledgeRoleModel } from "./knowledgeRoleModel";
+import { DomainRootMap } from "./KnowledgeRoleMap";
 
 interface TagKnowledgeMapProps {
   index: VaultIndex;
@@ -24,6 +29,8 @@ interface VisualNode {
   core: THREE.Sprite;
   target: THREE.Vector3;
   targetScale: number;
+  emphasis: number;
+  targetEmphasis: number;
   label: HTMLDivElement;
 }
 
@@ -31,6 +38,8 @@ interface VisualRelation {
   source: string;
   target: string;
   line: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  baseColor: number;
+  baseOpacity: number;
 }
 
 interface SceneState {
@@ -55,6 +64,7 @@ const TAG_COLORS: Record<KnowledgeTagKind, number> = {
 export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
   const { runtime, t } = useLocalization();
   const model = useMemo(() => buildTagKnowledgeModel(index), [index]);
+  const roleModel = useMemo(() => buildKnowledgeRoleModel(index), [index]);
   const [domain, setDomain] = useState<KnowledgeViewDomain>("classification");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -62,10 +72,9 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
   const labelLayerRef = useRef<HTMLDivElement>(null);
   const sceneStateRef = useRef<SceneState | null>(null);
   const domainRef = useRef(domain);
-  const selectedIdRef = useRef(selectedId);
   domainRef.current = domain;
-  selectedIdRef.current = selectedId;
   const selected = model.nodes.find((node) => node.id === selectedId) ?? null;
+  const selectedDomain = useMemo(() => selected ? buildTagRootDomain(selected, roleModel) : null, [roleModel, selected]);
   const hovered = model.nodes.find((node) => node.id === hoveredId) ?? null;
 
   useEffect(() => {
@@ -73,7 +82,7 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
   }, [domain]);
 
   useEffect(() => {
-    if (!sceneHostRef.current || !labelLayerRef.current || model.nodes.length === 0) return;
+    if (selectedId || !sceneHostRef.current || !labelLayerRef.current || model.nodes.length === 0) return;
     const host = sceneHostRef.current;
     const labelLayer = labelLayerRef.current;
     labelLayer.replaceChildren();
@@ -140,9 +149,11 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       label.className = `tag-knowledge-label kind-${node.kind}`;
       label.textContent = node.label;
       labelLayer.appendChild(label);
-      const targetScale = visualScale(node, domain);
-      setVisualNodeScale({ root, wash, rim, core, target: root.position.clone(), targetScale, label }, targetScale);
-      visualNodes.set(node.id, { root, wash, rim, core, target: root.position.clone(), targetScale, label });
+      const targetScale = globalNodeScale(node);
+      const emphasis = domainNodeWeight(node, domain);
+      const visual = { root, wash, rim, core, target: root.position.clone(), targetScale, emphasis, targetEmphasis: emphasis, label };
+      setVisualNodeScale(visual, targetScale);
+      visualNodes.set(node.id, visual);
     }
 
     const visualRelations: VisualRelation[] = [];
@@ -151,15 +162,17 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       const target = visualNodes.get(relation.target)?.root.position;
       if (!source || !target) continue;
       const geometry = new THREE.BufferGeometry().setFromPoints([source, target]);
+      const baseColor = relation.basis === "explicit-link" ? 0x615a72 : 0x454449;
+      const baseOpacity = relationLineOpacity(relation.strength);
       const material = new THREE.LineBasicMaterial({
-        color: relation.basis === "explicit-link" ? 0x615a72 : 0x4b4a50,
+        color: baseColor,
         transparent: true,
-        opacity: 0.08 + relation.strength * 0.18
+        opacity: baseOpacity
       });
       const line = new THREE.Line(geometry, material);
       line.userData = { source: relation.source, target: relation.target };
       group.add(line);
-      visualRelations.push({ source: relation.source, target: relation.target, line });
+      visualRelations.push({ source: relation.source, target: relation.target, line, baseColor, baseOpacity });
     }
 
     const related = new Map<string, Set<string>>();
@@ -192,17 +205,13 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       renderer.domElement.style.cursor = nextId ? "pointer" : "grab";
       const connected = nextId ? related.get(nextId) ?? new Set([nextId]) : null;
       for (const [id, visual] of visualNodes) {
-        const active = id === nextId;
         const visible = !connected || connected.has(id);
-        visual.wash.material.opacity = visible ? (active ? 1 : 0.88) : 0.055;
-        visual.rim.material.opacity = visible ? (active ? 0.78 : 0.43) : 0.045;
-        visual.core.material.opacity = visible ? (active ? 0.92 : 0.8) : 0.07;
         visual.label.classList.toggle("dimmed", !visible);
       }
       for (const relation of visualRelations) {
         const active = nextId && (relation.source === nextId || relation.target === nextId);
-        relation.line.material.color.setHex(active ? 0x9873ef : 0x4b4a50);
-        relation.line.material.opacity = nextId ? (active ? 0.72 : 0.025) : 0.18;
+        relation.line.material.color.setHex(active ? 0x9873ef : relation.baseColor);
+        relation.line.material.opacity = nextId ? (active ? 0.72 : 0.018) : relation.baseOpacity;
       }
     }
 
@@ -216,7 +225,13 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
 
     function onPointerUp(event: PointerEvent) {
       const moved = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5;
-      if (!moved) setSelectedId(nodeAt(event.clientX, event.clientY));
+      if (!moved) {
+        const nextId = nodeAt(event.clientX, event.clientY);
+        if (nextId) {
+          setHoveredId(null);
+          setSelectedId(nextId);
+        }
+      }
     }
 
     renderer.domElement.addEventListener("pointermove", onPointerMove);
@@ -234,7 +249,8 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
         const visual = visualNodes.get(node.id);
         if (!visual) continue;
         visual.target.copy(positions.get(node.id) ?? new THREE.Vector3());
-        visual.targetScale = visualScale(node, nextDomain);
+        visual.targetScale = globalNodeScale(node);
+        visual.targetEmphasis = domainNodeWeight(node, nextDomain);
       }
     }
 
@@ -256,13 +272,32 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
     observer.observe(host);
     resize();
     const projected = new THREE.Vector3();
+    const cameraSpacePosition = new THREE.Vector3();
+    const cameraSpaceTarget = new THREE.Vector3();
     let frame = 0;
     function animate() {
       frame = requestAnimationFrame(animate);
-      for (const visual of visualNodes.values()) {
+      controls.update();
+      camera.updateMatrixWorld();
+      cameraSpaceTarget.copy(controls.target).applyMatrix4(camera.matrixWorldInverse);
+      const referenceDepth = Math.max(0.1, Math.abs(cameraSpaceTarget.z));
+      const connected = focusedId ? related.get(focusedId) ?? new Set([focusedId]) : null;
+      for (const [id, visual] of visualNodes) {
         visual.root.position.lerp(visual.target, 0.075);
-        const nextScale = THREE.MathUtils.lerp(visual.root.scale.x, visual.targetScale, 0.08);
+        cameraSpacePosition.copy(visual.root.position).applyMatrix4(camera.matrixWorldInverse);
+        const depthCompensation = THREE.MathUtils.clamp(Math.abs(cameraSpacePosition.z) / referenceDepth, 0.68, 1.46);
+        const screenStableScale = visual.targetScale * depthCompensation;
+        const nextScale = THREE.MathUtils.lerp(visual.root.scale.x, screenStableScale, 0.08);
         visual.root.scale.setScalar(nextScale);
+        visual.emphasis = THREE.MathUtils.lerp(visual.emphasis, visual.targetEmphasis, 0.085);
+        const active = id === focusedId;
+        const visible = !connected || connected.has(id);
+        const washOpacity = 0.42 + visual.emphasis * 0.42;
+        const rimOpacity = 0.18 + visual.emphasis * 0.38;
+        const coreOpacity = 0.62 + modelNodesById.get(id)!.weight * 0.22;
+        visual.wash.material.opacity = THREE.MathUtils.lerp(visual.wash.material.opacity, visible ? (active ? 1 : washOpacity) : 0.05, 0.16);
+        visual.rim.material.opacity = THREE.MathUtils.lerp(visual.rim.material.opacity, visible ? (active ? 0.8 : rimOpacity) : 0.04, 0.16);
+        visual.core.material.opacity = THREE.MathUtils.lerp(visual.core.material.opacity, visible ? (active ? 0.94 : coreOpacity) : 0.06, 0.16);
       }
       for (const relation of visualRelations) {
         const source = visualNodes.get(relation.source)?.root.position;
@@ -273,13 +308,11 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
         positions.setXYZ(1, target.x, target.y, target.z);
         positions.needsUpdate = true;
       }
-      controls.update();
       renderer.render(scene, camera);
       const rect = renderer.domElement.getBoundingClientRect();
       for (const [id, visual] of visualNodes) {
         projected.copy(visual.root.position).project(camera);
-        const node = modelNodesById.get(id);
-        const visible = projected.z < 1 && (focusedId === id || visibleLabelIds.has(id) || (node && selectedIdRef.current === node.id));
+        const visible = projected.z < 1 && (focusedId === id || visibleLabelIds.has(id));
         visual.label.style.transform = `translate(-50%, -50%) translate(${(projected.x * 0.5 + 0.5) * rect.width}px, ${(-projected.y * 0.5 + 0.5) * rect.height}px)`;
         visual.label.style.opacity = visible ? "1" : "0";
       }
@@ -309,7 +342,7 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       renderer.domElement.remove();
       labelLayer.replaceChildren();
     };
-  }, [model]);
+  }, [model, selectedId]);
 
   if (model.nodes.length === 0) {
     return (
@@ -318,6 +351,17 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
         <strong>{t("标签知识图谱尚未形成")}</strong>
         <span>{t("先为资料添加标签，或在笔记中使用 Agent 拆解。")}</span>
       </section>
+    );
+  }
+
+  if (selectedDomain) {
+    return (
+      <DomainRootMap
+        domain={selectedDomain}
+        model={roleModel}
+        onBack={() => setSelectedId(null)}
+        onSelectNote={onSelectNote}
+      />
     );
   }
 
@@ -350,36 +394,10 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
         <span><i className="entity" />{t("对象")}</span>
         <span><i className="evidence" />{t("证据")}</span>
       </div>
-      {selected ? (
-        <TagInsight node={selected} onClose={() => setSelectedId(null)} onSelectNote={onSelectNote} />
-      ) : hovered ? (
+      {hovered ? (
         <TagHoverInsight node={hovered} />
       ) : null}
     </section>
-  );
-}
-
-function TagInsight({ node, onClose, onSelectNote }: { node: TagKnowledgeNode; onClose(): void; onSelectNote(path: string): void }) {
-  const { runtime, t } = useLocalization();
-  return (
-    <aside className="tag-knowledge-insight selected">
-      <header>
-        <span>{t(tagKindLabel(node.kind))}</span>
-        <button aria-label={t("关闭标签详情")} onClick={onClose} type="button"><X size={13} /></button>
-      </header>
-      <strong>{node.label}</strong>
-      <small>{runtime(`${node.documentPaths.length} 篇资料 · 来源 ${node.dominantSource}`)}</small>
-      <div className="tag-insight-metrics">
-        <span>{t("分布")} <b>{Math.round(node.weight * 100)}</b></span>
-        <span>{t("连接")} <b>{Math.round(node.centrality * 100)}</b></span>
-        <span>{t("应用")} <b>{Math.round(node.application * 100)}</b></span>
-      </div>
-      <div className="tag-insight-documents">
-        {node.documentPaths.slice(0, 7).map((path) => (
-          <button key={path} onClick={() => onSelectNote(path)} type="button">{path.replace(/\.md$/i, "")}</button>
-        ))}
-      </div>
-    </aside>
   );
 }
 
@@ -405,10 +423,6 @@ function domainHeading(domain: KnowledgeViewDomain): string {
 
 function tagKindLabel(kind: KnowledgeTagKind): string {
   return ({ concept: "概念", method: "方法", entity: "对象", evidence: "证据" } as Record<KnowledgeTagKind, string>)[kind];
-}
-
-function visualScale(node: TagKnowledgeNode, domain: KnowledgeViewDomain): number {
-  return 0.7 + domainNodeWeight(node, domain) * 0.78;
 }
 
 function rankedLabelIds(model: TagKnowledgeModel, domain: KnowledgeViewDomain, width: number): Set<string> {

@@ -1,6 +1,7 @@
 import { buildVaultIndex, type NoteFile } from "@knowledge-agent/core";
 import { describe, expect, it } from "vitest";
-import { buildTagKnowledgeModel, domainNodeWeight } from "./tagKnowledgeModel";
+import { buildKnowledgeRoleModel } from "./knowledgeRoleModel";
+import { buildTagKnowledgeModel, buildTagRootDomain, domainNodeWeight, globalNodeScale, relationLineOpacity } from "./tagKnowledgeModel";
 
 describe("tag knowledge model", () => {
   const files: NoteFile[] = [
@@ -23,5 +24,31 @@ describe("tag knowledge model", () => {
     expect(derivative?.dominantSource).toBe("数学");
     expect(domainNodeWeight(derivative!, "application")).toBeGreaterThan(0);
     expect(model.sourceCount).toBe(2);
+  });
+
+  it("keeps base node size and relation brightness independent from the active domain", () => {
+    const model = buildTagKnowledgeModel(buildVaultIndex(files));
+    const derivative = model.nodes.find((node) => node.label === "导数")!;
+    const scale = globalNodeScale(derivative);
+
+    for (const domain of ["classification", "context", "application", "source"] as const) {
+      expect(globalNodeScale(derivative)).toBe(scale);
+      expect(domainNodeWeight(derivative, domain)).toBeGreaterThanOrEqual(0);
+    }
+    expect(globalNodeScale({ ...derivative, weight: 1 }) - globalNodeScale({ ...derivative, weight: 0 })).toBeLessThanOrEqual(0.28);
+    expect(relationLineOpacity(0)).toBe(0.05);
+    expect(relationLineOpacity(1)).toBe(0.25);
+  });
+
+  it("builds a drill-down root from the documents behind a tag", () => {
+    const index = buildVaultIndex(files);
+    const tagModel = buildTagKnowledgeModel(index);
+    const roleModel = buildKnowledgeRoleModel(index);
+    const derivative = tagModel.nodes.find((node) => node.label === "导数")!;
+    const root = buildTagRootDomain(derivative, roleModel);
+
+    expect(root.label).toBe("导数");
+    expect(root.notePaths).toEqual(expect.arrayContaining(["数学/导数.md", "项目/优化案例.md"]));
+    expect(root.contributions.map((item) => item.path)).toEqual(expect.arrayContaining(root.notePaths));
   });
 });
