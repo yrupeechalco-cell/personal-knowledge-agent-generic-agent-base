@@ -34,19 +34,23 @@ For writable local sources, right-click a note or folder to create, rename, copy
 
 ## 3. Use the Graphs
 
-![Whole-collection knowledge terrain](images/workspace-graph.png)
+![Whole-collection tag knowledge map](images/workspace-graph.png)
 
-The center workspace separates macro knowledge roles from explicit file relationships:
+The center workspace separates the tag system from explicit file relationships:
+
+- **Tag system:** turns document tags into a three-dimensional knowledge cloud. Classification, connection, application, and source domains provide different viewpoints while keeping each tag's base size and each relation's base brightness stable.
+- **File relationships:** show traceable `[[wiki links]]`, backlinks, and unresolved concepts.
 
 - Drag empty space to pan.
 - Use the mouse wheel to zoom around the pointer.
 - Drag a node to adjust its local position.
 - Hover a node to dim unrelated nodes and emphasize direct connections.
-- Select a node to open its note.
+- Select a tag sphere to enter its two-dimensional root map, then open source notes from the leaves.
+- Select a file node to open its note directly.
 - Labels fade as their real screen size becomes unreadable and return when zoomed in.
 - Hold `Ctrl` and drag with the left mouse button to select multiple file nodes.
 
-Explicit file relationships come from note content such as `[[wiki links]]`; the App does not invent strong links merely because files share a folder.
+Tag relations come from shared tags, explicit links, and traceable source evidence; file relationships come from note content such as `[[wiki links]]`. The App does not invent strong links merely because files share a folder.
 
 ## 4. Read, Edit, and Review Local Context
 

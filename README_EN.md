@@ -30,7 +30,7 @@ Personal Knowledge Agent separates these concerns into four complementary views:
 
 1. **The file tree answers “where is it stored?”** It preserves real folders, hierarchy, filtering, and tags.
 2. **The file relationship graph answers “which documents are explicitly connected?”** It is built from traceable Markdown wiki links.
-3. **Knowledge terrain answers “what role does it play in this body of knowledge?”** It organizes a macro view around domains, questions, evidence, decisions, and outputs.
+3. **The tag knowledge map answers “what is it, what appears with it, and where can it be applied?”** It turns document tags into a three-dimensional knowledge cloud with classification, connection, application, and source domains.
 4. **Note Agent answers “what should I understand or do next?”** It reads approved context, proposes changes, and executes authorized tools within local permission boundaries.
 
 ## Connect Real Files
@@ -66,7 +66,7 @@ The demonstration content is maintained in the separate [`knowledge-agent-public
 
 ## The Three-Column Workspace
 
-![Knowledge terrain loaded from the public GitHub demo](docs/images/workspace-graph.png)
+![Tag knowledge map generated from the public GitHub demo](docs/images/workspace-graph.png)
 
 The desktop App and Web App render the same shared workspace. Their interface and graph behavior stay aligned; only their operating-system permissions differ.
 
@@ -83,11 +83,11 @@ The left column mirrors the real Markdown folder structure:
 
 The file tree owns storage structure. It does not compete with the graph by pretending to explain semantic influence.
 
-### Center: Knowledge Terrain and File Relationships
+### Center: Tag System and File Relationships
 
 The center column provides two independent graph perspectives.
 
-**Knowledge terrain** is the macro view. Domain nodes spread through a three-dimensional scene. Node size represents relative influence inside the current collection, while lines represent cross-domain evidence. Selecting a domain opens a rooted role map of questions, evidence, decisions, outputs, and background documents.
+**Tag system** is the classification view. Tags from every document become a three-dimensional knowledge cloud. A sphere's base size represents its whole-collection weight and stays stable across the classification, connection, application, and source domains. Domains change layout and rim emphasis without rewriting that global weight. Selecting a sphere opens a two-dimensional root map of questions, evidence, decisions, outputs, and background documents.
 
 **File relationships** are the explicit-document view. The graph is derived from `[[wiki links]]`, backlinks, and unresolved concepts. It does not infer strong connections from folder proximity.
 
@@ -99,7 +99,8 @@ Graph interactions include:
 - Hover a node to dim unrelated content and emphasize direct relationships.
 - Fade labels gradually as their real rendered size becomes unreadable.
 - Preserve graph position and zoom when changing views.
-- Hold `Ctrl` and drag with the left mouse button to select multiple file nodes for a batch delete flow.
+- Hover a tag sphere to dim unrelated knowledge and highlight direct relations in purple.
+- Hold `Ctrl` and drag with the left mouse button in the file graph to select multiple file nodes for a batch delete flow.
 
 ## Reading, Editing, and Local Context
 
@@ -113,7 +114,7 @@ Opening a note switches the center area to its reader or editor:
 - Related documents keep labels while unrelated nodes remain as low-contrast points.
 - Unresolved concepts use a subdued dashed treatment and can become new note drafts.
 
-The miniature graph explains the immediate neighborhood of the current article. It does not replace the whole-collection knowledge terrain.
+The miniature graph explains the immediate neighborhood of the current article. It does not replace the whole-collection tag system.
 
 ## Note Agent
 
