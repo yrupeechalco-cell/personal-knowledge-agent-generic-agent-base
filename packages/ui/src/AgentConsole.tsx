@@ -1,5 +1,18 @@
 import type { AgentDiff, AgentMessage } from "@knowledge-agent/agent";
-import { FolderUp, History, RefreshCw, SlidersHorizontal, SquarePlus } from "lucide-react";
+import {
+  Focus,
+  FolderUp,
+  History,
+  KeyRound,
+  PanelRightClose,
+  PanelRightOpen,
+  PictureInPicture2,
+  RefreshCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  SquarePlus,
+  Trash2
+} from "lucide-react";
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useLocalization, type TranslationValues } from "./localization";
@@ -25,6 +38,11 @@ export interface AgentConsoleProps {
   canRestoreSession?: boolean;
   contextUploadLabel?: string;
   modelConfigured?: boolean;
+  modelCredentialStorage?: "windows-dpapi" | "environment" | "none";
+  modelCredentialStatus?: "unchecked" | "valid" | "invalid";
+  modelCredentialUpdatedLabel?: string;
+  modelCredentialValidatedLabel?: string;
+  modelCredentialBusy?: boolean;
   canConfigureModel?: boolean;
   settingsOpen?: boolean;
   selectedModel?: string;
@@ -35,6 +53,12 @@ export interface AgentConsoleProps {
   onModelChange?(model: string): void;
   onAgentModeChange?(mode: string): void;
   onRequestApiKey?(): void;
+  onDeleteApiKey?(): void;
+  onValidateApiKey?(): void;
+  onDock?(): void;
+  onFloat?(): void;
+  onHide?(): void;
+  onFocus?(): void;
   onNewSession?(): void;
   onResetSession?(): void;
   onRestoreSession?(): void;
@@ -74,6 +98,11 @@ export function AgentConsole({
   canRestoreSession = false,
   contextUploadLabel = "添加当前笔记到 Agent 上下文",
   modelConfigured = false,
+  modelCredentialStorage = "none",
+  modelCredentialStatus = "unchecked",
+  modelCredentialUpdatedLabel,
+  modelCredentialValidatedLabel,
+  modelCredentialBusy = false,
   canConfigureModel = false,
   settingsOpen = false,
   selectedModel = "",
@@ -84,6 +113,12 @@ export function AgentConsole({
   onModelChange,
   onAgentModeChange,
   onRequestApiKey,
+  onDeleteApiKey,
+  onValidateApiKey,
+  onDock,
+  onFloat,
+  onHide,
+  onFocus,
   onNewSession,
   onResetSession,
   onRestoreSession,
@@ -96,6 +131,7 @@ export function AgentConsole({
 }: AgentConsoleProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const { runtime, t } = useLocalization();
+  const visibleModelLabel = localizedModelLabel(modelLabel, t);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -126,11 +162,18 @@ export function AgentConsole({
         agentModeOptions,
         canConfigureModel,
         modelConfigured,
+        modelCredentialBusy,
+        modelCredentialStatus,
+        modelCredentialStorage,
+        modelCredentialUpdatedLabel,
+        modelCredentialValidatedLabel,
         modelOptions,
         onAgentModeChange,
         onModelChange,
+        onDeleteApiKey,
         onRequestApiKey,
         onToggleSettings,
+        onValidateApiKey,
         selectedAgentMode,
         selectedModel,
         t
@@ -141,13 +184,13 @@ export function AgentConsole({
     <aside className="agent-console">
       <header className="agent-console-header">
         <div className="agent-title-block">
-          <h2>Note Agent</h2>
-          <p>GenericAgent-inspired workspace controller</p>
+          <h2>{t("笔记智能体")}</h2>
+          <p>{t("知识库工作台智能控制器")}</p>
         </div>
         <section className={modelConfigured ? "agent-model ready" : "agent-model"} aria-label={t("模型连接状态")}>
           <div className="agent-model-state">
-            <span>{modelConfigured ? "Connected" : "Offline"}</span>
-            <strong>{modelLabel}</strong>
+            <span>{modelConfigured ? t("已连接") : t("离线")}</span>
+            <strong>{visibleModelLabel}</strong>
           </div>
           <button
             aria-expanded={settingsOpen}
@@ -165,6 +208,20 @@ export function AgentConsole({
             <p className="agent-model-warning">{t("需要填写本机 DeepSeek API key 后才能使用在线模型。")}</p>
           ) : null}
         </section>
+        <div className="agent-panel-controls" aria-label={t("智能体面板布局")}>
+          <button aria-label={t("停靠右侧")} onClick={onDock} title={t("停靠右侧")} type="button">
+            <PanelRightOpen size={14} />
+          </button>
+          <button aria-label={t("浮动窗口")} onClick={onFloat} title={t("浮动窗口")} type="button">
+            <PictureInPicture2 size={14} />
+          </button>
+          <button aria-label={t("专注模式")} onClick={onFocus} title={t("专注模式")} type="button">
+            <Focus size={14} />
+          </button>
+          <button aria-label={t("收起智能体")} onClick={onHide} title={t("收起智能体")} type="button">
+            <PanelRightClose size={14} />
+          </button>
+        </div>
       </header>
 
       <div className="agent-messages" ref={messagesRef}>
@@ -181,9 +238,9 @@ export function AgentConsole({
           <section className={`diff-card ${diff.permission}`} key={`${diff.path}-${diff.summary}-${index}`}>
             <h3>{diff.summary}</h3>
             <p>{diff.path}</p>
-            <pre>{diffPreview(diff)}</pre>
+            <pre>{runtime(diffPreview(diff))}</pre>
             <button disabled={readOnly || diff.permission === "blocked"} onClick={() => onApply(diff)} type="button">
-              {diff.permission === "confirm" ? "Confirm apply" : diff.permission === "blocked" ? "Blocked" : "Apply"}
+              {diff.permission === "confirm" ? t("确认应用") : diff.permission === "blocked" ? t("已阻止") : t("应用改动")}
             </button>
           </section>
         ))}
@@ -233,23 +290,23 @@ export function AgentConsole({
         </div>
         </div>
         <textarea
-          aria-label="Agent prompt"
+          aria-label={t("智能体输入")}
           disabled={readOnly}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={submitFromKeyboard}
-          placeholder={readOnly ? t("只读磁盘结构模式已暂停 Agent") : "Try: summarize current note / suggest links / generate MOC / organize current note"}
+          placeholder={readOnly ? t("只读磁盘结构模式已暂停 Agent") : t("可以总结当前笔记、建议链接、生成目录或整理内容")}
           value={input}
         />
         <button className="agent-send-button" disabled={readOnly || running || input.trim() === ""} onClick={onRun} type="button">
-          {running ? "Running" : "Send"}
+          {running ? t("运行中") : t("发送")}
         </button>
         <div className="agent-status-strip" aria-label={t("模型状态")}>
-          <span className="agent-status-model">{modelShortLabel ?? shortModelName(modelLabel)}</span>
+          <span className="agent-status-model">{t(modelShortLabel ?? shortModelName(visibleModelLabel))}</span>
           <span>
-            Effort:
-            <strong>{formatEffort(reasoningEffort)}</strong>
+            {t("推理强度")}:
+            <strong>{t(formatEffort(reasoningEffort))}</strong>
           </span>
-          <span className="agent-context-meter" title={contextUsage ? runtime(contextUsage.label) : "Context usage unavailable"}>
+          <span className="agent-context-meter" title={contextUsage ? runtime(contextUsage.label) : t("上下文用量暂不可用")}>
             <i style={{ "--context-percent": `${contextUsage?.percent ?? 0}%` } as CSSProperties} />
             <strong>{contextUsage?.percent ?? 0}%</strong>
           </span>
@@ -265,23 +322,39 @@ export function AgentConsole({
 function shortModelName(label: string): string {
   if (/flash/i.test(label)) return "Flash";
   if (/pro/i.test(label)) return "Pro";
-  if (/offline/i.test(label)) return "Local";
-  return "Model";
+  if (/offline/i.test(label)) return "本地";
+  return "模型";
+}
+
+function localizedModelLabel(
+  label: string,
+  t: (source: string, values?: TranslationValues) => string
+): string {
+  return /^offline(?::offline)?$/i.test(label.trim()) ? t("本地离线模式") : label;
 }
 
 function formatEffort(effort: "low" | "medium" | "high"): string {
-  return effort[0].toUpperCase() + effort.slice(1);
+  if (effort === "low") return "低";
+  if (effort === "high") return "高";
+  return "中";
 }
 
 interface SettingsDialogProps {
   agentModeOptions: AgentSelectOption[];
   canConfigureModel: boolean;
   modelConfigured: boolean;
+  modelCredentialBusy: boolean;
+  modelCredentialStatus: "unchecked" | "valid" | "invalid";
+  modelCredentialStorage: "windows-dpapi" | "environment" | "none";
+  modelCredentialUpdatedLabel?: string;
+  modelCredentialValidatedLabel?: string;
   modelOptions: AgentSelectOption[];
   onAgentModeChange?(mode: string): void;
   onModelChange?(model: string): void;
+  onDeleteApiKey?(): void;
   onRequestApiKey?(): void;
   onToggleSettings?(): void;
+  onValidateApiKey?(): void;
   selectedAgentMode: string;
   selectedModel: string;
   t(source: string, values?: TranslationValues): string;
@@ -291,11 +364,18 @@ function renderSettingsDialog({
   agentModeOptions,
   canConfigureModel,
   modelConfigured,
+  modelCredentialBusy,
+  modelCredentialStatus,
+  modelCredentialStorage,
+  modelCredentialUpdatedLabel,
+  modelCredentialValidatedLabel,
   modelOptions,
   onAgentModeChange,
   onModelChange,
+  onDeleteApiKey,
   onRequestApiKey,
   onToggleSettings,
+  onValidateApiKey,
   selectedAgentMode,
   selectedModel,
   t
@@ -313,7 +393,7 @@ function renderSettingsDialog({
           ×
         </button>
         <header>
-          <span>Note Agent</span>
+          <span>{t("笔记智能体")}</span>
           <h2>{t("Agent 设置")}</h2>
           <p>{t("切换模型、笔记 Agent 模式和本机模型连接。")}</p>
         </header>
@@ -334,7 +414,7 @@ function renderSettingsDialog({
             </select>
           </label>
           <label>
-            <span>Agent</span>
+            <span>{t("智能体")}</span>
             <select
               aria-label="Agent mode"
               disabled={agentModeOptions.length === 0}
@@ -353,11 +433,46 @@ function renderSettingsDialog({
             <div className={modelConfigured ? "agent-connection-card ready" : "agent-connection-card"}>
               <div>
                 <span>{t("模型连接")}</span>
-                <strong>{modelConfigured ? t("本机密钥已保存") : t("未配置密钥")}</strong>
+                <strong>
+                  {modelConfigured
+                    ? modelCredentialStorage === "windows-dpapi"
+                      ? t("Windows DPAPI 已加密")
+                      : modelCredentialStorage === "environment"
+                        ? t("由系统环境变量提供")
+                        : t("密钥已配置")
+                    : t("未配置密钥")}
+                </strong>
+                {modelCredentialUpdatedLabel ? <small>{t("最近轮换：{time}", { time: modelCredentialUpdatedLabel })}</small> : null}
+                {modelCredentialValidatedLabel ? <small>{t("最近验证：{time}", { time: modelCredentialValidatedLabel })}</small> : null}
+                {modelConfigured ? (
+                  <small className={`agent-key-health ${modelCredentialStatus}`}>
+                    <ShieldCheck size={12} />
+                    {modelCredentialStatus === "valid"
+                      ? t("有效性检查通过")
+                      : modelCredentialStatus === "invalid"
+                        ? t("密钥已失效")
+                        : t("尚未检查有效性")}
+                  </small>
+                ) : null}
               </div>
-              <button className="agent-key-button" onClick={onRequestApiKey} type="button">
-                {t("配置")}
-              </button>
+              <div className="agent-key-actions">
+                <button className="agent-key-button" disabled={modelCredentialBusy} onClick={onRequestApiKey} type="button">
+                  <KeyRound size={13} />
+                  {modelConfigured ? t("轮换") : t("配置")}
+                </button>
+                {modelConfigured ? (
+                  <button className="agent-key-button" disabled={modelCredentialBusy} onClick={onValidateApiKey} type="button">
+                    <ShieldCheck size={13} />
+                    {t("验证")}
+                  </button>
+                ) : null}
+                {modelConfigured && modelCredentialStorage !== "environment" ? (
+                  <button className="agent-key-button danger" disabled={modelCredentialBusy} onClick={onDeleteApiKey} type="button">
+                    <Trash2 size={13} />
+                    {t("删除")}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>
@@ -379,5 +494,5 @@ function diffPreview(diff: AgentDiff): string {
     if (after[index]) lines.push(`+ ${after[index]}`);
     if (lines.length > 12) break;
   }
-  return lines.join("\n") || "No visible line changes.";
+  return lines.join("\n") || "没有可见行变化。";
 }

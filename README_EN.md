@@ -26,12 +26,13 @@ Automated checks protect this contract. Missing desktop settings, unreadable set
 
 Large personal knowledge collections usually face three different problems. Folder trees explain where a file is stored but not what role it plays. Conventional node graphs show connections but often fail to explain why they matter. General chat tools can discuss text, yet they rarely understand the real file structure and the risks of changing it.
 
-Personal Knowledge Agent separates these concerns into four complementary views:
+Personal Knowledge Agent separates these concerns into five complementary views:
 
 1. **The file tree answers “where is it stored?”** It preserves real folders, hierarchy, filtering, and tags.
 2. **The file relationship graph answers “which documents are explicitly connected?”** It is built from traceable Markdown wiki links.
 3. **The tag knowledge map answers “what is it, what appears with it, and where can it be applied?”** It turns document tags into a three-dimensional knowledge cloud with classification, connection, application, and source domains.
-4. **Note Agent answers “what should I understand or do next?”** It reads approved context, proposes changes, and executes authorized tools within local permission boundaries.
+4. **The knowledge canvas answers “how do these pieces form one idea?”** It combines text cards, tables, live note references, topic groups, and semantically labeled relationships.
+5. **Note Agent answers “what should I understand or do next?”** It reads approved context, proposes changes, and executes authorized tools within local permission boundaries.
 
 ## Connect Real Files
 
@@ -101,6 +102,13 @@ Graph interactions include:
 - Preserve graph position and zoom when changing views.
 - Hover a tag sphere to dim unrelated knowledge and highlight direct relations in purple.
 - Hold `Ctrl` and drag with the left mouse button in the file graph to select multiple file nodes for a batch delete flow.
+- Fit every node into view, reset the camera, cluster by top-level folder, and use a minimap to understand the current viewport.
+
+### Knowledge Canvas
+
+The knowledge canvas is for authoring explicit relationships instead of asking the graph to guess them. It supports text cards, tables, live references to real Markdown notes, topic groups, and labeled edges for related, supporting, contradicting, dependent, and reference relationships. Users can pan, zoom, select, resize, fit content, and undo or redo changes.
+
+The desktop App stores canvas metadata in `.knowledge-agent/canvas.json` inside the current knowledge base without rewriting note bodies. Public GitHub repositories and read-only disk structures expose the canvas as read only.
 
 ## Reading, Editing, and Local Context
 
@@ -128,6 +136,7 @@ Note Agent is a controlled knowledge-work console, not an unrestricted system sh
 - Left-click a number to switch sessions and right-click it to remove that session.
 - Reset a conversation while keeping a recoverable snapshot; restore both messages and context memory later.
 - Keep the rest of the App interactive while a model task is running.
+- Dock, float, hide, or focus the Agent panel. An empty idle panel collapses automatically and stays open after the user deliberately restores it.
 
 ### Tools and Permissions
 
@@ -142,7 +151,7 @@ It does not receive unlimited Bash or arbitrary computer-control access. Every r
 - Deleted local files move into `.knowledge-agent-trash` for 30 days and can be restored after Agent review.
 - Read-only disk browsing disables content access and all Agent write operations.
 
-DeepSeek V4 Pro and DeepSeek V4 Flash are the current default model targets. Every user supplies their own API key. Keys stay in local App configuration and are never committed to the project, bundled in the installer, or uploaded to GitHub.
+DeepSeek V4 Pro and DeepSeek V4 Flash are the current default model targets. Every user supplies their own API key. The Windows App encrypts it for the current Windows account with DPAPI instead of writing plaintext into the knowledge base, project, installer, or GitHub. Users can rotate, validate, or delete the credential and inspect its latest validation time.
 
 ## Write, Delete, and Restore Behavior
 
@@ -158,7 +167,11 @@ The desktop App edits the real folder that the user connects. Safety behavior de
 | Restore | Returns the original path and content after Agent review |
 | Sensitive path | Blocked from indexing, write-back, and commit workflows |
 
-Trash expiry uses real UTC millisecond timestamps. Cleanup happens only after 30 actual days, preventing visible time and deletion time from drifting apart.
+Trash expiry uses real UTC millisecond timestamps. Cleanup happens only after 30 actual days, preventing visible time and deletion time from drifting apart. A dedicated Trash workspace shows the real `.knowledge-agent-trash/files` copy location, remaining retention time, a read-only preview, and the restore destination.
+
+## Update Trust and Control
+
+The Windows update settings show the current version, publisher, signature-verification policy, and release notes, and allow startup checks to be disabled. The client only installs GitHub Release artifacts that pass its embedded public-key verification. The signing private key exists only as an encrypted GitHub Actions secret and is never committed to the project.
 
 ## Default Safety Boundary
 

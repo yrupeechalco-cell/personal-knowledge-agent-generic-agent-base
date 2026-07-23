@@ -58,6 +58,54 @@
   white-space: pre-wrap;
 }
 
+.desktop-update-trust {
+  background: #1e1e21;
+  border: 1px solid #35353a;
+  border-radius: 6px;
+  display: grid;
+  gap: 7px;
+  margin: 13px 0 0;
+  padding: 10px 11px;
+}
+
+.desktop-update-trust div {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 82px minmax(0, 1fr);
+}
+
+.desktop-update-trust dt {
+  color: #85858d;
+  font-size: 11px;
+}
+
+.desktop-update-trust dd {
+  align-items: center;
+  color: #c9c9cf;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 6px;
+  margin: 0;
+}
+
+.desktop-update-trust dd svg {
+  color: #8fbd9a;
+}
+
+.desktop-update-toggle {
+  align-items: center;
+  color: #c2c2c8;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.desktop-update-toggle input {
+  accent-color: #a77cda;
+}
+
 .desktop-update-close {
   position: absolute;
   top: 12px;

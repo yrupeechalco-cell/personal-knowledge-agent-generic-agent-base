@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import type { GraphEdge, GraphNode, NoteGraph } from "@knowledge-agent/core";
+import { Focus, FolderTree, Map as MapIcon, RotateCcw } from "lucide-react";
 import { useLocalization } from "./localization";
 
 interface SimNode extends GraphNode {
@@ -103,9 +104,12 @@ export function StarGraph({
   const [trashArmed, setTrashArmed] = useState(false);
   const [panning, setPanning] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionDrag | null>(null);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [clusterByFolder, setClusterByFolder] = useState(true);
   const visibleGraph = useMemo(() => filterGraph(graph, filterText, showSecondHop), [graph, filterText, showSecondHop]);
   const adjacency = useMemo(() => buildAdjacency(visibleGraph.edges), [visibleGraph.edges]);
   const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
+  const clusterCenters = useMemo(() => buildClusterCenters(visibleGraph.nodes), [visibleGraph.nodes]);
 
   function updateViewport(next: Viewport | ((current: Viewport) => Viewport)) {
     cancelSmoothViewport();
@@ -282,7 +286,7 @@ export function StarGraph({
 
     function animate() {
       if (!running) return;
-      stepSimulation([...nodesRef.current.values()], visibleGraph.edges, radiusScale);
+      stepSimulation([...nodesRef.current.values()], visibleGraph.edges, radiusScale, clusterByFolder ? clusterCenters : undefined);
       setTick((value) => value + 1);
       frame = requestAnimationFrame(animate);
     }
@@ -292,9 +296,17 @@ export function StarGraph({
       running = false;
       cancelAnimationFrame(frame);
     };
-  }, [radiusScale, visibleGraph.edges]);
+  }, [clusterByFolder, clusterCenters, radiusScale, visibleGraph.edges]);
 
   const positioned = [...nodesRef.current.values()];
+  const visibleLabelIds = chooseNonOverlappingLabels(
+    positioned,
+    adjacency,
+    viewport,
+    svgUnitScale,
+    hoveredId,
+    selectedPathSet
+  );
 
   function viewPositionFromClient(clientX: number, clientY: number) {
     const svg = svgRef.current;
@@ -523,7 +535,14 @@ export function StarGraph({
             const active = isNodeActive(node.id, hoveredId, adjacency);
             const selected = selectedPathSet.has(node.id);
             const radius = node.depth === 0 ? 8 : node.depth === 1 ? 6 : 5;
-            const labelMetrics = graphLabelMetrics(showLabels, viewport.scale, svgUnitScale, node.id, hoveredId, active);
+            const labelMetrics = graphLabelMetrics(
+              showLabels && (visibleLabelIds.has(node.id) || hoveredId === node.id || selected),
+              viewport.scale,
+              svgUnitScale,
+              node.id,
+              hoveredId,
+              active
+            );
             return (
               <g
                 className={nodeClass(node, hoveredId, active, selected)}
@@ -549,6 +568,33 @@ export function StarGraph({
           })}
         </g>
       </svg>
+      <div className="graph-camera-tools" aria-label={t("图谱镜头工具")}>
+        <button aria-label={t("适配全部节点")} onClick={() => {
+          userViewportRef.current = true;
+          smoothViewportTo(fitGraphViewport(positioned));
+        }} title={t("适配全部节点")} type="button">
+          <Focus size={15} />
+        </button>
+        <button aria-label={t("重置镜头")} onClick={() => {
+          userViewportRef.current = false;
+          smoothViewportTo(DEFAULT_VIEWPORT);
+        }} title={t("重置镜头")} type="button">
+          <RotateCcw size={14} />
+        </button>
+        <button
+          className={clusterByFolder ? "active" : ""}
+          aria-label={t("按顶层文件夹聚类")}
+          onClick={() => setClusterByFolder((value) => !value)}
+          title={t("按顶层文件夹聚类")}
+          type="button"
+        >
+          <FolderTree size={14} />
+        </button>
+        <button aria-label={t("显示小地图")} className={showMinimap ? "active" : ""} onClick={() => setShowMinimap((value) => !value)} title={t("显示小地图")} type="button">
+          <MapIcon size={14} />
+        </button>
+      </div>
+      {showMinimap ? <GraphMinimap label={t("图谱小地图")} nodes={positioned} viewport={viewport} /> : null}
       {onDelete ? (
         <button
           aria-label={t("拖拽图谱节点到这里删除")}
@@ -683,7 +729,12 @@ function labelReadabilityOpacity(screenPx: number) {
   return (screenPx - LABEL_HIDE_BELOW_PX) / (LABEL_FULL_READABLE_PX - LABEL_HIDE_BELOW_PX);
 }
 
-function stepSimulation(nodes: SimNode[], edges: GraphEdge[], radiusScale: number) {
+function stepSimulation(
+  nodes: SimNode[],
+  edges: GraphEdge[],
+  radiusScale: number,
+  clusterCenters?: Map<string, { x: number; y: number }>
+) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const centerX = VIEWBOX.width / 2;
   const centerY = VIEWBOX.height / 2;
@@ -693,6 +744,11 @@ function stepSimulation(nodes: SimNode[], edges: GraphEdge[], radiusScale: numbe
     if (node.fixed) continue;
     node.vx += (centerX - node.x) * 0.00055;
     node.vy += (centerY - node.y) * 0.00055;
+    const cluster = clusterCenters?.get(topLevelFolder(node.id));
+    if (cluster) {
+      node.vx += (cluster.x - node.x) * 0.0014;
+      node.vy += (cluster.y - node.y) * 0.0014;
+    }
   }
 
   for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
@@ -743,6 +799,104 @@ function stepSimulation(nodes: SimNode[], edges: GraphEdge[], radiusScale: numbe
     node.x += node.vx;
     node.y += node.vy;
   }
+}
+
+function buildClusterCenters(nodes: GraphNode[]) {
+  const groups = [...new Set(nodes.map((node) => topLevelFolder(node.id)))].sort();
+  const centers = new Map<string, { x: number; y: number }>();
+  const radius = Math.min(185, 78 + groups.length * 10);
+  groups.forEach((group, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(groups.length, 1) - Math.PI / 2;
+    centers.set(group, {
+      x: VIEWBOX.width / 2 + Math.cos(angle) * radius,
+      y: VIEWBOX.height / 2 + Math.sin(angle) * radius * 0.72
+    });
+  });
+  return centers;
+}
+
+function topLevelFolder(path: string) {
+  const normalized = path.replaceAll("\\", "/");
+  const slash = normalized.indexOf("/");
+  return slash >= 0 ? normalized.slice(0, slash) : "根目录";
+}
+
+function chooseNonOverlappingLabels(
+  nodes: SimNode[],
+  adjacency: Map<string, Set<string>>,
+  viewport: Viewport,
+  svgUnitScale: number,
+  hoveredId: string | undefined,
+  selectedPaths: Set<string>
+) {
+  const accepted = new Set<string>();
+  const boxes: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  const fontSize = BASE_LABEL_FONT_SIZE / clamp(svgUnitScale, LABEL_MIN_SIZE_COMPENSATION, LABEL_MAX_SIZE_COMPENSATION);
+  const screenPx = fontSize * viewport.scale * svgUnitScale;
+  if (screenPx <= LABEL_HIDE_BELOW_PX) {
+    if (hoveredId) accepted.add(hoveredId);
+    selectedPaths.forEach((path) => accepted.add(path));
+    return accepted;
+  }
+  const sorted = [...nodes].sort((left, right) => {
+    const leftPriority = (left.id === hoveredId ? 10_000 : 0) + (selectedPaths.has(left.id) ? 5_000 : 0) + (adjacency.get(left.id)?.size ?? 0) * 10 - left.depth;
+    const rightPriority = (right.id === hoveredId ? 10_000 : 0) + (selectedPaths.has(right.id) ? 5_000 : 0) + (adjacency.get(right.id)?.size ?? 0) * 10 - right.depth;
+    return rightPriority - leftPriority;
+  });
+  for (const node of sorted) {
+    const x = (node.x * viewport.scale + viewport.x) * svgUnitScale;
+    const y = (node.y * viewport.scale + viewport.y) * svgUnitScale;
+    const width = Math.max(24, node.label.length * screenPx * 0.62);
+    const box = {
+      left: x - width / 2 - 3,
+      right: x + width / 2 + 3,
+      top: y + screenPx * 0.6,
+      bottom: y + screenPx * 2.05
+    };
+    const required = node.id === hoveredId || selectedPaths.has(node.id);
+    if (!required && boxes.some((existing) => boxesOverlap(existing, box))) continue;
+    accepted.add(node.id);
+    boxes.push(box);
+  }
+  return accepted;
+}
+
+function boxesOverlap(
+  left: { left: number; right: number; top: number; bottom: number },
+  right: { left: number; right: number; top: number; bottom: number }
+) {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+function GraphMinimap({ label, nodes, viewport }: { label: string; nodes: SimNode[]; viewport: Viewport }) {
+  if (nodes.length === 0) return null;
+  const width = 132;
+  const height = 88;
+  const padding = 8;
+  const minX = Math.min(...nodes.map((node) => node.x));
+  const maxX = Math.max(...nodes.map((node) => node.x));
+  const minY = Math.min(...nodes.map((node) => node.y));
+  const maxY = Math.max(...nodes.map((node) => node.y));
+  const worldWidth = Math.max(maxX - minX, 1);
+  const worldHeight = Math.max(maxY - minY, 1);
+  const scale = Math.min((width - padding * 2) / worldWidth, (height - padding * 2) / worldHeight);
+  const mapX = (value: number) => padding + (value - minX) * scale;
+  const mapY = (value: number) => padding + (value - minY) * scale;
+  const viewLeft = -viewport.x / viewport.scale;
+  const viewTop = -viewport.y / viewport.scale;
+  const viewWidth = VIEWBOX.width / viewport.scale;
+  const viewHeight = VIEWBOX.height / viewport.scale;
+  return (
+    <svg aria-label={label} className="graph-minimap" viewBox={`0 0 ${width} ${height}`}>
+      {nodes.map((node) => <circle cx={mapX(node.x)} cy={mapY(node.y)} key={node.id} r={1.7} />)}
+      <rect
+        height={Math.min(height - padding * 2, viewHeight * scale)}
+        width={Math.min(width - padding * 2, viewWidth * scale)}
+        x={Math.max(padding, mapX(viewLeft))}
+        y={Math.max(padding, mapY(viewTop))}
+      />
+    </svg>
+  );
 }
 
 function buildAdjacency(edges: GraphEdge[]): Map<string, Set<string>> {

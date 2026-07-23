@@ -24,6 +24,9 @@ describe("localization", () => {
   it("translates static interface labels and dynamic graph summaries", () => {
     expect(translateText("连接你的知识库", "en")).toBe("Connect your knowledge base");
     expect(translateText("连接你的知识库", "zh-CN")).toBe("连接你的知识库");
+    expect(translateText("按知识类型聚类", "en")).toBe("Cluster by knowledge type");
+    expect(translateText("删除本机保存的 DeepSeek API key？删除后在线 Agent 将停止工作。", "en"))
+      .toBe("Delete the locally stored DeepSeek API key? Online Agent features will stop working.");
     expect(translateRuntimeText("12 个领域 · 36 条跨域依据", "en")).toBe("12 domains · 36 cross-domain evidence links");
     expect(translateRuntimeText("已框选 4 篇文档", "en")).toBe("4 documents selected");
   });

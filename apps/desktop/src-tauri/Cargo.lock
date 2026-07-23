@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "knowledge-agent-desktop"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "notify",
  "quick-xml 0.38.4",
@@ -2105,6 +2105,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-updater",
+ "windows",
  "zip 2.4.2",
 ]
 

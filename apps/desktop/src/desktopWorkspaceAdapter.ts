@@ -2,16 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { ModelRequest, ModelTurnResponse } from "@knowledge-agent/agent";
 import { buildSafetyManifest, type NoteFile } from "@knowledge-agent/core";
+import type { KnowledgeCanvasDocument } from "@knowledge-agent/ui";
 import {
   createEmptyVault,
   type DraftChange,
   type KnowledgeWorkspaceAdapter,
   type LoadedVault,
   type ModelConnectionSettings,
+  type PathMove,
   type ReadOnlyDirectoryListing,
   type ReadOnlyFilePreview,
   type StorageRoot,
   type TrashEntry,
+  type TrashEntryPreview,
   type WriteChangesResult
 } from "@knowledge-agent/workspace";
 
@@ -122,9 +125,29 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       }
       return writeChangesToVaultWithTrash(activeVaultPath, changes);
     },
+    async moveNotes(moves: PathMove[]) {
+      if (!activeVaultPath) {
+        throw new Error("还没有选择本地 vault，不能移动文档。");
+      }
+      await invoke("move_notes_atomic", { root: activeVaultPath, moves });
+      const reloaded = await loadVault(activeVaultPath);
+      const trashEntries = await invoke<TrashEntry[]>("list_trash_entries", { root: activeVaultPath });
+      return {
+        message: `已通过原子事务移动 ${moves.length} 篇文档。`,
+        files: reloaded.files,
+        safetyManifest: reloaded.safetyManifest,
+        trashEntries
+      };
+    },
     async listTrashEntries() {
       if (!activeVaultPath) return [];
       return invoke<TrashEntry[]>("list_trash_entries", { root: activeVaultPath });
+    },
+    async previewTrashEntry(id) {
+      if (!activeVaultPath) {
+        throw new Error("还没有选择本地 vault，不能预览回收站文档。");
+      }
+      return invoke<TrashEntryPreview>("preview_trash_entry", { root: activeVaultPath, id });
     },
     async restoreTrashEntry(id) {
       if (!activeVaultPath) {
@@ -140,6 +163,16 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
         trashEntries
       };
     },
+    async loadCanvasDocument() {
+      if (!activeVaultPath) return null;
+      return invoke<KnowledgeCanvasDocument | null>("load_canvas_document", { root: activeVaultPath });
+    },
+    async saveCanvasDocument(document) {
+      if (!activeVaultPath) {
+        throw new Error("请先打开一个本地知识库，再保存画布。");
+      }
+      await invoke("save_canvas_document", { root: activeVaultPath, document });
+    },
     loadModelSettings() {
       return invoke<ModelConnectionSettings>("load_model_settings");
     },
@@ -152,6 +185,12 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
     },
     saveDeepSeekApiKey(apiKey) {
       return invoke<ModelConnectionSettings>("save_deepseek_api_key", { apiKey });
+    },
+    deleteDeepSeekApiKey() {
+      return invoke<ModelConnectionSettings>("delete_deepseek_api_key");
+    },
+    validateDeepSeekApiKey() {
+      return invoke<ModelConnectionSettings>("validate_deepseek_api_key");
     },
     runModel(request: ModelRequest) {
       return invoke<string>("deepseek_chat_completion", { request });

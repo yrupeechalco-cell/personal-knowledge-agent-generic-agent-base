@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.6 - 2026-07-23
+
+### Added
+
+- Added a first-class knowledge canvas shared by the Windows App and Web workspace.
+- Added editable text cards, tables, and live references to real Markdown notes.
+- Added labeled relationship lines for related, supporting, contradicting, dependent, and reference relationships.
+- Added multi-card topic groups, canvas pan/zoom, fit-to-content, card resizing, selection deletion, and undo/redo.
+- Added durable canvas metadata at `.knowledge-agent/canvas.json` for writable local knowledge bases.
+- Added graph camera controls for fit-to-content, reset, top-level folder clustering, and a live minimap.
+- Added docked, floating, hidden, and focus modes for the Agent panel, including automatic idle collapse.
+- Added a full Trash workspace with storage location, exact remaining retention time, read-only previews, and guarded restore actions.
+- Added an updater trust panel showing the current version, publisher, signature policy, release notes, and automatic-check preference.
+
+### Safety
+
+- Canvas persistence never rewrites existing Markdown note bodies.
+- Public GitHub repositories and read-only disk structure sources expose the canvas as read only.
+- Browser persistence only begins after the user explicitly grants read/write access to a local folder.
+- Pending canvas changes are flushed before switching storage sources so metadata cannot cross between knowledge bases.
+- DeepSeek API keys are encrypted for the current Windows user with DPAPI instead of being stored as plaintext JSON.
+- API-key rotation replaces the encrypted secret atomically; users can validate or delete the credential and inspect its latest validation time.
+- Multi-note rename and move operations are validated first and committed as one native transaction, including Windows case-only renames.
+- Deleted Markdown documents remain recoverable for exactly 30 days under the current vault's `.knowledge-agent-trash` directory.
+
+### Improved
+
+- Reduced dense-graph label collisions, kept nodes inside the usable viewport, and exposed hierarchy clustering without changing note contents.
+- Localized remaining visible Agent, updater, graph, and credential-state strings across Chinese and English interfaces.
+- Kept the main workspace usable while the Agent is hidden or floating, and restored the full-width center workspace in focus mode.
+
+### Fixed
+
+- Fixed credential rotation failing when an encrypted secret already existed on Windows.
+- Fixed deleted credentials retaining stale rotation or validation timestamps in settings.
+- Fixed persisted credential validation status being lost after an App restart.
+- Fixed case-only Markdown renames being skipped on Windows.
+- Fixed the offline model identity leaking as `offline:offline` in the Chinese interface.
+- Fixed Agent auto-collapse reading its active prompt before that session state was initialized.
+
+### Verification
+
+- Added document-normalization, card-creation, browser persistence, native Rust round-trip, DPAPI, atomic replacement, case-only rename, Trash retention, and desktop-adapter tests.
+- Verified all workspace type checks and unit tests, including 87 JavaScript/TypeScript tests and 22 native Rust tests.
+
 ## 0.2.5 - 2026-07-20
 
 ### Added

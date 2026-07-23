@@ -1,6 +1,15 @@
 import { type NoteFile } from "@knowledge-agent/core";
+import { createEmptyCanvasDocument } from "@knowledge-agent/ui";
 import { describe, expect, it } from "vitest";
-import { filterSafeMarkdownFiles, isDirectoryPickerSupported, loadBrowserDirectoryVault, loadEmptyVault } from "./vaultSources";
+import type { BrowserFileSystemDirectoryHandle, BrowserFileSystemFileHandle } from "./browserTypes";
+import {
+  filterSafeMarkdownFiles,
+  isDirectoryPickerSupported,
+  loadBrowserCanvasDocument,
+  loadBrowserDirectoryVault,
+  loadEmptyVault,
+  saveBrowserCanvasDocument
+} from "./vaultSources";
 
 describe("web vault sources", () => {
   it("filters non-markdown and sensitive paths before indexing", () => {
@@ -35,5 +44,66 @@ describe("web vault sources", () => {
   it("detects browser directory picker support from the supplied window object", () => {
     expect(isDirectoryPickerSupported({ showDirectoryPicker: async () => ({}) } as unknown as Window)).toBe(true);
     expect(isDirectoryPickerSupported({} as unknown as Window)).toBe(false);
+  });
+
+  it("persists the canvas inside the selected local directory", async () => {
+    let storedCanvas = "";
+    const canvasFile: BrowserFileSystemFileHandle = {
+      kind: "file",
+      name: "canvas.json",
+      async getFile() {
+        return {
+          lastModified: Date.now(),
+          text: async () => storedCanvas
+        } as File;
+      },
+      async createWritable() {
+        return {
+          async write(data) {
+            storedCanvas = data;
+          },
+          async close() {
+            return undefined;
+          }
+        };
+      }
+    };
+    const metadataDirectory: BrowserFileSystemDirectoryHandle = {
+      kind: "directory",
+      name: ".knowledge-agent",
+      async *values() {
+        return;
+      },
+      async getDirectoryHandle() {
+        throw new Error("not used");
+      },
+      async getFileHandle() {
+        return canvasFile;
+      }
+    };
+    const root: BrowserFileSystemDirectoryHandle = {
+      kind: "directory",
+      name: "Research",
+      async *values() {
+        return;
+      },
+      async getDirectoryHandle() {
+        return metadataDirectory;
+      },
+      async getFileHandle() {
+        throw new Error("not used");
+      }
+    };
+    const win = {
+      showDirectoryPicker: async () => root
+    } as unknown as Window;
+
+    await loadBrowserDirectoryVault(win);
+    const document = createEmptyCanvasDocument("Research");
+    await saveBrowserCanvasDocument(document);
+    const reloaded = await loadBrowserCanvasDocument();
+
+    expect(JSON.parse(storedCanvas).id).toBe(document.id);
+    expect(reloaded?.name).toBe("Research");
   });
 });

@@ -5,13 +5,22 @@ import {
   loadPublicGitHubVault,
   OFFICIAL_DEMO_REPOSITORY
 } from "./githubVaultSource";
-import { isDirectoryPickerSupported, loadBrowserDirectoryVault, loadEmptyVault } from "./vaultSources";
+import {
+  clearBrowserDirectoryVault,
+  isDirectoryPickerSupported,
+  loadBrowserCanvasDocument,
+  loadBrowserDirectoryVault,
+  loadEmptyVault,
+  saveBrowserCanvasDocument
+} from "./vaultSources";
 
 const webWorkspaceAdapter: KnowledgeWorkspaceAdapter = {
   canOpenVault: isDirectoryPickerSupported(),
   async loadInitialVault() {
     const repository = new URLSearchParams(window.location.search).get("repo");
-    return repository ? loadPublicGitHubVault(repository) : loadEmptyVault();
+    if (!repository) return loadEmptyVault();
+    clearBrowserDirectoryVault();
+    return loadPublicGitHubVault(repository);
   },
   async openVault() {
     const vault = await loadBrowserDirectoryVault();
@@ -19,10 +28,13 @@ const webWorkspaceAdapter: KnowledgeWorkspaceAdapter = {
     return vault;
   },
   async openPublicGitHubRepo(repository) {
+    clearBrowserDirectoryVault();
     const vault = await loadPublicGitHubVault(repository);
     setRepositoryQuery(githubRepositorySlug(repository));
     return vault;
   },
+  loadCanvasDocument: loadBrowserCanvasDocument,
+  saveCanvasDocument: saveBrowserCanvasDocument,
   publicGitHubExampleRepository: OFFICIAL_DEMO_REPOSITORY,
   getSourceLabel(sourceKind) {
     if (sourceKind === "github-public") return "GitHub 公开库 · 只读";

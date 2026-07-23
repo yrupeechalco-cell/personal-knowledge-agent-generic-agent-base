@@ -1,5 +1,5 @@
 import type { KnowledgeTagKind, VaultIndex } from "@knowledge-agent/core";
-import { Sparkles } from "lucide-react";
+import { LayoutGrid, Map as MapIcon, Maximize2, RotateCcw, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -45,6 +45,8 @@ interface VisualRelation {
 interface SceneState {
   nodes: Map<string, VisualNode>;
   applyDomain(domain: KnowledgeViewDomain): void;
+  fitCamera(): void;
+  resetCamera(): void;
 }
 
 const DOMAIN_OPTIONS: Array<{ value: KnowledgeViewDomain; label: string }> = [
@@ -68,11 +70,15 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
   const [domain, setDomain] = useState<KnowledgeViewDomain>("classification");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [showMinimap, setShowMinimap] = useState(false);
   const sceneHostRef = useRef<HTMLDivElement>(null);
   const labelLayerRef = useRef<HTMLDivElement>(null);
+  const minimapRef = useRef<HTMLCanvasElement>(null);
   const sceneStateRef = useRef<SceneState | null>(null);
   const domainRef = useRef(domain);
+  const showMinimapRef = useRef(showMinimap);
   domainRef.current = domain;
+  showMinimapRef.current = showMinimap;
   const selected = model.nodes.find((node) => node.id === selectedId) ?? null;
   const selectedDomain = useMemo(() => selected ? buildTagRootDomain(selected, roleModel) : null, [roleModel, selected]);
   const hovered = model.nodes.find((node) => node.id === hoveredId) ?? null;
@@ -95,7 +101,8 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
     host.appendChild(renderer.domElement);
 
     const radius = mapRadius(model.nodes.length);
-    camera.position.set(radius * 0.62, radius * 0.32, radius * 3.15);
+    const initialCameraPosition = new THREE.Vector3(radius * 0.62, radius * 0.32, radius * 3.15);
+    camera.position.copy(initialCameraPosition);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.075;
@@ -254,7 +261,30 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       }
     }
 
-    sceneStateRef.current = { nodes: visualNodes, applyDomain };
+    function fitCamera() {
+      const points = [...visualNodes.values()].map((visual) => visual.target);
+      if (points.length === 0) return;
+      const sphere = new THREE.Box3().setFromPoints(points).getBoundingSphere(new THREE.Sphere());
+      const verticalDistance = sphere.radius / Math.max(Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)), 0.1);
+      const horizontalDistance = verticalDistance / Math.max(camera.aspect, 0.62);
+      const distance = Math.max(verticalDistance, horizontalDistance) * 1.22;
+      const direction = camera.position.clone().sub(controls.target);
+      if (direction.lengthSq() < 0.001) direction.set(0.35, 0.2, 1);
+      direction.normalize();
+      controls.target.copy(sphere.center);
+      camera.position.copy(sphere.center).add(direction.multiplyScalar(distance));
+      cameraWasAdjusted = true;
+      controls.update();
+    }
+
+    function resetCamera() {
+      controls.target.set(0, 0, 0);
+      camera.position.copy(initialCameraPosition);
+      cameraWasAdjusted = false;
+      controls.update();
+    }
+
+    sceneStateRef.current = { nodes: visualNodes, applyDomain, fitCamera, resetCamera };
 
     function resize() {
       const rect = host.getBoundingClientRect();
@@ -310,11 +340,33 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       }
       renderer.render(scene, camera);
       const rect = renderer.domElement.getBoundingClientRect();
+      const labelCandidates: Array<{
+        id: string;
+        visual: VisualNode;
+        x: number;
+        y: number;
+        priority: number;
+      }> = [];
       for (const [id, visual] of visualNodes) {
         projected.copy(visual.root.position).project(camera);
-        const visible = projected.z < 1 && (focusedId === id || visibleLabelIds.has(id));
-        visual.label.style.transform = `translate(-50%, -50%) translate(${(projected.x * 0.5 + 0.5) * rect.width}px, ${(-projected.y * 0.5 + 0.5) * rect.height}px)`;
-        visual.label.style.opacity = visible ? "1" : "0";
+        const x = (projected.x * 0.5 + 0.5) * rect.width;
+        const y = (-projected.y * 0.5 + 0.5) * rect.height;
+        visual.label.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+        if (projected.z < 1 && (focusedId === id || visibleLabelIds.has(id))) {
+          labelCandidates.push({
+            id,
+            visual,
+            x,
+            y,
+            priority: focusedId === id ? Number.POSITIVE_INFINITY : domainNodeWeight(modelNodesById.get(id)!, domainRef.current)
+          });
+        } else {
+          visual.label.style.opacity = "0";
+        }
+      }
+      applyCollisionAwareLabels(labelCandidates, rect.width, rect.height, focusedId);
+      if (showMinimapRef.current && frame % 3 === 0 && minimapRef.current) {
+        drawTagMinimap(minimapRef.current, visualNodes, visualRelations, controls.target, modelNodesById);
       }
     }
     animate();
@@ -388,6 +440,37 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
           </button>
         ))}
       </div>
+      <div className="tag-knowledge-camera-tools" aria-label={t("图谱镜头工具")}>
+        <button aria-label={t("适配全部节点")} onClick={() => sceneStateRef.current?.fitCamera()} title={t("适配全部节点")} type="button">
+          <Maximize2 size={14} />
+        </button>
+        <button aria-label={t("重置镜头")} onClick={() => sceneStateRef.current?.resetCamera()} title={t("重置镜头")} type="button">
+          <RotateCcw size={14} />
+        </button>
+        <button
+          aria-label={t("按知识类型聚类")}
+          className={domain === "classification" ? "active" : ""}
+          onClick={() => {
+            setDomain("classification");
+            sceneStateRef.current?.applyDomain("classification");
+            window.setTimeout(() => sceneStateRef.current?.fitCamera(), 180);
+          }}
+          title={t("按知识类型聚类")}
+          type="button"
+        >
+          <LayoutGrid size={14} />
+        </button>
+        <button
+          aria-label={t(showMinimap ? "隐藏小地图" : "显示小地图")}
+          className={showMinimap ? "active" : ""}
+          onClick={() => setShowMinimap((value) => !value)}
+          title={t(showMinimap ? "隐藏小地图" : "显示小地图")}
+          type="button"
+        >
+          <MapIcon size={14} />
+        </button>
+      </div>
+      {showMinimap ? <canvas aria-label={t("图谱小地图")} className="tag-knowledge-minimap" ref={minimapRef} /> : null}
       <div className="tag-knowledge-legend">
         <span><i className="concept" />{t("概念")}</span>
         <span><i className="method" />{t("方法")}</span>
@@ -433,6 +516,104 @@ function rankedLabelIds(model: TagKnowledgeModel, domain: KnowledgeViewDomain, w
       .slice(0, count)
       .map((node) => node.id)
   );
+}
+
+function applyCollisionAwareLabels(
+  candidates: Array<{ id: string; visual: VisualNode; x: number; y: number; priority: number }>,
+  width: number,
+  height: number,
+  focusedId: string | null
+) {
+  const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  candidates.sort((left, right) => right.priority - left.priority);
+  for (const candidate of candidates) {
+    const labelWidth = Math.min(148, Math.max(54, (candidate.visual.label.textContent?.length ?? 0) * 12 + 20));
+    const box = {
+      left: candidate.x - labelWidth / 2,
+      right: candidate.x + labelWidth / 2,
+      top: candidate.y - 2,
+      bottom: candidate.y + 58
+    };
+    const inBounds = box.right > 4 && box.left < width - 4 && box.bottom > 4 && box.top < height - 4;
+    const overlaps = occupied.some((existing) => (
+      box.left < existing.right
+      && box.right > existing.left
+      && box.top < existing.bottom
+      && box.bottom > existing.top
+    ));
+    const visible = inBounds && (candidate.id === focusedId || !overlaps);
+    candidate.visual.label.style.opacity = visible ? "1" : "0";
+    if (visible) occupied.push(box);
+  }
+}
+
+function drawTagMinimap(
+  canvas: HTMLCanvasElement,
+  nodes: Map<string, VisualNode>,
+  relations: VisualRelation[],
+  target: THREE.Vector3,
+  modelNodesById: Map<string, TagKnowledgeNode>
+) {
+  const width = Math.max(1, Math.round(canvas.clientWidth));
+  const height = Math.max(1, Math.round(canvas.clientHeight));
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+  const pixelWidth = Math.round(width * ratio);
+  const pixelHeight = Math.round(height * ratio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "rgba(25, 25, 28, 0.92)";
+  context.fillRect(0, 0, width, height);
+
+  const positions = [...nodes.values()].map((node) => node.root.position);
+  if (positions.length === 0) return;
+  const minX = Math.min(...positions.map((position) => position.x));
+  const maxX = Math.max(...positions.map((position) => position.x));
+  const minY = Math.min(...positions.map((position) => position.y));
+  const maxY = Math.max(...positions.map((position) => position.y));
+  const padding = 8;
+  const scaleX = (width - padding * 2) / Math.max(maxX - minX, 1);
+  const scaleY = (height - padding * 2) / Math.max(maxY - minY, 1);
+  const scale = Math.min(scaleX, scaleY);
+  const offsetX = (width - (maxX - minX) * scale) / 2;
+  const offsetY = (height - (maxY - minY) * scale) / 2;
+  const point = (position: THREE.Vector3) => ({
+    x: offsetX + (position.x - minX) * scale,
+    y: height - (offsetY + (position.y - minY) * scale)
+  });
+
+  context.strokeStyle = "rgba(122, 117, 132, 0.22)";
+  context.lineWidth = 0.7;
+  for (const relation of relations) {
+    const source = nodes.get(relation.source)?.root.position;
+    const destination = nodes.get(relation.target)?.root.position;
+    if (!source || !destination) continue;
+    const from = point(source);
+    const to = point(destination);
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+  }
+
+  for (const [id, node] of nodes) {
+    const location = point(node.root.position);
+    const kind = modelNodesById.get(id)?.kind ?? "concept";
+    context.fillStyle = `#${TAG_COLORS[kind].toString(16).padStart(6, "0")}`;
+    context.beginPath();
+    context.arc(location.x, location.y, 2, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  const center = point(target);
+  context.strokeStyle = "rgba(202, 179, 255, 0.9)";
+  context.lineWidth = 1;
+  context.strokeRect(center.x - 4, center.y - 3, 8, 6);
 }
 
 function setVisualNodeScale(node: VisualNode, scale: number) {

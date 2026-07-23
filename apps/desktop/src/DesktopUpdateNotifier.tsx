@@ -1,11 +1,12 @@
 import { isTauri } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
-import { Download, RefreshCw, Sparkles, X } from "lucide-react";
+import { Download, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useLocalization } from "@knowledge-agent/ui";
 
 type UpdateState =
-  | { status: "idle" | "checking" }
+  | { status: "idle" | "checking" | "settings" }
   | { status: "available"; update: Update }
   | { status: "downloading"; update: Update; progress: number | null }
   | { status: "ready"; version: string }
@@ -13,6 +14,9 @@ type UpdateState =
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const SNOOZE_MS = 6 * 60 * 60 * 1000;
+const AUTO_CHECK_STORAGE_KEY = "knowledge-agent:auto-update-check";
+const OPEN_UPDATE_SETTINGS_EVENT = "knowledge-agent:open-update-settings";
+const UPDATE_PUBLISHER = "yrupeechalco-cell";
 let startupCheck: Promise<Update | null> | null = null;
 
 function checkOnce() {
@@ -54,9 +58,25 @@ function progressFromEvent(
 export function DesktopUpdateNotifier() {
   const { locale, t } = useLocalization();
   const [state, setState] = useState<UpdateState>({ status: "idle" });
+  const [autoCheckEnabled, setAutoCheckEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem(AUTO_CHECK_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [currentVersion, setCurrentVersion] = useState("—");
   const snoozed = useRef<{ version: string; until: number } | null>(null);
   const downloaded = useRef(0);
   const total = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void getVersion().then(setCurrentVersion).catch(() => undefined);
+    const openSettings = () => setState({ status: "settings" });
+    window.addEventListener(OPEN_UPDATE_SETTINGS_EVENT, openSettings);
+    return () => window.removeEventListener(OPEN_UPDATE_SETTINGS_EVENT, openSettings);
+  }, []);
 
   const runCheck = useCallback(async (quiet = true) => {
     if (!isTauri()) return;
@@ -84,14 +104,14 @@ export function DesktopUpdateNotifier() {
   }, [t]);
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || !autoCheckEnabled) return;
     const startupTimer = window.setTimeout(() => void runCheck(true), 2_000);
     const interval = window.setInterval(() => void runCheck(true), CHECK_INTERVAL_MS);
     return () => {
       window.clearTimeout(startupTimer);
       window.clearInterval(interval);
     };
-  }, [runCheck]);
+  }, [autoCheckEnabled, runCheck]);
 
   const install = useCallback(async (update: Update) => {
     setState({ status: "downloading", update, progress: 0 });
@@ -123,7 +143,9 @@ export function DesktopUpdateNotifier() {
     ? locale === "en" ? `v${state.version} installed` : `v${state.version} 已安装`
     : state.status === "error"
       ? state.phase === "install" ? t("更新安装失败") : t("更新检查失败")
-      : locale === "en" ? `Version v${update?.version} is available` : `发现新版本 v${update?.version}`;
+      : state.status === "settings"
+        ? t("更新与信任")
+        : locale === "en" ? `Version v${update?.version} is available` : `发现新版本 v${update?.version}`;
 
   return (
     <div className="desktop-update-layer" role="presentation">
@@ -141,10 +163,18 @@ export function DesktopUpdateNotifier() {
         </button>
         <div className="desktop-update-icon"><Sparkles size={19} /></div>
         <div className="desktop-update-copy">
-          <span className="desktop-update-kicker">Knowledge Agent Update</span>
+          <span className="desktop-update-kicker">{t("知识库智能体更新")}</span>
           <h2 id="desktop-update-title">{title}</h2>
           {state.status === "available" && (
-            <p>{update?.body?.trim() || t("包含最新功能、体验改进与问题修复。")}</p>
+            <>
+              <p>{update?.body?.trim() || t("包含最新功能、体验改进与问题修复。")}</p>
+              <UpdateTrustDetails
+                currentVersion={currentVersion}
+                targetVersion={update?.version ?? "—"}
+                t={t}
+                verified={false}
+              />
+            </>
           )}
           {state.status === "downloading" && (
             <>
@@ -154,8 +184,35 @@ export function DesktopUpdateNotifier() {
               </div>
             </>
           )}
-          {state.status === "ready" && <p>{t("更新将在应用重新启动后完整生效。")}</p>}
+          {state.status === "ready" && (
+            <>
+              <p>{t("更新将在应用重新启动后完整生效。")}</p>
+              <UpdateTrustDetails currentVersion={currentVersion} targetVersion={state.version} t={t} verified />
+            </>
+          )}
           {state.status === "error" && <p>{state.message}</p>}
+          {state.status === "settings" && (
+            <>
+              <p>{t("控制启动时自动检查，并核对当前版本、发布者与安装前签名验证方式。")}</p>
+              <UpdateTrustDetails currentVersion={currentVersion} targetVersion="—" t={t} verified={false} />
+              <label className="desktop-update-toggle">
+                <input
+                  checked={autoCheckEnabled}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setAutoCheckEnabled(enabled);
+                    try {
+                      window.localStorage.setItem(AUTO_CHECK_STORAGE_KEY, String(enabled));
+                    } catch {
+                      // Preference remains active for this session.
+                    }
+                  }}
+                  type="checkbox"
+                />
+                <span>{t("启动时及每 6 小时自动检查更新")}</span>
+              </label>
+            </>
+          )}
         </div>
         <div className="desktop-update-actions">
           {state.status === "available" && (
@@ -191,8 +248,45 @@ export function DesktopUpdateNotifier() {
               {t("知道了")}
             </button>
           )}
+          {state.status === "settings" && (
+            <>
+              <button className="desktop-update-secondary" onClick={() => setState({ status: "idle" })} type="button">
+                {t("关闭")}
+              </button>
+              <button className="desktop-update-primary" onClick={() => void runCheck(false)} type="button">
+                <RefreshCw size={16} />{t("立即检查")}
+              </button>
+            </>
+          )}
         </div>
       </section>
     </div>
+  );
+}
+
+function UpdateTrustDetails({
+  currentVersion,
+  targetVersion,
+  t,
+  verified
+}: {
+  currentVersion: string;
+  targetVersion: string;
+  t(source: string, values?: Record<string, string | number>): string;
+  verified: boolean;
+}) {
+  return (
+    <dl className="desktop-update-trust">
+      <div><dt>{t("当前版本")}</dt><dd>v{currentVersion}</dd></div>
+      <div><dt>{t("目标版本")}</dt><dd>{targetVersion === "—" ? "—" : `v${targetVersion}`}</dd></div>
+      <div><dt>{t("发布者")}</dt><dd>{UPDATE_PUBLISHER}</dd></div>
+      <div>
+        <dt>{t("签名验证")}</dt>
+        <dd>
+          <ShieldCheck size={13} />
+          {verified ? t("已通过 Tauri Ed25519 验证") : t("安装前强制执行 Tauri Ed25519 验证")}
+        </dd>
+      </div>
+    </dl>
   );
 }

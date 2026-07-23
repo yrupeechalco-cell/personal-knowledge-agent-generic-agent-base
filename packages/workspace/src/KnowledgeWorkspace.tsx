@@ -26,7 +26,20 @@ import {
   type SafetyManifest,
   type TagGranularity
 } from "@knowledge-agent/core";
-import { AgentConsole, FileTree, NoteEditor, StarGraph, useLocalization, type FileTreeFolder, type Viewport } from "@knowledge-agent/ui";
+import {
+  AgentConsole,
+  createEmptyCanvasDocument,
+  FileTree,
+  KnowledgeCanvas,
+  normalizeCanvasDocument,
+  NoteEditor,
+  StarGraph,
+  useLocalization,
+  type CanvasSaveState,
+  type FileTreeFolder,
+  type KnowledgeCanvasDocument,
+  type Viewport
+} from "@knowledge-agent/ui";
 import {
   ArrowUp,
   BookOpen,
@@ -44,8 +57,10 @@ import {
   Languages,
   Network,
   PanelLeft,
+  PanelsTopLeft,
   Search,
   RefreshCw,
+  RotateCcw,
   Settings,
   ShieldCheck,
   Trash2,
@@ -67,14 +82,17 @@ import {
 const TagKnowledgeMap = lazy(() => import("./TagKnowledgeMap").then((module) => ({ default: module.TagKnowledgeMap })));
 
 const GRAPH_TAB_ID = "graph-overview";
+const CANVAS_TAB_ID = "knowledge-canvas";
 const EXPLORER_TAB_ID = "vault-explorer";
+const TRASH_TAB_ID = "vault-trash";
 
-type CenterMode = "graph" | "edit" | "explorer";
+type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
 type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
+type AgentPanelMode = "docked" | "floating" | "hidden";
 
 interface AgentMutationApproval {
   create: boolean;
@@ -178,6 +196,17 @@ export interface TrashEntry {
   purgeAfterMs: number;
 }
 
+export interface TrashEntryPreview extends TrashEntry {
+  content: string;
+  size: number;
+  truncated: boolean;
+}
+
+export interface PathMove {
+  from: string;
+  to: string;
+}
+
 export interface WriteChangesResult {
   message: string;
   files?: NoteFile[];
@@ -190,6 +219,10 @@ export interface ModelConnectionSettings {
   model: string;
   agentMode: string;
   deepSeekApiKeyConfigured: boolean;
+  deepSeekApiKeyStorage?: "windows-dpapi" | "environment" | "none";
+  deepSeekApiKeyUpdatedAtMs?: number;
+  deepSeekApiKeyStatus?: "unchecked" | "valid" | "invalid";
+  deepSeekApiKeyValidatedAtMs?: number;
 }
 
 export interface KnowledgeWorkspaceAdapter {
@@ -208,11 +241,17 @@ export interface KnowledgeWorkspaceAdapter {
   createWordDocumentOnDesktop?(request: WordDocumentRequest): Promise<WordDocumentResult>;
   watchVault?(onChange: (vault: LoadedVault, changedPaths: string[]) => void): Promise<() => void> | (() => void);
   writeChanges?(changes: DraftChange[]): Promise<WriteChangesResult>;
+  moveNotes?(moves: PathMove[]): Promise<WriteChangesResult>;
   listTrashEntries?(): Promise<TrashEntry[]> | TrashEntry[];
+  previewTrashEntry?(id: string): Promise<TrashEntryPreview> | TrashEntryPreview;
   restoreTrashEntry?(id: string): Promise<WriteChangesResult> | WriteChangesResult;
+  loadCanvasDocument?(): Promise<KnowledgeCanvasDocument | null> | KnowledgeCanvasDocument | null;
+  saveCanvasDocument?(document: KnowledgeCanvasDocument): Promise<void> | void;
   loadModelSettings?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   saveModelSettings?(settings: Pick<ModelConnectionSettings, "provider" | "model" | "agentMode">): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   saveDeepSeekApiKey?(apiKey: string): Promise<ModelConnectionSettings> | ModelConnectionSettings;
+  deleteDeepSeekApiKey?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
+  validateDeepSeekApiKey?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   runModel?(request: ModelRequest): Promise<string>;
   runModelTurn?(request: ModelRequest): Promise<ModelTurnResponse>;
   getSourceLabel?(sourceKind: SourceKind): string;
@@ -338,6 +377,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [agentSessionHistory, setAgentSessionHistory] = useState<AgentSessionSnapshot[]>([]);
   const [agentSessionNumber, setAgentSessionNumber] = useState(1);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
+  const [trashPreview, setTrashPreview] = useState<TrashEntryPreview | null>(null);
+  const [trashPreviewLoadingId, setTrashPreviewLoadingId] = useState<string | null>(null);
   const [trashAuthorizations, setTrashAuthorizations] = useState<Record<string, TrashAuthorization>>({});
   const [restoringTrashId, setRestoringTrashId] = useState<string | null>(null);
   const [runningAgentSessionIds, setRunningAgentSessionIds] = useState<Set<string>>(() => new Set());
@@ -345,10 +386,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     provider: adapter.runModel ? "deepseek" : "offline",
     model: adapter.runModel ? "deepseek-v4-pro" : "offline",
     agentMode: "daily",
-    deepSeekApiKeyConfigured: false
+    deepSeekApiKeyConfigured: false,
+    deepSeekApiKeyStorage: "none",
+    deepSeekApiKeyStatus: "unchecked"
   });
   const [agentApiKeyInput, setAgentApiKeyInput] = useState("");
   const [savingAgentKey, setSavingAgentKey] = useState(false);
+  const [modelCredentialBusy, setModelCredentialBusy] = useState(false);
   const [modelSettingsLoaded, setModelSettingsLoaded] = useState(!adapter.loadModelSettings);
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentKeyDialogOpen, setAgentKeyDialogOpen] = useState(false);
@@ -356,6 +400,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [status, setStatus] = useState("尚未连接知识库。请选择一个 Markdown 文件夹开始使用。");
   const [sourceSafety, setSourceSafety] = useState(initialVault.safetyManifest);
   const [leftVisible, setLeftVisible] = useState(true);
+  const [agentPanelMode, setAgentPanelMode] = useState<AgentPanelMode>("docked");
+  const [focusMode, setFocusMode] = useState(false);
   const [noteFilter, setNoteFilter] = useState("");
   const [explorerQuery, setExplorerQuery] = useState("");
   const [explorerScope, setExplorerScope] = useState("");
@@ -366,6 +412,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [graphRadius, setGraphRadius] = useState(1);
   const [graphShowLabels, setGraphShowLabels] = useState(true);
   const [graphShowRelated, setGraphShowRelated] = useState(true);
+  const [canvasDocument, setCanvasDocument] = useState<KnowledgeCanvasDocument>(() => createEmptyCanvasDocument());
+  const [canvasSaveState, setCanvasSaveState] = useState<CanvasSaveState>("idle");
   const [tagExtractingPath, setTagExtractingPath] = useState<string | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
   const [writingChanges, setWritingChanges] = useState(false);
@@ -392,18 +440,25 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const sourceKindRef = useRef<SourceKind>(sourceKind);
   const agentMutationApprovalRef = useRef<AgentMutationApproval>({ create: false, delete: false, restore: false });
   const autoSaveInFlightRef = useRef(false);
+  const canvasSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasDocumentRef = useRef(canvasDocument);
+  const canvasDirtyRef = useRef(false);
+  const canvasRevisionRef = useRef(0);
   const trashEntriesRef = useRef<TrashEntry[]>(trashEntries);
+  const agentAutoCollapseAppliedRef = useRef(false);
   filesRef.current = files;
   currentPathRef.current = currentPath;
   sourceKindRef.current = sourceKind;
+  canvasDocumentRef.current = canvasDocument;
   trashEntriesRef.current = trashEntries;
   const selectedAgentMode = normalizeAgentMode(modelSettings.agentMode);
   const selectedAgentModel = normalizeAgentModel(modelSettings.model, Boolean(adapter.runModel));
   const agentModelOptions = adapter.runModel
     ? AGENT_MODEL_OPTIONS
-    : [{ value: "offline", label: "Offline tools", description: "仅使用本地笔记工具，不调用在线模型。" }];
+    : [{ value: "offline", label: "本地工具", description: "仅使用本地笔记工具，不调用在线模型。" }];
   const localizedAgentModelOptions = agentModelOptions.map((option) => ({
     ...option,
+    label: t(option.label),
     description: option.description ? t(option.description) : option.description
   }));
   const localizedAgentModeOptions = AGENT_MODE_OPTIONS.map((option) => ({
@@ -737,6 +792,59 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }, [adapter]);
 
   useEffect(() => {
+    if (canvasSaveTimerRef.current) {
+      clearTimeout(canvasSaveTimerRef.current);
+      canvasSaveTimerRef.current = null;
+    }
+    const writableCanvas = sourceKind === "desktop" || sourceKind === "browser-directory";
+    if (!writableCanvas || !adapter.loadCanvasDocument) {
+      const nextDocument = createEmptyCanvasDocument(sourceName);
+      canvasDocumentRef.current = nextDocument;
+      canvasDirtyRef.current = false;
+      setCanvasDocument(nextDocument);
+      setCanvasSaveState(writableCanvas ? "idle" : "read-only");
+      return;
+    }
+    let cancelled = false;
+    setCanvasSaveState("idle");
+    Promise.resolve(adapter.loadCanvasDocument())
+      .then((loaded) => {
+        if (cancelled) return;
+        const nextDocument = loaded ? normalizeCanvasDocument(loaded, sourceName) : createEmptyCanvasDocument(sourceName);
+        canvasDocumentRef.current = nextDocument;
+        canvasDirtyRef.current = false;
+        setCanvasDocument(nextDocument);
+        setCanvasSaveState(loaded ? "saved" : "idle");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const nextDocument = createEmptyCanvasDocument(sourceName);
+        canvasDocumentRef.current = nextDocument;
+        canvasDirtyRef.current = false;
+        setCanvasDocument(nextDocument);
+        setCanvasSaveState("error");
+        setStatus(error instanceof Error ? `画布载入失败：${error.message}` : "画布载入失败。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, sourceKind, sourceName]);
+
+  useEffect(() => () => {
+    if (canvasSaveTimerRef.current) clearTimeout(canvasSaveTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    function flushCanvasOnExit() {
+      const writableCanvas = sourceKindRef.current === "desktop" || sourceKindRef.current === "browser-directory";
+      if (!writableCanvas || !canvasDirtyRef.current || !adapter.saveCanvasDocument) return;
+      void Promise.resolve(adapter.saveCanvasDocument(canvasDocumentRef.current)).catch(() => undefined);
+    }
+    window.addEventListener("pagehide", flushCanvasOnExit);
+    return () => window.removeEventListener("pagehide", flushCanvasOnExit);
+  }, [adapter]);
+
+  useEffect(() => {
     if (!adapter.loadModelSettings) {
       setModelSettingsLoaded(true);
       return;
@@ -853,6 +961,44 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     [agentPinnedPaths, currentPath, files, messages, selectedAgentModel]
   );
   const dirtyPathsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const waitingForFirstKeyDecision = Boolean(
+      adapter.saveDeepSeekApiKey
+      && sourceKind !== "empty"
+      && sourceKind !== "structure"
+      && !modelSettings.deepSeekApiKeyConfigured
+      && !agentKeyDialogDismissed
+    );
+    if (
+      agentAutoCollapseAppliedRef.current
+      || !modelSettingsLoaded
+      || waitingForFirstKeyDecision
+      || agentSettingsOpen
+      || agentKeyDialogOpen
+      || prompt.trim() !== ""
+      || runningAgentSessionIds.size > 0
+      || agentSessions.some((session) => session.messages.length > 0)
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      agentAutoCollapseAppliedRef.current = true;
+      setAgentPanelMode("hidden");
+    }, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [
+    adapter.saveDeepSeekApiKey,
+    agentKeyDialogDismissed,
+    agentKeyDialogOpen,
+    agentSessions,
+    agentSettingsOpen,
+    modelSettings.deepSeekApiKeyConfigured,
+    modelSettingsLoaded,
+    prompt,
+    runningAgentSessionIds,
+    sourceKind
+  ]);
 
   function updateAgentSession(sessionId: string, updater: (session: AgentConversationSession) => AgentConversationSession) {
     setAgentSessions((current) => updateConversationById(current, sessionId, updater));
@@ -1062,6 +1208,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setRunningAgentSessionIds(new Set());
     }
     if (vault.sourceKind !== "desktop") setTrashEntries([]);
+    setTrashPreview(null);
     setNoteFilter("");
     setExplorerQuery("");
     setExplorerScope("");
@@ -1078,7 +1225,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setSourceName(vault.sourceName);
     setSourceKind(vault.sourceKind);
     setSourceSafety(vault.safetyManifest);
-    if (vault.sourceKind !== "desktop") setTrashEntries([]);
+    if (vault.sourceKind !== "desktop") {
+      setTrashEntries([]);
+      setTrashPreview(null);
+    }
     setCurrentPath((path) => (path && existingPaths.has(path) ? path : nextIndex.notes[0]?.path ?? ""));
     setWorkspaceTabs((tabs) => {
       const nextTabs = tabs.filter((tab) => !tab.path || existingPaths.has(tab.path));
@@ -1098,6 +1248,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus("正在等待你选择本地存储文件夹...");
     setStorageBusy(true);
     try {
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.openVault();
       applyLoadedVault(
         vault,
@@ -1126,6 +1277,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus("正在从 GitHub 读取公开知识库的文件树和 Markdown 正文...");
     setStorageBusy(true);
     try {
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.openPublicGitHubRepo(target);
       applyLoadedVault(
         vault,
@@ -1147,6 +1299,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus("正在打开只读文件浏览器：只列出当前目录，不会修改任何本地文件...");
     setStorageBusy(true);
     try {
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.openReadOnlyStructure();
       const summary = vault.readOnlyStructure;
       const limitMessage = summary?.truncated ? "当前目录超过 1000 项，仅显示前 1000 项。" : "";
@@ -1167,6 +1320,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStorageBusy(true);
     setStatus(`正在以只读方式打开 ${root}...`);
     try {
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.openReadOnlyRoot(root);
       applyLoadedVault(vault, `已以只读方式打开 ${root}。点击文件夹继续浏览，点击文件查看预览。`);
       setStorageOpen(false);
@@ -1221,6 +1375,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus(`正在选择位置并创建文件夹：${folderName}...`);
     setStorageBusy(true);
     try {
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.createVaultFolder(folderName);
       applyLoadedVault(vault, `已创建并连接本地存储空间：${vault.sourceName}`);
       setStorageOpen(false);
@@ -1274,13 +1429,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       return;
     }
     if (target.type === "note") {
-      renameNoteInSession(target.note.path);
+      void renameNoteInSession(target.note.path);
       return;
     }
-    renameFolderInSession(target.folder.path);
+    void renameFolderInSession(target.folder.path);
   }
 
-  function renameNoteInSession(path: string) {
+  async function renameNoteInSession(path: string) {
     const oldPath = normalizePath(path);
     const input = window.prompt("重命名文档路径", oldPath);
     if (!input) return;
@@ -1290,6 +1445,25 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus(`重命名失败：${nextPath} 已存在。`);
       return;
     }
+    if (sourceKindRef.current === "desktop" && adapter.moveNotes) {
+      setStatus(`正在原子重命名：${oldPath} -> ${nextPath}`);
+      try {
+        const result = await adapter.moveNotes([{ from: oldPath, to: nextPath }]);
+        if (result.files) {
+          filesRef.current = result.files;
+          setFiles(result.files);
+          setBaseFiles(result.files);
+        }
+        if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+        if (result.trashEntries) setTrashEntries(result.trashEntries);
+        replacePathInTabs(oldPath, nextPath);
+        setTreeContextMenu(null);
+        setStatus(result.message);
+      } catch (error) {
+        setStatus(error instanceof Error ? `重命名失败：${error.message}` : "重命名失败，原文档保持不变。");
+      }
+      return;
+    }
     setFiles((current) => current.map((file) => (normalizePath(file.path).toLowerCase() === oldPath.toLowerCase() ? { ...file, path: nextPath } : file)));
     replacePathInTabs(oldPath, nextPath);
     setTreeContextMenu(null);
@@ -1297,7 +1471,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus(`已重命名为：${nextPath}。写回本地前会在改动面板确认。`);
   }
 
-  function renameFolderInSession(path: string) {
+  async function renameFolderInSession(path: string) {
     const oldFolder = normalizePath(path).replace(/\/+$/g, "");
     const input = window.prompt("重命名文件夹路径", oldFolder);
     if (!input) return;
@@ -1317,6 +1491,26 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       }
       replacements.set(normalizePath(file.path), nextPath);
     }
+    if (sourceKindRef.current === "desktop" && adapter.moveNotes) {
+      const moves = [...replacements.entries()].map(([from, to]) => ({ from, to }));
+      setStatus(`正在原子移动 ${moves.length} 篇文档…`);
+      try {
+        const result = await adapter.moveNotes(moves);
+        if (result.files) {
+          filesRef.current = result.files;
+          setFiles(result.files);
+          setBaseFiles(result.files);
+        }
+        if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+        if (result.trashEntries) setTrashEntries(result.trashEntries);
+        replaceManyPathsInTabs(replacements);
+        setTreeContextMenu(null);
+        setStatus(result.message);
+      } catch (error) {
+        setStatus(error instanceof Error ? `文件夹重命名失败：${error.message}` : "文件夹重命名失败，原文档保持不变。");
+      }
+      return;
+    }
     setFiles((current) => current.map((file) => ({ ...file, path: replacements.get(normalizePath(file.path)) ?? file.path })));
     replaceManyPathsInTabs(replacements);
     setTreeContextMenu(null);
@@ -1334,7 +1528,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus(`${mode === "copy" ? "已复制" : "已剪切"} ${paths.length} 篇文档。右键目标位置可以粘贴。`);
   }
 
-  function pasteClipboard(target: TreeContextMenu) {
+  async function pasteClipboard(target: TreeContextMenu) {
     if (isReadOnlyContent) {
       setStatus("当前来源为只读模式，不能粘贴或移动文档。");
       return;
@@ -1358,6 +1552,30 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       const nextPath = uniqueNotePath(nextFiles, desired);
       replacements.set(normalizePath(file.path), nextPath);
       nextFiles = [...nextFiles, { ...file, path: nextPath, modifiedAt: new Date().toISOString() }];
+    }
+
+    if (noteClipboard.mode === "cut" && sourceKindRef.current === "desktop" && adapter.moveNotes) {
+      const moves = [...replacements.entries()].map(([from, to]) => ({ from, to }));
+      setStatus(`正在原子移动 ${moves.length} 篇文档…`);
+      try {
+        const result = await adapter.moveNotes(moves);
+        if (result.files) {
+          filesRef.current = result.files;
+          setFiles(result.files);
+          setBaseFiles(result.files);
+        }
+        if (result.safetyManifest) setSourceSafety(result.safetyManifest);
+        if (result.trashEntries) setTrashEntries(result.trashEntries);
+        replaceManyPathsInTabs(replacements);
+        setNoteClipboard(null);
+        setTreeContextMenu(null);
+        const firstPath = [...replacements.values()][0];
+        if (firstPath) openNoteTab(firstPath);
+        setStatus(result.message);
+      } catch (error) {
+        setStatus(error instanceof Error ? `移动失败：${error.message}` : "移动失败，原文档保持不变。");
+      }
+      return;
     }
 
     setFiles(nextFiles);
@@ -1418,7 +1636,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setAgentApiKeyInput("");
       setAgentKeyDialogOpen(false);
       setAgentKeyDialogDismissed(true);
-      setStatus("DeepSeek API key saved locally. Note Agent is ready.");
+      setStatus("DeepSeek API key 已使用 Windows DPAPI 加密保存。建议立即执行有效性验证。");
     } catch (error) {
       setStatus(error instanceof Error ? `DeepSeek API key save failed: ${error.message}` : "DeepSeek API key save failed.");
     } finally {
@@ -1465,6 +1683,37 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       pinnedPaths: session.pinnedPaths,
       savedAt: new Date().toISOString()
     };
+  }
+
+  async function validateAgentApiKey() {
+    if (!adapter.validateDeepSeekApiKey) return;
+    setModelCredentialBusy(true);
+    try {
+      const settings = await adapter.validateDeepSeekApiKey();
+      setModelSettings(normalizeModelSettings(settings, Boolean(adapter.runModel)));
+      setStatus(settings.deepSeekApiKeyStatus === "valid" ? "DeepSeek API key 有效性检查通过。" : "DeepSeek API key 已失效，请轮换密钥。");
+    } catch (error) {
+      setStatus(error instanceof Error ? `密钥有效性检查失败：${error.message}` : "密钥有效性检查失败。");
+    } finally {
+      setModelCredentialBusy(false);
+    }
+  }
+
+  async function deleteAgentApiKey() {
+    if (!adapter.deleteDeepSeekApiKey) return;
+    if (!window.confirm(t("删除本机保存的 DeepSeek API key？删除后在线 Agent 将停止工作。"))) return;
+    setModelCredentialBusy(true);
+    try {
+      const settings = await adapter.deleteDeepSeekApiKey();
+      setModelSettings(normalizeModelSettings(settings, Boolean(adapter.runModel)));
+      setStatus(settings.deepSeekApiKeyConfigured
+        ? "已删除 App 内保存的密钥；系统环境变量仍在提供 DeepSeek API key。"
+        : "已删除本机保存的 DeepSeek API key。");
+    } catch (error) {
+      setStatus(error instanceof Error ? `删除密钥失败：${error.message}` : "删除密钥失败。");
+    } finally {
+      setModelCredentialBusy(false);
+    }
   }
 
   function updateCurrentNoteTags(nextTags: string[]) {
@@ -1723,6 +1972,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       if (!adapter.createInterlinkedVault) {
         throw new Error("当前入口没有本地文件系统写入能力，请在桌面 App 中使用。");
       }
+      await flushCanvasSaveBeforeSourceChange();
       const vault = await adapter.createInterlinkedVault(request);
       applyLoadedVault(
         vault,
@@ -1839,7 +2089,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function focusAgent() {
-    document.querySelector<HTMLTextAreaElement>(".agent-console textarea")?.focus();
+    agentAutoCollapseAppliedRef.current = true;
+    setFocusMode(false);
+    if (agentPanelMode === "hidden") setAgentPanelMode("docked");
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".agent-console textarea")?.focus());
   }
 
   function openTreeNoteMenu(note: ParsedNote, event: ReactMouseEvent<HTMLElement>) {
@@ -1899,12 +2152,56 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setCenterMode("graph");
   }
 
+  function openCanvasTab() {
+    if (sourceKind === "empty") {
+      setStorageOpen(true);
+      setStatus("请先打开一个本地知识库，再建立知识画布。");
+      return;
+    }
+    if (sourceKind === "structure") {
+      setStatus("只读磁盘结构模式不会读取文件内容，因此不能建立知识画布。");
+      return;
+    }
+    setWorkspaceTabs((current) => (
+      current.some((tab) => tab.id === CANVAS_TAB_ID)
+        ? current
+        : [...current, { id: CANVAS_TAB_ID, mode: "canvas" }]
+    ));
+    setActiveTabId(CANVAS_TAB_ID);
+    setCenterMode("canvas");
+  }
+
   function openExplorerTab() {
     setWorkspaceTabs((current) =>
       current.some((tab) => tab.id === EXPLORER_TAB_ID) ? current : [...current, { id: EXPLORER_TAB_ID, mode: "explorer" }]
     );
     setActiveTabId(EXPLORER_TAB_ID);
     setCenterMode("explorer");
+  }
+
+  function openTrashTab() {
+    if (sourceKind !== "desktop") {
+      setStatus("回收站只属于当前打开的本地桌面知识库。");
+      return;
+    }
+    setWorkspaceTabs((current) =>
+      current.some((tab) => tab.id === TRASH_TAB_ID) ? current : [...current, { id: TRASH_TAB_ID, mode: "trash" }]
+    );
+    setActiveTabId(TRASH_TAB_ID);
+    setCenterMode("trash");
+  }
+
+  async function previewTrash(entry: TrashEntry) {
+    if (!adapter.previewTrashEntry) return;
+    setTrashPreviewLoadingId(entry.id);
+    try {
+      const preview = await adapter.previewTrashEntry(entry.id);
+      setTrashPreview(preview);
+    } catch (error) {
+      setStatus(error instanceof Error ? `回收站预览失败：${error.message}` : "回收站预览失败。");
+    } finally {
+      setTrashPreviewLoadingId(null);
+    }
   }
 
   function openNoteTab(path: string) {
@@ -1922,13 +2219,58 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function closeTab(tabId: string) {
-    if (tabId === GRAPH_TAB_ID || tabId === EXPLORER_TAB_ID) return;
+    if (tabId === GRAPH_TAB_ID || tabId === CANVAS_TAB_ID || tabId === EXPLORER_TAB_ID || tabId === TRASH_TAB_ID) return;
     const tabIndex = workspaceTabs.findIndex((tab) => tab.id === tabId);
     if (tabIndex === -1) return;
     const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
     setWorkspaceTabs(nextTabs.length > 0 ? nextTabs : [{ id: GRAPH_TAB_ID, mode: "graph" }]);
     if (activeTabId === tabId) {
       activateTab(nextTabs[Math.max(0, tabIndex - 1)] ?? nextTabs[0] ?? { id: GRAPH_TAB_ID, mode: "graph" });
+    }
+  }
+
+  function updateCanvasDocument(nextDocument: KnowledgeCanvasDocument) {
+    canvasDocumentRef.current = nextDocument;
+    canvasDirtyRef.current = true;
+    canvasRevisionRef.current += 1;
+    setCanvasDocument(nextDocument);
+    const writableCanvas = sourceKind === "desktop" || sourceKind === "browser-directory";
+    if (!writableCanvas || !adapter.saveCanvasDocument) {
+      setCanvasSaveState("read-only");
+      return;
+    }
+    if (canvasSaveTimerRef.current) clearTimeout(canvasSaveTimerRef.current);
+    setCanvasSaveState("saving");
+    canvasSaveTimerRef.current = setTimeout(() => {
+      canvasSaveTimerRef.current = null;
+      const savingRevision = canvasRevisionRef.current;
+      Promise.resolve(adapter.saveCanvasDocument?.(nextDocument))
+        .then(() => {
+          if (canvasRevisionRef.current === savingRevision) {
+            canvasDirtyRef.current = false;
+            setCanvasSaveState("saved");
+          }
+        })
+        .catch((error) => {
+          setCanvasSaveState("error");
+          setStatus(error instanceof Error ? `画布保存失败：${error.message}` : "画布保存失败。");
+        });
+    }, 360);
+  }
+
+  async function flushCanvasSaveBeforeSourceChange() {
+    if (canvasSaveTimerRef.current) {
+      clearTimeout(canvasSaveTimerRef.current);
+      canvasSaveTimerRef.current = null;
+    }
+    const writableCanvas = sourceKind === "desktop" || sourceKind === "browser-directory";
+    if (!writableCanvas || !canvasDirtyRef.current || !adapter.saveCanvasDocument) return;
+    const savingRevision = canvasRevisionRef.current;
+    setCanvasSaveState("saving");
+    await adapter.saveCanvasDocument(canvasDocumentRef.current);
+    if (canvasRevisionRef.current === savingRevision) {
+      canvasDirtyRef.current = false;
+      setCanvasSaveState("saved");
     }
   }
 
@@ -2179,6 +2521,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       if (result.trashEntries) {
         setTrashEntries(result.trashEntries);
       }
+      if (trashPreview?.id === entry.id) setTrashPreview(null);
       setStatus(`${result.message} 原路径：${entry.originalPath}`);
     } catch (error) {
       setStatus(error instanceof Error ? `回收站恢复失败：${error.message}` : "回收站恢复失败。");
@@ -2191,12 +2534,22 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     "--left-width": `${leftWidth}px`,
     "--agent-width": `${agentWidth}px`
   } as CSSProperties;
+  const shellClassName = [
+    "obsidian-shell",
+    leftVisible && !focusMode ? "" : "left-collapsed",
+    agentPanelMode === "hidden" && !focusMode ? "agent-collapsed" : "",
+    agentPanelMode === "floating" && !focusMode ? "agent-floating" : "",
+    focusMode ? "workspace-focus-mode" : ""
+  ].filter(Boolean).join(" ");
 
   return (
-    <div ref={shellRef} className={leftVisible ? "obsidian-shell" : "obsidian-shell left-collapsed"} style={shellStyle}>
+    <div ref={shellRef} className={shellClassName} style={shellStyle}>
       <header className="app-chrome">
         <div className="chrome-left">
-          <IconButton active={leftVisible} label={t("切换侧栏")} onClick={() => setLeftVisible((visible) => !visible)}>
+          <IconButton active={leftVisible && !focusMode} label={t("切换侧栏")} onClick={() => {
+            setFocusMode(false);
+            setLeftVisible((visible) => !visible);
+          }}>
             <PanelLeft />
           </IconButton>
           <IconButton active={storageOpen} label={t("存储空间")} onClick={() => setStorageOpen((open) => !open)}>
@@ -2221,10 +2574,18 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 tabIndex={0}
                 title={tab.path ?? "Graph"}
               >
-                {tab.mode === "graph" ? <GitBranch size={13} /> : tab.mode === "explorer" ? <HardDrive size={13} /> : <BookOpen size={13} />}
+                {tab.mode === "graph"
+                  ? <GitBranch size={13} />
+                  : tab.mode === "canvas"
+                    ? <PanelsTopLeft size={13} />
+                    : tab.mode === "explorer"
+                      ? <HardDrive size={13} />
+                      : tab.mode === "trash"
+                        ? <Trash2 size={13} />
+                      : <BookOpen size={13} />}
                 <span>{t(tabTitle(tab, index))}</span>
                 {tab.path && dirtyPaths.includes(tab.path) ? <b className="tab-dirty" aria-label="Unsaved changes" /> : null}
-                {tab.id !== GRAPH_TAB_ID && tab.id !== EXPLORER_TAB_ID ? (
+                {tab.id !== GRAPH_TAB_ID && tab.id !== CANVAS_TAB_ID && tab.id !== EXPLORER_TAB_ID && tab.id !== TRASH_TAB_ID ? (
                   <button
                     aria-label={`Close ${tabTitle(tab, index)}`}
                     className="tab-close"
@@ -2300,14 +2661,26 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <IconButton active={centerMode === "graph"} label={t("关系图谱")} onClick={openGraphTab}>
           <Network />
         </IconButton>
+        <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
+          <PanelsTopLeft />
+        </IconButton>
         <IconButton active={centerMode === "explorer"} label={t("资源查询")} onClick={openExplorerTab}>
           <HardDrive />
         </IconButton>
+        <IconButton active={centerMode === "trash"} label={t("回收站")} onClick={openTrashTab}>
+          <Trash2 />
+        </IconButton>
         <div className="ribbon-spacer" />
-        <IconButton label="Agent" onClick={focusAgent}>
+        <IconButton active={agentPanelMode !== "hidden" && !focusMode} label={t("智能体")} onClick={focusAgent}>
           <Bot />
         </IconButton>
-        <IconButton active={graphSettingsOpen} label={t("设置")} onClick={() => setGraphSettingsOpen((open) => !open)}>
+        <IconButton active={graphSettingsOpen} label={t("设置")} onClick={() => {
+          if (centerMode === "graph" && graphPerspective === "files") {
+            setGraphSettingsOpen((open) => !open);
+            return;
+          }
+          window.dispatchEvent(new Event("knowledge-agent:open-update-settings"));
+        }}>
           <Settings />
         </IconButton>
       </aside>
@@ -2442,7 +2815,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      {leftVisible ? (
+      {leftVisible && !focusMode ? (
         <div
           aria-label={t("调整左侧栏宽度")}
           aria-orientation="vertical"
@@ -2452,13 +2825,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      <div
-        aria-label={t("调整右侧 Agent 栏宽度")}
-        aria-orientation="vertical"
-        className="column-resizer column-resizer-agent"
-        onPointerDown={(event) => startColumnResize("agent", event)}
-        role="separator"
-      />
+      {agentPanelMode === "docked" && !focusMode ? (
+        <div
+          aria-label={t("调整右侧 Agent 栏宽度")}
+          aria-orientation="vertical"
+          className="column-resizer column-resizer-agent"
+          onPointerDown={(event) => startColumnResize("agent", event)}
+          role="separator"
+        />
+      ) : null}
 
       <main className="workspace">
         <header className="workspace-toolbar">
@@ -2471,8 +2846,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{sourceKind === "empty" ? t("开始") : centerMode === "explorer" ? runtime(sourceName) : currentPath.split("/").slice(0, -1).join(" / ") || t("关系图谱")}</span>
-            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : leafName(currentPath)}</strong>
+            <span>{sourceKind === "empty" ? t("开始") : centerMode === "canvas" || centerMode === "explorer" || centerMode === "trash" ? runtime(sourceName) : currentPath.split("/").slice(0, -1).join(" / ") || t("关系图谱")}</span>
+            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "canvas" ? t("知识画布") : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
@@ -2482,6 +2857,20 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             canOpen={adapter.canOpenVault}
             onCreate={() => setStorageOpen(true)}
             onOpen={() => void openLocalVault()}
+          />
+        ) : centerMode === "canvas" ? (
+          <KnowledgeCanvas
+            document={canvasDocument}
+            notes={index.notes.map((note) => ({
+              path: note.path,
+              title: note.title,
+              content: note.content,
+              tags: note.tags
+            }))}
+            onChange={updateCanvasDocument}
+            onOpenNote={openNoteTab}
+            readOnly={sourceKind !== "desktop" && sourceKind !== "browser-directory"}
+            saveState={canvasSaveState}
           />
         ) : centerMode === "graph" ? (
           <div className="graph-workspace">
@@ -2584,6 +2973,17 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               </aside>
             ) : null}
           </div>
+        ) : centerMode === "trash" ? (
+          <TrashWorkspace
+            authorizations={trashAuthorizations}
+            entries={trashEntries}
+            onAuthorize={authorizeTrashRestore}
+            onPreview={(entry) => void previewTrash(entry)}
+            onRestore={restoreAuthorizedTrashEntry}
+            preview={trashPreview}
+            previewLoadingId={trashPreviewLoadingId}
+            restoringId={restoringTrashId}
+          />
         ) : centerMode === "explorer" ? (
           isReadOnlyStructure && readOnlyListing ? (
             <ReadOnlyStorageExplorer
@@ -2621,7 +3021,17 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         )}
       </main>
 
-      <AgentConsole
+      {focusMode ? (
+        <button className="focus-mode-exit" onClick={() => {
+          setFocusMode(false);
+          setAgentPanelMode("docked");
+        }} type="button">
+          <Bot size={15} />
+          {t("退出专注模式")}
+        </button>
+      ) : null}
+
+      {agentPanelMode !== "hidden" || focusMode ? <AgentConsole
         activeSessionId={activeAgentSessionKey}
         agentModeOptions={localizedAgentModeOptions}
         canConfigureModel={Boolean(adapter.saveDeepSeekApiKey)}
@@ -2633,6 +3043,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         contextUploadLabel={currentPath ? `${t("加入 Agent 上下文")}: ${currentPath}` : t("当前没有可上传的笔记")}
         contextUsage={agentContextUsage}
         modelConfigured={modelSettings.deepSeekApiKeyConfigured}
+        modelCredentialBusy={modelCredentialBusy}
+        modelCredentialStatus={modelSettings.deepSeekApiKeyStatus}
+        modelCredentialStorage={modelSettings.deepSeekApiKeyStorage}
+        modelCredentialUpdatedLabel={modelSettings.deepSeekApiKeyUpdatedAtMs
+          ? formatTrashTime(modelSettings.deepSeekApiKeyUpdatedAtMs, locale)
+          : undefined}
+        modelCredentialValidatedLabel={modelSettings.deepSeekApiKeyValidatedAtMs
+          ? formatTrashTime(modelSettings.deepSeekApiKeyValidatedAtMs, locale)
+          : undefined}
         modelLabel={`${modelSettings.provider}:${modelSettings.model}`}
         modelShortLabel={modelShortLabel(selectedAgentModel)}
         modelOptions={localizedAgentModelOptions}
@@ -2642,11 +3061,25 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         onNewSession={createAgentSession}
         onInputChange={setPrompt}
         onModelChange={(model) => void updateAgentModel(model)}
+        onDeleteApiKey={() => void deleteAgentApiKey()}
+        onDock={() => setAgentPanelMode("docked")}
+        onFloat={() => setAgentPanelMode("floating")}
+        onFocus={() => {
+          agentAutoCollapseAppliedRef.current = true;
+          setAgentSettingsOpen(false);
+          setAgentPanelMode("docked");
+          setFocusMode(true);
+        }}
+        onHide={() => {
+          setAgentSettingsOpen(false);
+          setAgentPanelMode("hidden");
+        }}
         onRequestApiKey={() => {
           setAgentApiKeyInput("");
           setAgentSettingsOpen(false);
           setAgentKeyDialogOpen(true);
         }}
+        onValidateApiKey={() => void validateAgentApiKey()}
         onResetSession={resetAgentSession}
         onRestoreSession={restoreAgentSession}
         onRun={runAgent}
@@ -2659,7 +3092,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         selectedModel={selectedAgentModel}
         sessions={agentSessionTabs}
         settingsOpen={agentSettingsOpen}
-      />
+      /> : null}
     </div>
   );
 }
@@ -2811,7 +3244,7 @@ function AgentApiKeyDialog({
           <span>{runtime(`当前模型：${modelLabel}`)}</span>
         </div>
         <label>
-          <span>{t("API key 只保存在本机 AppData，不会写入知识库或 GitHub。")}</span>
+          <span>{t("API key 由 Windows DPAPI 按当前用户加密保存在本机，不会写入知识库或 GitHub。")}</span>
           <input
             autoFocus
             aria-label="DeepSeek API key"
@@ -2981,6 +3414,115 @@ function StoragePanel({
           : t("浏览器入口只能打开授权文件夹；只读磁盘结构扫描和新建任意本机文件夹请使用桌面 App。")}
       </footer>
     </aside>
+  );
+}
+
+function TrashWorkspace({
+  authorizations,
+  entries,
+  onAuthorize,
+  onPreview,
+  onRestore,
+  preview,
+  previewLoadingId,
+  restoringId
+}: {
+  authorizations: Record<string, TrashAuthorization>;
+  entries: TrashEntry[];
+  onAuthorize(entry: TrashEntry): void;
+  onPreview(entry: TrashEntry): void;
+  onRestore(entry: TrashEntry): void;
+  preview: TrashEntryPreview | null;
+  previewLoadingId: string | null;
+  restoringId: string | null;
+}) {
+  const { locale, runtime, t } = useLocalization();
+  return (
+    <section className="trash-workspace">
+      <header className="trash-workspace-header">
+        <div>
+          <span>{t("可恢复删除")}</span>
+          <h1>{t("回收站")}</h1>
+          <p>{t("删除的 Markdown 文档保存在当前知识库的 .knowledge-agent-trash/files 中，精确保留 30 天。")}</p>
+        </div>
+        <div className="trash-retention-badge">
+          <Trash2 size={18} />
+          <strong>{entries.length}</strong>
+          <span>{t("个可恢复文档")}</span>
+        </div>
+      </header>
+      <div className="trash-trust-strip">
+        <ShieldCheck size={16} />
+        <span>{t("恢复不会覆盖同名文档；若原路径已被占用，会生成唯一恢复名称。每次恢复前均可查看内容、原路径和到期时间。")}</span>
+      </div>
+      <div className="trash-workspace-body">
+        <div className="trash-workspace-list">
+          {entries.length === 0 ? (
+            <div className="trash-workspace-empty">
+              <Trash2 size={26} />
+              <strong>{t("回收站为空")}</strong>
+              <span>{t("删除后的文档会在这里保留 30 天。")}</span>
+            </div>
+          ) : entries.map((entry) => {
+            const authorization = authorizations[entry.id];
+            const blocked = authorization?.permission === "blocked";
+            const authorized = authorization && !blocked;
+            return (
+              <article className={preview?.id === entry.id ? "trash-workspace-item active" : "trash-workspace-item"} key={entry.id}>
+                <button className="trash-preview-trigger" onClick={() => onPreview(entry)} type="button">
+                  <strong>{entry.originalPath}</strong>
+                  <span>{runtime(trashRemainingLabel(entry.purgeAfterMs))}</span>
+                  <small>{t("到期：{time}", { time: formatTrashTime(entry.purgeAfterMs, locale) })}</small>
+                </button>
+                <div className="trash-workspace-actions">
+                  {previewLoadingId === entry.id ? <span>{t("读取中…")}</span> : null}
+                  {blocked ? (
+                    <button disabled title={authorization.reason} type="button">{t("已阻止")}</button>
+                  ) : authorized ? (
+                    <button disabled={restoringId === entry.id} onClick={() => onRestore(entry)} type="button">
+                      <RotateCcw size={14} />
+                      {restoringId === entry.id ? t("恢复中…") : t("恢复")}
+                    </button>
+                  ) : (
+                    <button onClick={() => onAuthorize(entry)} type="button">
+                      <ShieldCheck size={14} />
+                      {t("Agent 审核")}
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <aside className="trash-preview-pane">
+          {preview ? (
+            <>
+              <header>
+                <div>
+                  <span>{t("恢复预览")}</span>
+                  <strong>{preview.originalPath}</strong>
+                </div>
+                <span>{formatFileSize(preview.size)}</span>
+              </header>
+              <dl>
+                <div><dt>{t("物理位置")}</dt><dd>{preview.trashPath}</dd></div>
+                <div><dt>{t("删除时间")}</dt><dd>{formatTrashTime(preview.deletedAtMs, locale)}</dd></div>
+                <div><dt>{t("自动清理")}</dt><dd>{formatTrashTime(preview.purgeAfterMs, locale)}</dd></div>
+                <div><dt>{t("剩余时间")}</dt><dd>{runtime(trashRemainingLabel(preview.purgeAfterMs))}</dd></div>
+              </dl>
+              {preview.truncated ? <p className="trash-preview-limit">{t("文档较大，预览仅显示前 1 MB；恢复时仍会恢复完整原文件。")}</p> : null}
+              <pre>{preview.content || t("（文档没有可显示的文字内容）")}</pre>
+            </>
+          ) : (
+            <div className="trash-preview-empty">
+              <FileText size={25} />
+              <strong>{t("选择文档查看恢复预览")}</strong>
+              <span>{t("这里只读取回收站副本，不会修改原始知识库。")}</span>
+            </div>
+          )}
+        </aside>
+      </div>
+    </section>
   );
 }
 
@@ -3475,7 +4017,9 @@ function tabIdForPath(path: string): string {
 
 function tabTitle(tab: WorkspaceTab, index: ReturnType<typeof buildVaultIndex>): string {
   if (tab.mode === "graph") return "关系图谱";
+  if (tab.mode === "canvas") return "知识画布";
   if (tab.mode === "explorer") return "资源查询";
+  if (tab.mode === "trash") return "回收站";
   if (!tab.path) return "笔记";
   return getNote(index, tab.path)?.title ?? leafName(tab.path);
 }
@@ -3549,7 +4093,11 @@ function normalizeModelSettings(settings: ModelConnectionSettings, canRunModel: 
     provider: canRunModel ? settings.provider || "deepseek" : "offline",
     model: normalizeAgentModel(settings.model, canRunModel),
     agentMode: normalizeAgentMode(settings.agentMode),
-    deepSeekApiKeyConfigured: settings.deepSeekApiKeyConfigured
+    deepSeekApiKeyConfigured: settings.deepSeekApiKeyConfigured,
+    deepSeekApiKeyStorage: settings.deepSeekApiKeyStorage ?? (settings.deepSeekApiKeyConfigured ? "environment" : "none"),
+    deepSeekApiKeyUpdatedAtMs: settings.deepSeekApiKeyUpdatedAtMs,
+    deepSeekApiKeyStatus: settings.deepSeekApiKeyStatus ?? "unchecked",
+    deepSeekApiKeyValidatedAtMs: settings.deepSeekApiKeyValidatedAtMs
   };
 }
 
@@ -3611,8 +4159,8 @@ function contextLimitForModel(model: string): number {
 function modelShortLabel(model: string): string {
   if (/flash/i.test(model)) return "Flash";
   if (/pro/i.test(model)) return "Pro";
-  if (/offline/i.test(model)) return "Local";
-  return "Model";
+  if (/offline/i.test(model)) return "本地";
+  return "模型";
 }
 
 export function detectInterlinkedVaultRequest(input: string): InterlinkedVaultRequest | null {

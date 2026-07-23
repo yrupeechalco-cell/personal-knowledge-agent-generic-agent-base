@@ -6,12 +6,14 @@ import { DesktopUpdateNotifier } from "./DesktopUpdateNotifier";
 
 const { checkMock } = vi.hoisted(() => ({ checkMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => Promise.resolve("0.2.5") }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => checkMock() }));
 
 describe("DesktopUpdateNotifier", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     checkMock.mockReset();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -76,5 +78,20 @@ describe("DesktopUpdateNotifier", () => {
 
     expect(downloadAndInstall).toHaveBeenCalledTimes(2);
     expect(screen.getByText("v0.2.4 已安装")).toBeTruthy();
+  });
+
+  it("lets the user disable startup update checks and shows trust metadata", async () => {
+    render(<DesktopUpdateNotifier />);
+    await act(async () => {
+      window.dispatchEvent(new Event("knowledge-agent:open-update-settings"));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("更新与信任")).toBeTruthy();
+    expect(screen.getByText("yrupeechalco-cell")).toBeTruthy();
+    expect(screen.getByText("安装前强制执行 Tauri Ed25519 验证")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(window.localStorage.getItem("knowledge-agent:auto-update-check")).toBe("false");
   });
 });

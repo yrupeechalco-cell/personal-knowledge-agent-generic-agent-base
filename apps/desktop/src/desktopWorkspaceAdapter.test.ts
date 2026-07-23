@@ -37,4 +37,29 @@ describe("desktop workspace startup", () => {
     expect(vault.files).toEqual([]);
     expect(vault.unsupportedReason).toContain("settings unavailable");
   });
+
+  it("routes note moves through the atomic desktop command before reloading", async () => {
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "load_app_settings") return { vaultPath: "F:\\Knowledge" };
+      if (command === "load_vault_notes") {
+        return [{ path: "new/topic.md", content: "# Topic" }];
+      }
+      if (command === "list_trash_entries") return [];
+      if (command === "move_notes_atomic") return undefined;
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const adapter = createDesktopWorkspaceAdapter();
+    await adapter.loadInitialVault();
+
+    const result = await adapter.moveNotes?.([
+      { from: "old/topic.md", to: "new/topic.md" }
+    ]);
+
+    expect(invokeMock).toHaveBeenCalledWith("move_notes_atomic", {
+      root: "F:\\Knowledge",
+      moves: [{ from: "old/topic.md", to: "new/topic.md" }]
+    });
+    expect(result?.files?.map((file) => file.path)).toEqual(["new/topic.md"]);
+    expect(result?.message).toContain("原子事务");
+  });
 });

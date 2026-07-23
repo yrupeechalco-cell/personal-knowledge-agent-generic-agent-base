@@ -3,7 +3,7 @@ use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
@@ -17,10 +17,13 @@ use zip::{write::SimpleFileOptions, ZipWriter};
 const TRASH_DIR: &str = ".knowledge-agent-trash";
 const TRASH_FILES_DIR: &str = "files";
 const TRASH_INDEX_FILE: &str = "index.json";
+const CANVAS_DIR: &str = ".knowledge-agent";
+const CANVAS_FILE: &str = "canvas.json";
 const TRASH_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 const MAX_READ_ONLY_STRUCTURE_ENTRIES: usize = 900;
 const MAX_READ_ONLY_DIRECTORY_ENTRIES: usize = 1_000;
 const MAX_READ_ONLY_PREVIEW_BYTES: u64 = 1_048_576;
+const MAX_CANVAS_BYTES: usize = 5 * 1_048_576;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +113,9 @@ struct AppSettings {
     model: Option<String>,
     agent_mode: Option<String>,
     deep_seek_api_key_configured: Option<bool>,
+    deep_seek_api_key_updated_at_ms: Option<u64>,
+    deep_seek_api_key_status: Option<String>,
+    deep_seek_api_key_validated_at_ms: Option<u64>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -125,6 +131,30 @@ struct ModelSettings {
     model: String,
     agent_mode: String,
     deep_seek_api_key_configured: bool,
+    deep_seek_api_key_storage: String,
+    deep_seek_api_key_updated_at_ms: Option<u64>,
+    deep_seek_api_key_status: String,
+    deep_seek_api_key_validated_at_ms: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathMove {
+    from: String,
+    to: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashEntryPreview {
+    id: String,
+    original_path: String,
+    trash_path: String,
+    content: String,
+    size: u64,
+    truncated: bool,
+    deleted_at_ms: u64,
+    purge_after_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -358,6 +388,36 @@ fn load_vault_notes(root: String) -> Result<Vec<NoteFile>, String> {
 }
 
 #[tauri::command]
+fn load_canvas_document(root: String) -> Result<Option<serde_json::Value>, String> {
+    let root_path = PathBuf::from(root);
+    ensure_existing_dir(&root_path)?;
+    let canvas_path = root_path.join(CANVAS_DIR).join(CANVAS_FILE);
+    if !canvas_path.exists() {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&canvas_path).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_CANVAS_BYTES as u64 {
+        return Err("canvas document is larger than the 5 MiB safety limit".to_string());
+    }
+    let text = fs::read_to_string(canvas_path).map_err(|error| error.to_string())?;
+    let value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    Ok(Some(value))
+}
+
+#[tauri::command]
+fn save_canvas_document(root: String, document: serde_json::Value) -> Result<(), String> {
+    let root_path = PathBuf::from(root);
+    ensure_existing_dir(&root_path)?;
+    let text = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
+    if text.len() > MAX_CANVAS_BYTES {
+        return Err("canvas document is larger than the 5 MiB safety limit".to_string());
+    }
+    let canvas_dir = root_path.join(CANVAS_DIR);
+    fs::create_dir_all(&canvas_dir).map_err(|error| error.to_string())?;
+    fs::write(canvas_dir.join(CANVAS_FILE), text).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn scan_directory_structure_read_only(root: String) -> Result<ReadOnlyStructureScan, String> {
     let root_path = PathBuf::from(root);
     ensure_existing_dir(&root_path)?;
@@ -386,6 +446,45 @@ fn list_trash_entries(root: String) -> Result<Vec<TrashEntry>, String> {
 }
 
 #[tauri::command]
+fn preview_trash_entry(root: String, id: String) -> Result<TrashEntryPreview, String> {
+    let root_path = PathBuf::from(root);
+    ensure_existing_dir(&root_path)?;
+    purge_expired_trash(&root_path)?;
+    let index = load_trash_index(&root_path)?;
+    let entry = index
+        .entries
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "trash entry not found or already purged".to_string())?;
+    let full_path = safe_internal_join(&root_path, &entry.trash_path)?;
+    let metadata = fs::metadata(&full_path).map_err(|error| error.to_string())?;
+    let (content, truncated) = read_utf8_preview(&full_path, MAX_READ_ONLY_PREVIEW_BYTES as usize)?;
+    Ok(TrashEntryPreview {
+        id: entry.id,
+        original_path: entry.original_path,
+        trash_path: entry.trash_path,
+        content,
+        size: metadata.len(),
+        truncated,
+        deleted_at_ms: entry.deleted_at_ms,
+        purge_after_ms: entry.purge_after_ms,
+    })
+}
+
+fn read_utf8_preview(path: &Path, max_bytes: usize) -> Result<(String, bool), String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut buffer = Vec::with_capacity(max_bytes.min(64 * 1024));
+    file.take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut buffer)
+        .map_err(|error| error.to_string())?;
+    let truncated = buffer.len() > max_bytes;
+    if truncated {
+        buffer.truncate(max_bytes);
+    }
+    Ok((String::from_utf8_lossy(&buffer).into_owned(), truncated))
+}
+
+#[tauri::command]
 fn save_note(root: String, path: String, content: String) -> Result<(), String> {
     ensure_allowed_path(&path)?;
     let root_path = PathBuf::from(root);
@@ -398,6 +497,13 @@ fn save_note(root: String, path: String, content: String) -> Result<(), String> 
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::write(full_path, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn move_notes_atomic(root: String, moves: Vec<PathMove>) -> Result<(), String> {
+    let root_path = PathBuf::from(root);
+    ensure_existing_dir(&root_path)?;
+    move_notes_atomic_in_root(&root_path, moves)
 }
 
 #[tauri::command]
@@ -458,8 +564,7 @@ fn load_app_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
-    let path = settings_path(&app)?;
-    let existing = load_app_settings(app).unwrap_or_default();
+    let existing = load_app_settings(app.clone()).unwrap_or_default();
     let merged = AppSettings {
         vault_path: settings.vault_path.or(existing.vault_path),
         github_repo: settings.github_repo.or(existing.github_repo),
@@ -469,21 +574,37 @@ fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(),
         deep_seek_api_key_configured: settings
             .deep_seek_api_key_configured
             .or(existing.deep_seek_api_key_configured),
+        deep_seek_api_key_updated_at_ms: settings
+            .deep_seek_api_key_updated_at_ms
+            .or(existing.deep_seek_api_key_updated_at_ms),
+        deep_seek_api_key_status: settings
+            .deep_seek_api_key_status
+            .or(existing.deep_seek_api_key_status),
+        deep_seek_api_key_validated_at_ms: settings
+            .deep_seek_api_key_validated_at_ms
+            .or(existing.deep_seek_api_key_validated_at_ms),
     };
-    let text = serde_json::to_string_pretty(&merged).map_err(|error| error.to_string())?;
-    fs::write(path, text).map_err(|error| error.to_string())
+    write_app_settings(&app, &merged)
 }
 
 #[tauri::command]
 fn load_model_settings(app: tauri::AppHandle) -> Result<ModelSettings, String> {
     let settings = load_app_settings(app.clone()).unwrap_or_default();
+    let credential = deepseek_credential_info(&app)?;
     Ok(ModelSettings {
         provider: settings
             .model_provider
             .unwrap_or_else(|| "deepseek".to_string()),
         model: normalize_model_name(settings.model),
         agent_mode: normalize_agent_mode(settings.agent_mode),
-        deep_seek_api_key_configured: load_deepseek_api_key(&app)?.is_some(),
+        deep_seek_api_key_configured: credential.configured,
+        deep_seek_api_key_storage: credential.storage,
+        deep_seek_api_key_updated_at_ms: settings.deep_seek_api_key_updated_at_ms,
+        deep_seek_api_key_status: normalize_credential_status(
+            settings.deep_seek_api_key_status,
+            credential.configured,
+        ),
+        deep_seek_api_key_validated_at_ms: settings.deep_seek_api_key_validated_at_ms,
     })
 }
 
@@ -512,17 +633,64 @@ fn save_deepseek_api_key(app: tauri::AppHandle, api_key: String) -> Result<Model
     if trimmed.is_empty() {
         return Err("DeepSeek API key cannot be empty".to_string());
     }
-    let secrets = AppSecrets {
-        deep_seek_api_key: Some(trimmed.to_string()),
-    };
-    let path = secrets_path(&app)?;
-    let text = serde_json::to_string_pretty(&secrets).map_err(|error| error.to_string())?;
-    fs::write(path, text).map_err(|error| error.to_string())?;
+    save_protected_deepseek_api_key(&app, trimmed)?;
     let mut settings = load_app_settings(app.clone()).unwrap_or_default();
     settings.model_provider = Some("deepseek".to_string());
     settings.deep_seek_api_key_configured = Some(true);
-    save_app_settings(app.clone(), settings)?;
+    settings.deep_seek_api_key_updated_at_ms = Some(now_ms()?);
+    settings.deep_seek_api_key_status = Some("unchecked".to_string());
+    settings.deep_seek_api_key_validated_at_ms = None;
+    write_app_settings(&app, &settings)?;
     load_model_settings(app)
+}
+
+#[tauri::command]
+fn delete_deepseek_api_key(app: tauri::AppHandle) -> Result<ModelSettings, String> {
+    for path in [protected_secrets_path(&app)?, legacy_secrets_path(&app)?] {
+        if path.exists() {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+        }
+    }
+    let mut settings = load_app_settings(app.clone()).unwrap_or_default();
+    settings.deep_seek_api_key_configured = Some(false);
+    settings.deep_seek_api_key_updated_at_ms = None;
+    settings.deep_seek_api_key_status = Some("unchecked".to_string());
+    settings.deep_seek_api_key_validated_at_ms = None;
+    write_app_settings(&app, &settings)?;
+    load_model_settings(app)
+}
+
+#[tauri::command]
+async fn validate_deepseek_api_key(app: tauri::AppHandle) -> Result<ModelSettings, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let api_key = load_deepseek_api_key(&app)?
+            .ok_or_else(|| "DeepSeek API key is not configured".to_string())?;
+        let response = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|error| error.to_string())?
+            .get("https://api.deepseek.com/models")
+            .bearer_auth(api_key)
+            .send()
+            .map_err(|error| format!("API key validation request failed: {error}"))?;
+        let status = if response.status().is_success() {
+            "valid".to_string()
+        } else if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
+            "invalid".to_string()
+        } else {
+            return Err(format!(
+                "API key validation service returned HTTP {}",
+                response.status()
+            ));
+        };
+        let mut persisted = load_app_settings(app.clone()).unwrap_or_default();
+        persisted.deep_seek_api_key_status = Some(status);
+        persisted.deep_seek_api_key_validated_at_ms = Some(now_ms()?);
+        write_app_settings(&app, &persisted)?;
+        load_model_settings(app)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -722,9 +890,13 @@ pub fn run() {
             start_vault_watcher,
             stop_vault_watcher,
             load_vault_notes,
+            load_canvas_document,
+            save_canvas_document,
             scan_directory_structure_read_only,
             list_trash_entries,
+            preview_trash_entry,
             save_note,
+            move_notes_atomic,
             delete_note,
             restore_trash_entry,
             git_status,
@@ -735,6 +907,8 @@ pub fn run() {
             load_model_settings,
             save_model_settings,
             save_deepseek_api_key,
+            delete_deepseek_api_key,
+            validate_deepseek_api_key,
             deepseek_chat_completion,
             deepseek_tool_completion
         ])
@@ -1443,6 +1617,135 @@ fn linked_targets(index: usize, count: usize) -> Vec<usize> {
     targets
 }
 
+fn move_notes_atomic_in_root(root: &Path, moves: Vec<PathMove>) -> Result<(), String> {
+    if moves.is_empty() {
+        return Ok(());
+    }
+
+    let mut sources = HashSet::new();
+    let mut destinations = HashSet::new();
+    let mut validated = Vec::with_capacity(moves.len());
+    for path_move in moves {
+        let from = path_move.from.replace('\\', "/");
+        let to = path_move.to.replace('\\', "/");
+        ensure_allowed_path(&from)?;
+        ensure_allowed_path(&to)?;
+        if from == to {
+            continue;
+        }
+        if !Path::new(&from)
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+            || !Path::new(&to)
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        {
+            return Err("only markdown notes can be moved".to_string());
+        }
+        if !sources.insert(from.to_lowercase()) {
+            return Err(format!("duplicate move source: {from}"));
+        }
+        if !destinations.insert(to.to_lowercase()) {
+            return Err(format!("duplicate move destination: {to}"));
+        }
+        let source_path = safe_join(root, &from)?;
+        if !source_path.is_file() {
+            return Err(format!("move source does not exist: {from}"));
+        }
+        validated.push((from, to, source_path));
+    }
+    if validated.is_empty() {
+        return Ok(());
+    }
+
+    for (_, to, _) in &validated {
+        let destination_path = safe_join(root, to)?;
+        if destination_path.exists() && !sources.contains(&to.to_lowercase()) {
+            return Err(format!("move destination already exists: {to}"));
+        }
+    }
+
+    let transaction_root = root
+        .join(CANVAS_DIR)
+        .join("transactions")
+        .join(format!("move-{}", now_ms()?));
+    fs::create_dir_all(&transaction_root).map_err(|error| error.to_string())?;
+    let staged = validated
+        .into_iter()
+        .enumerate()
+        .map(|(index, (from, to, source_path))| {
+            (
+                from,
+                to,
+                source_path,
+                transaction_root.join(format!("{index}.md")),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut staged_count = 0;
+    for (_, _, source_path, temp_path) in &staged {
+        if let Err(error) = fs::rename(source_path, temp_path) {
+            for (_, _, rollback_source, rollback_temp) in staged[..staged_count].iter().rev() {
+                let _ = fs::rename(rollback_temp, rollback_source);
+            }
+            let _ = fs::remove_dir_all(&transaction_root);
+            return Err(format!("failed to stage move transaction: {error}"));
+        }
+        staged_count += 1;
+    }
+
+    let mut committed_count = 0;
+    for (_, to, _, temp_path) in &staged {
+        let destination_path = safe_join(root, to)?;
+        if let Some(parent) = destination_path.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                rollback_move_transaction(root, &staged, committed_count);
+                return Err(format!("failed to create move destination: {error}"));
+            }
+        }
+        if let Err(error) = fs::rename(temp_path, &destination_path) {
+            rollback_move_transaction(root, &staged, committed_count);
+            return Err(format!("failed to commit move transaction: {error}"));
+        }
+        committed_count += 1;
+    }
+
+    let _ = fs::remove_dir_all(&transaction_root);
+    Ok(())
+}
+
+fn rollback_move_transaction(
+    root: &Path,
+    staged: &[(String, String, PathBuf, PathBuf)],
+    committed_count: usize,
+) {
+    for (_, to, source_path, _) in staged[..committed_count].iter().rev() {
+        let Ok(destination_path) = safe_join(root, to) else {
+            continue;
+        };
+        if let Some(parent) = source_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if destination_path.exists() {
+            let _ = fs::rename(destination_path, source_path);
+        }
+    }
+    for (_, _, source_path, temp_path) in staged[committed_count..].iter().rev() {
+        if let Some(parent) = source_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if temp_path.exists() {
+            let _ = fs::rename(temp_path, source_path);
+        }
+    }
+    if let Some(transaction_root) = staged.first().and_then(|entry| entry.3.parent()) {
+        let _ = fs::remove_dir_all(transaction_root);
+    }
+}
+
 fn move_note_to_trash(
     root: &Path,
     original_path: &str,
@@ -1786,7 +2089,16 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("settings.json"))
 }
 
-fn secrets_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn protected_secrets_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    Ok(dir.join("secrets.dat"))
+}
+
+fn legacy_secrets_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
@@ -1795,22 +2107,189 @@ fn secrets_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("secrets.json"))
 }
 
+struct CredentialInfo {
+    configured: bool,
+    storage: String,
+}
+
+fn deepseek_credential_info(app: &tauri::AppHandle) -> Result<CredentialInfo, String> {
+    let configured = load_deepseek_api_key(app)?.is_some();
+    let storage = if protected_secrets_path(app)?.exists() {
+        "windows-dpapi"
+    } else if env::var("DEEPSEEK_API_KEY")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        "environment"
+    } else {
+        "none"
+    };
+    Ok(CredentialInfo {
+        configured,
+        storage: storage.to_string(),
+    })
+}
+
+fn save_protected_deepseek_api_key(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
+    let encrypted = protect_secret(key.as_bytes())?;
+    let path = protected_secrets_path(app)?;
+    let temp_path = path.with_extension("dat.tmp");
+    fs::write(&temp_path, encrypted).map_err(|error| error.to_string())?;
+    replace_file_atomic(&temp_path, &path)?;
+    let legacy_path = legacy_secrets_path(app)?;
+    if legacy_path.exists() {
+        fs::remove_file(legacy_path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn write_app_settings(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), String> {
+    let path = settings_path(app)?;
+    let temp_path = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
+    fs::write(&temp_path, text).map_err(|error| error.to_string())?;
+    replace_file_atomic(&temp_path, &path)
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    unsafe {
+        MoveFileExW(
+            PCWSTR(source_wide.as_ptr()),
+            PCWSTR(destination_wide.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+        .map_err(|error| format!("atomic file replacement failed: {error}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::rename(source, destination).map_err(|error| error.to_string())
+}
+
 fn load_deepseek_api_key(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let protected_path = protected_secrets_path(app)?;
+    if protected_path.exists() {
+        let encrypted = fs::read(protected_path).map_err(|error| error.to_string())?;
+        let decrypted = unprotect_secret(&encrypted)?;
+        let key = String::from_utf8(decrypted).map_err(|error| error.to_string())?;
+        let trimmed = key.trim().to_string();
+        return Ok((!trimmed.is_empty()).then_some(trimmed));
+    }
+
+    let legacy_path = legacy_secrets_path(app)?;
+    if legacy_path.exists() {
+        let text = fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
+        let secrets: AppSecrets = parse_json_document(&text)?;
+        if let Some(key) = secrets
+            .deep_seek_api_key
+            .filter(|key| !key.trim().is_empty())
+        {
+            save_protected_deepseek_api_key(app, key.trim())?;
+            return Ok(Some(key.trim().to_string()));
+        }
+        fs::remove_file(legacy_path).map_err(|error| error.to_string())?;
+    }
+
     if let Ok(value) = env::var("DEEPSEEK_API_KEY") {
         let trimmed = value.trim().to_string();
         if !trimmed.is_empty() {
             return Ok(Some(trimmed));
         }
     }
-    let path = secrets_path(app)?;
-    if !path.exists() {
-        return Ok(None);
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn protect_secret(value: &[u8]) -> Result<Vec<u8>, String> {
+    use windows::core::w;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: value
+            .len()
+            .try_into()
+            .map_err(|_| "API key is too large".to_string())?,
+        pbData: value.as_ptr() as *mut u8,
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptProtectData(
+            &input,
+            w!("Knowledge Agent API Key"),
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .map_err(|error| format!("Windows DPAPI encryption failed: {error}"))?;
+        let encrypted = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(output.pbData.cast())));
+        Ok(encrypted)
     }
-    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let secrets: AppSecrets = parse_json_document(&text)?;
-    Ok(secrets
-        .deep_seek_api_key
-        .filter(|key| !key.trim().is_empty()))
+}
+
+#[cfg(windows)]
+fn unprotect_secret(value: &[u8]) -> Result<Vec<u8>, String> {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: value
+            .len()
+            .try_into()
+            .map_err(|_| "encrypted API key is too large".to_string())?,
+        pbData: value.as_ptr() as *mut u8,
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptUnprotectData(
+            &input,
+            None,
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .map_err(|error| format!("Windows DPAPI decryption failed: {error}"))?;
+        let decrypted = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(output.pbData.cast())));
+        Ok(decrypted)
+    }
+}
+
+#[cfg(not(windows))]
+fn protect_secret(_value: &[u8]) -> Result<Vec<u8>, String> {
+    Err("secure API key storage currently requires Windows DPAPI".to_string())
+}
+
+#[cfg(not(windows))]
+fn unprotect_secret(_value: &[u8]) -> Result<Vec<u8>, String> {
+    Err("secure API key storage currently requires Windows DPAPI".to_string())
 }
 
 fn parse_json_document<T: DeserializeOwned>(text: &str) -> Result<T, String> {
@@ -1839,6 +2318,17 @@ fn normalize_agent_mode(mode: Option<String>) -> String {
         Some("linker") => "linker".to_string(),
         Some("daily") => "daily".to_string(),
         _ => "daily".to_string(),
+    }
+}
+
+fn normalize_credential_status(status: Option<String>, configured: bool) -> String {
+    if !configured {
+        return "unchecked".to_string();
+    }
+    match status.as_deref() {
+        Some("valid") => "valid".to_string(),
+        Some("invalid") => "invalid".to_string(),
+        _ => "unchecked".to_string(),
     }
 }
 
@@ -1933,6 +2423,226 @@ mod trash_tests {
 
         fs::remove_dir_all(&root).expect("test restore root should be removed");
     }
+
+    #[test]
+    fn bounds_large_trash_previews_without_affecting_restore_content() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-trash-preview-{stamp}"));
+        let note_path = root.join("large.md");
+        fs::create_dir_all(&root).expect("test root should be created");
+        let original = "x".repeat(MAX_READ_ONLY_PREVIEW_BYTES as usize + 64);
+        fs::write(&note_path, &original).expect("large note should be written");
+
+        let entry = move_note_to_trash_at(
+            &root,
+            "large.md",
+            &note_path,
+            now_ms().expect("current time should be available"),
+        )
+        .expect("large note should move to trash");
+        let preview = preview_trash_entry(root.to_string_lossy().to_string(), entry.id.clone())
+            .expect("large trash note should have a bounded preview");
+
+        assert!(preview.truncated);
+        assert_eq!(preview.content.len(), MAX_READ_ONLY_PREVIEW_BYTES as usize);
+        assert_eq!(preview.size, original.len() as u64);
+
+        restore_trash_entry_by_id(&root, &entry.id).expect("large note should restore");
+        assert_eq!(
+            fs::read_to_string(&note_path).expect("restored note should be readable"),
+            original
+        );
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[test]
+    fn moves_multiple_notes_as_one_validated_transaction() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-move-{stamp}"));
+        fs::create_dir_all(root.join("old")).expect("source folder should be created");
+        fs::write(root.join("old/a.md"), "# A").expect("first note should be written");
+        fs::write(root.join("old/b.md"), "# B").expect("second note should be written");
+
+        move_notes_atomic_in_root(
+            &root,
+            vec![
+                PathMove {
+                    from: "old/a.md".to_string(),
+                    to: "new/a.md".to_string(),
+                },
+                PathMove {
+                    from: "old/b.md".to_string(),
+                    to: "new/b.md".to_string(),
+                },
+            ],
+        )
+        .expect("transaction should commit");
+
+        assert!(!root.join("old/a.md").exists());
+        assert!(!root.join("old/b.md").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("new/a.md")).expect("moved note should exist"),
+            "# A"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("new/b.md")).expect("moved note should exist"),
+            "# B"
+        );
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[test]
+    fn rejects_move_collision_before_changing_any_source() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-move-collision-{stamp}"));
+        fs::create_dir_all(root.join("old")).expect("source folder should be created");
+        fs::create_dir_all(root.join("new")).expect("destination folder should be created");
+        fs::write(root.join("old/a.md"), "# A").expect("source note should be written");
+        fs::write(root.join("new/a.md"), "# Existing").expect("destination note should be written");
+
+        let result = move_notes_atomic_in_root(
+            &root,
+            vec![PathMove {
+                from: "old/a.md".to_string(),
+                to: "new/a.md".to_string(),
+            }],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(root.join("old/a.md")).expect("source should remain"),
+            "# A"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("new/a.md")).expect("destination should remain"),
+            "# Existing"
+        );
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[test]
+    fn rolls_back_every_note_when_a_later_move_cannot_commit() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-move-rollback-{stamp}"));
+        fs::create_dir_all(root.join("old")).expect("source folder should be created");
+        fs::write(root.join("old/a.md"), "# A").expect("first note should be written");
+        fs::write(root.join("old/b.md"), "# B").expect("second note should be written");
+        fs::write(root.join("blocked"), "not a directory")
+            .expect("blocking file should be written");
+
+        let result = move_notes_atomic_in_root(
+            &root,
+            vec![
+                PathMove {
+                    from: "old/a.md".to_string(),
+                    to: "new/a.md".to_string(),
+                },
+                PathMove {
+                    from: "old/b.md".to_string(),
+                    to: "blocked/b.md".to_string(),
+                },
+            ],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(root.join("old/a.md")).expect("first source should roll back"),
+            "# A"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("old/b.md")).expect("second source should roll back"),
+            "# B"
+        );
+        assert!(!root.join("new/a.md").exists());
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn supports_case_only_note_renames_on_windows() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-case-move-{stamp}"));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::write(root.join("Topic.md"), "# Topic").expect("source note should be written");
+
+        move_notes_atomic_in_root(
+            &root,
+            vec![PathMove {
+                from: "Topic.md".to_string(),
+                to: "topic.md".to_string(),
+            }],
+        )
+        .expect("case-only transaction should commit");
+
+        assert_eq!(
+            fs::read_to_string(root.join("topic.md")).expect("renamed note should exist"),
+            "# Topic"
+        );
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[test]
+    fn atomic_replacement_overwrites_an_existing_file() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-replace-{stamp}"));
+        fs::create_dir_all(&root).expect("test root should be created");
+        let destination = root.join("secrets.dat");
+        let source = root.join("secrets.dat.tmp");
+        fs::write(&destination, b"old").expect("old file should be written");
+        fs::write(&source, b"new").expect("new file should be written");
+
+        replace_file_atomic(&source, &destination).expect("replacement should succeed");
+
+        assert_eq!(
+            fs::read(&destination).expect("replacement should be readable"),
+            b"new"
+        );
+        assert!(!source.exists());
+        fs::remove_dir_all(&root).expect("test root should be removed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_dpapi_round_trip_does_not_store_plaintext() {
+        let secret = b"sk-test-private-value";
+        let encrypted = protect_secret(secret).expect("DPAPI should encrypt");
+        assert_ne!(encrypted, secret);
+        assert!(!String::from_utf8_lossy(&encrypted).contains("sk-test-private-value"));
+        assert_eq!(
+            unprotect_secret(&encrypted).expect("DPAPI should decrypt"),
+            secret
+        );
+    }
+
+    #[test]
+    fn credential_status_is_cleared_when_no_key_is_configured() {
+        assert_eq!(
+            normalize_credential_status(Some("valid".to_string()), false),
+            "unchecked"
+        );
+        assert_eq!(
+            normalize_credential_status(Some("invalid".to_string()), true),
+            "invalid"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2005,6 +2715,39 @@ mod tests {
             "# Persistent overview\n\n[[Generated/Systems/node-a]]"
         );
 
+        fs::remove_dir_all(&root).expect("test vault should be removed");
+    }
+
+    #[test]
+    fn saves_and_loads_canvas_metadata_without_touching_markdown() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-canvas-{stamp}"));
+        fs::create_dir_all(&root).expect("test vault root should be created");
+        let note_path = root.join("notes.md");
+        fs::write(&note_path, "# unchanged").expect("test note should be written");
+        let document = json!({
+            "version": 1,
+            "id": "canvas-test",
+            "name": "Research",
+            "cards": [],
+            "connections": [],
+            "groups": [],
+            "viewport": { "x": 0, "y": 0, "scale": 1 }
+        });
+
+        save_canvas_document(root.to_string_lossy().to_string(), document.clone())
+            .expect("canvas should be saved");
+        let reloaded =
+            load_canvas_document(root.to_string_lossy().to_string()).expect("canvas should load");
+
+        assert_eq!(reloaded, Some(document));
+        assert_eq!(
+            fs::read_to_string(note_path).expect("note should remain readable"),
+            "# unchanged"
+        );
         fs::remove_dir_all(&root).expect("test vault should be removed");
     }
 

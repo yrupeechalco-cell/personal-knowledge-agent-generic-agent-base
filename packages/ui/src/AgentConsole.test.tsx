@@ -17,7 +17,7 @@ describe("AgentConsole", () => {
       onRun
     });
 
-    const prompt = screen.getByLabelText("Agent prompt");
+    const prompt = screen.getByLabelText("智能体输入");
     fireEvent.keyDown(prompt, { key: "Enter" });
 
     expect(onRun).toHaveBeenCalledTimes(1);
@@ -35,7 +35,7 @@ describe("AgentConsole", () => {
       onRun
     });
 
-    fireEvent.keyDown(screen.getByLabelText("Agent prompt"), {
+    fireEvent.keyDown(screen.getByLabelText("智能体输入"), {
       key: "Enter",
       isComposing: true
     });
@@ -51,11 +51,11 @@ describe("AgentConsole", () => {
       onRun
     });
 
-    fireEvent.keyDown(screen.getByLabelText("Agent prompt"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByLabelText("智能体输入"), { key: "Enter" });
     expect(onRun).not.toHaveBeenCalled();
 
     rerender(baseAgentConsole({ input: "总结当前笔记", onRun, running: true }));
-    fireEvent.keyDown(screen.getByLabelText("Agent prompt"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByLabelText("智能体输入"), { key: "Enter" });
     expect(onRun).not.toHaveBeenCalled();
   });
 
@@ -136,6 +136,53 @@ describe("AgentConsole", () => {
     expect(screen.getByRole("dialog", { name: "Agent settings" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "New sub-agent" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Model connection status" })).toBeTruthy();
+    expect(screen.getByText("Local offline mode")).toBeTruthy();
+  });
+
+  it("exposes real panel controls and credential lifecycle actions", () => {
+    const onDock = vi.fn();
+    const onFloat = vi.fn();
+    const onFocus = vi.fn();
+    const onHide = vi.fn();
+    const onRequestApiKey = vi.fn();
+    const onValidateApiKey = vi.fn();
+    const onDeleteApiKey = vi.fn();
+
+    renderAgentConsole({
+      canConfigureModel: true,
+      modelConfigured: true,
+      modelCredentialStorage: "windows-dpapi",
+      modelCredentialStatus: "valid",
+      modelCredentialUpdatedLabel: "2026/07/23 21:00",
+      modelCredentialValidatedLabel: "2026/07/23 21:01",
+      onDeleteApiKey,
+      onDock,
+      onFloat,
+      onFocus,
+      onHide,
+      onRequestApiKey,
+      onValidateApiKey,
+      settingsOpen: true
+    });
+
+    fireEvent.click(screen.getByLabelText("停靠右侧"));
+    fireEvent.click(screen.getByLabelText("浮动窗口"));
+    fireEvent.click(screen.getByLabelText("专注模式"));
+    fireEvent.click(screen.getByLabelText("收起智能体"));
+    fireEvent.click(screen.getByText("轮换"));
+    fireEvent.click(screen.getByText("验证"));
+    fireEvent.click(screen.getByText("删除"));
+
+    expect(screen.getByText("Windows DPAPI 已加密")).toBeTruthy();
+    expect(screen.getByText("有效性检查通过")).toBeTruthy();
+    expect(screen.getByText("最近验证：2026/07/23 21:01")).toBeTruthy();
+    expect(onDock).toHaveBeenCalledTimes(1);
+    expect(onFloat).toHaveBeenCalledTimes(1);
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(onHide).toHaveBeenCalledTimes(1);
+    expect(onRequestApiKey).toHaveBeenCalledTimes(1);
+    expect(onValidateApiKey).toHaveBeenCalledTimes(1);
+    expect(onDeleteApiKey).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -148,13 +195,24 @@ function baseAgentConsole({
   agentModeOptions,
   canConfigureModel = false,
   input = "",
+  modelConfigured = false,
+  modelCredentialStorage,
+  modelCredentialStatus,
+  modelCredentialUpdatedLabel,
+  modelCredentialValidatedLabel,
   modelOptions,
   onAgentModeChange,
+  onDeleteApiKey,
+  onDeleteSession,
+  onDock,
+  onFloat,
+  onFocus,
+  onHide,
   onModelChange,
   onRequestApiKey,
-  onDeleteSession,
   onSelectSession,
   onToggleSettings,
+  onValidateApiKey,
   running = false,
   selectedAgentMode,
   selectedModel,
@@ -166,13 +224,24 @@ function baseAgentConsole({
   agentModeOptions?: Array<{ value: string; label: string; description?: string }>;
   canConfigureModel?: boolean;
   input?: string;
+  modelConfigured?: boolean;
+  modelCredentialStorage?: "windows-dpapi" | "environment" | "none";
+  modelCredentialStatus?: "unchecked" | "valid" | "invalid";
+  modelCredentialUpdatedLabel?: string;
+  modelCredentialValidatedLabel?: string;
   modelOptions?: Array<{ value: string; label: string; description?: string }>;
   onAgentModeChange?: (mode: string) => void;
+  onDeleteApiKey?: () => void;
+  onDeleteSession?: (sessionId: string) => void;
+  onDock?: () => void;
+  onFloat?: () => void;
+  onFocus?: () => void;
+  onHide?: () => void;
   onModelChange?: (model: string) => void;
   onRequestApiKey?: () => void;
-  onDeleteSession?: (sessionId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onToggleSettings?: () => void;
+  onValidateApiKey?: () => void;
   running?: boolean;
   selectedAgentMode?: string;
   selectedModel?: string;
@@ -188,11 +257,22 @@ function baseAgentConsole({
       diffs={[]}
       input={input}
       messages={[]}
+      modelConfigured={modelConfigured}
+      modelCredentialStorage={modelCredentialStorage}
+      modelCredentialStatus={modelCredentialStatus}
+      modelCredentialUpdatedLabel={modelCredentialUpdatedLabel}
+      modelCredentialValidatedLabel={modelCredentialValidatedLabel}
       onApply={vi.fn()}
       onAgentModeChange={onAgentModeChange}
+      onDeleteApiKey={onDeleteApiKey}
+      onDock={onDock}
+      onFloat={onFloat}
+      onFocus={onFocus}
+      onHide={onHide}
       onInputChange={vi.fn()}
       onModelChange={onModelChange}
       onRequestApiKey={onRequestApiKey}
+      onValidateApiKey={onValidateApiKey}
       onRun={onRun}
       onDeleteSession={onDeleteSession}
       onSelectSession={onSelectSession}
