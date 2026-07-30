@@ -14,6 +14,8 @@ use std::{
 use tauri::{Emitter, Manager, State};
 use zip::{write::SimpleFileOptions, ZipWriter};
 
+mod codex_bridge;
+
 const TRASH_DIR: &str = ".knowledge-agent-trash";
 const TRASH_FILES_DIR: &str = "files";
 const TRASH_INDEX_FILE: &str = "index.json";
@@ -24,6 +26,10 @@ const MAX_READ_ONLY_STRUCTURE_ENTRIES: usize = 900;
 const MAX_READ_ONLY_DIRECTORY_ENTRIES: usize = 1_000;
 const MAX_READ_ONLY_PREVIEW_BYTES: u64 = 1_048_576;
 const MAX_CANVAS_BYTES: usize = 5 * 1_048_576;
+const MAX_AGENT_ATTACHMENT_FILES: usize = 8;
+const MAX_AGENT_ATTACHMENT_TEXT_BYTES: u64 = 2 * 1_048_576;
+const MAX_AGENT_ATTACHMENT_IMAGE_BYTES: u64 = 20 * 1_048_576;
+const MAX_AGENT_ATTACHMENT_CHARS: usize = 12_000;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,6 +86,27 @@ struct ReadOnlyFilePreview {
     message: Option<String>,
     size: u64,
     modified_at_ms: Option<u64>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentAttachment {
+    id: String,
+    name: String,
+    kind: String,
+    content: String,
+    size: u64,
+    media_type: Option<String>,
+    source_path: Option<String>,
+    truncated: bool,
+    warning: Option<String>,
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentAttachmentSelection {
+    attachments: Vec<AgentAttachment>,
+    issues: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -173,6 +200,8 @@ struct ModelRequest {
     system: String,
     messages: Vec<ModelMessage>,
     model: Option<String>,
+    cwd: Option<String>,
+    attachments: Option<Vec<AgentAttachment>>,
     thinking: Option<bool>,
     reasoning_effort: Option<String>,
     tools: Option<Vec<ModelToolDefinition>>,
@@ -272,6 +301,29 @@ fn list_directory_read_only(
 #[tauri::command]
 fn read_file_preview_read_only(root: String, path: String) -> Result<ReadOnlyFilePreview, String> {
     read_file_preview_read_only_at(Path::new(&root), &path)
+}
+
+#[tauri::command]
+async fn select_agent_attachments() -> Result<AgentAttachmentSelection, String> {
+    let Some(paths) = rfd::FileDialog::new()
+        .set_title("选择要交给 Agent 阅读的文件或图片")
+        .add_filter(
+            "Agent 可读取内容",
+            &[
+                "md", "txt", "docx", "json", "csv", "tsv", "html", "xml", "yaml", "yml", "toml",
+                "log", "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "c", "h", "cpp", "hpp",
+                "cs", "sql", "tex", "rtf", "png", "jpg", "jpeg", "bmp", "tif", "tiff", "gif",
+                "webp",
+            ],
+        )
+        .pick_files()
+    else {
+        return Ok(AgentAttachmentSelection::default());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || build_agent_attachment_selection(paths))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -713,6 +765,29 @@ async fn deepseek_tool_completion(
         .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn codex_status() -> Result<codex_bridge::CodexStatus, String> {
+    tauri::async_runtime::spawn_blocking(codex_bridge::codex_status_blocking)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn codex_chat_completion(request: ModelRequest) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        codex_bridge::codex_completion_blocking(request).map(|response| response.content)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn codex_tool_completion(request: ModelRequest) -> Result<ModelTurnResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || codex_bridge::codex_completion_blocking(request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 fn deepseek_tool_completion_blocking(
     app: tauri::AppHandle,
     request: ModelRequest,
@@ -884,6 +959,7 @@ pub fn run() {
             list_storage_roots,
             list_directory_read_only,
             read_file_preview_read_only,
+            select_agent_attachments,
             create_vault_dir,
             create_interlinked_demo_vault,
             create_word_document_on_desktop,
@@ -910,7 +986,10 @@ pub fn run() {
             delete_deepseek_api_key,
             validate_deepseek_api_key,
             deepseek_chat_completion,
-            deepseek_tool_completion
+            deepseek_tool_completion,
+            codex_status,
+            codex_chat_completion,
+            codex_tool_completion
         ])
         .run(tauri::generate_context!())
         .expect("error while running knowledge agent desktop");
@@ -1284,6 +1363,203 @@ fn read_docx_text(path: &Path) -> Result<String, String> {
         }
     }
     Ok(output.trim().to_string())
+}
+
+fn build_agent_attachment_selection(paths: Vec<PathBuf>) -> AgentAttachmentSelection {
+    let mut selection = AgentAttachmentSelection::default();
+    let total = paths.len();
+    for (index, path) in paths
+        .into_iter()
+        .take(MAX_AGENT_ATTACHMENT_FILES)
+        .enumerate()
+    {
+        match read_agent_attachment(&path, index) {
+            Ok(attachment) => selection.attachments.push(attachment),
+            Err(error) => {
+                let name = path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                selection.issues.push(format!("{name}: {error}"));
+            }
+        }
+    }
+    if total > MAX_AGENT_ATTACHMENT_FILES {
+        selection.issues.push(format!(
+            "一次最多读取 {MAX_AGENT_ATTACHMENT_FILES} 个附件，其余文件未加入"
+        ));
+    }
+    selection
+}
+
+fn read_agent_attachment(path: &Path, index: usize) -> Result<AgentAttachment, String> {
+    if !path.is_file() {
+        return Err("不是普通文件".to_string());
+    }
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    let size = metadata.len();
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .ok_or_else(|| "无法读取文件名".to_string())?;
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let (kind, content, warning) = if extension == "docx" {
+        if size > MAX_AGENT_ATTACHMENT_IMAGE_BYTES {
+            return Err("Word 文档超过 20 MB，未读取".to_string());
+        }
+        ("document".to_string(), read_docx_text(path)?, None)
+    } else if is_agent_image_extension(&extension) {
+        if size > MAX_AGENT_ATTACHMENT_IMAGE_BYTES {
+            return Err("图片超过 20 MB，未执行 OCR".to_string());
+        }
+        (
+            "image-ocr".to_string(),
+            read_image_text_with_system_ocr(path)?,
+            Some(
+                "图片在本机通过 Windows OCR 转成文字；DeepSeek 接收的是识别文字，不是原图像素。"
+                    .to_string(),
+            ),
+        )
+    } else if is_text_preview_extension(&extension) {
+        if size > MAX_AGENT_ATTACHMENT_TEXT_BYTES {
+            return Err("文本文件超过 2 MB，未读取".to_string());
+        }
+        let bytes = fs::read(path).map_err(|error| error.to_string())?;
+        if bytes.iter().take(8_192).any(|byte| *byte == 0) {
+            return Err("文件包含二进制内容，未作为文本读取".to_string());
+        }
+        (
+            "text".to_string(),
+            String::from_utf8_lossy(&bytes).into_owned(),
+            None,
+        )
+    } else {
+        return Err(
+            "当前支持常见文本/代码/数据文件、Word .docx 和图片 OCR；PDF 暂未提取".to_string(),
+        );
+    };
+
+    if content.trim().is_empty() {
+        return Err(if kind == "image-ocr" {
+            "Windows OCR 没有识别出可发送给模型的文字".to_string()
+        } else {
+            "文件没有可发送给模型的文字内容".to_string()
+        });
+    }
+    let (content, truncated) = truncate_attachment_text(&content, MAX_AGENT_ATTACHMENT_CHARS);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis())
+        .unwrap_or_default();
+    Ok(AgentAttachment {
+        id: format!("attachment-{stamp}-{index}"),
+        name,
+        kind,
+        content,
+        size,
+        media_type: attachment_media_type(&extension).map(str::to_string),
+        source_path: Some(path.to_string_lossy().to_string()),
+        truncated,
+        warning,
+    })
+}
+
+fn truncate_attachment_text(content: &str, limit: usize) -> (String, bool) {
+    let mut chars = content.chars();
+    let truncated = chars.by_ref().take(limit).collect::<String>();
+    if chars.next().is_none() {
+        (truncated, false)
+    } else {
+        (truncated, true)
+    }
+}
+
+fn is_agent_image_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" | "gif" | "webp"
+    )
+}
+
+fn attachment_media_type(extension: &str) -> Option<&'static str> {
+    match extension {
+        "md" => Some("text/markdown"),
+        "txt" | "log" => Some("text/plain"),
+        "json" => Some("application/json"),
+        "csv" => Some("text/csv"),
+        "html" => Some("text/html"),
+        "xml" => Some("application/xml"),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "bmp" => Some("image/bmp"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_image_text_with_system_ocr(path: &Path) -> Result<String, String> {
+    use windows::{
+        core::HSTRING,
+        Graphics::Imaging::BitmapDecoder,
+        Media::Ocr::OcrEngine,
+        Storage::{FileAccessMode, StorageFile},
+    };
+
+    let path = HSTRING::from(path.to_string_lossy().as_ref());
+    let file = StorageFile::GetFileFromPathAsync(&path)
+        .map_err(|error| format!("无法打开图片：{error}"))?
+        .get()
+        .map_err(|error| format!("无法打开图片：{error}"))?;
+    let stream = file
+        .OpenAsync(FileAccessMode::Read)
+        .map_err(|error| format!("无法读取图片：{error}"))?
+        .get()
+        .map_err(|error| format!("无法读取图片：{error}"))?;
+    let decoder = BitmapDecoder::CreateAsync(&stream)
+        .map_err(|error| format!("Windows 无法解码该图片：{error}"))?
+        .get()
+        .map_err(|error| format!("Windows 无法解码该图片：{error}"))?;
+    let max_dimension = OcrEngine::MaxImageDimension()
+        .map_err(|error| format!("无法读取 Windows OCR 限制：{error}"))?;
+    let width = decoder
+        .PixelWidth()
+        .map_err(|error| format!("无法读取图片宽度：{error}"))?;
+    let height = decoder
+        .PixelHeight()
+        .map_err(|error| format!("无法读取图片高度：{error}"))?;
+    if width > max_dimension || height > max_dimension {
+        return Err(format!(
+            "图片尺寸 {width}×{height} 超过 Windows OCR 上限 {max_dimension}，请先缩小图片"
+        ));
+    }
+    let bitmap = decoder
+        .GetSoftwareBitmapAsync()
+        .map_err(|error| format!("无法准备 OCR 位图：{error}"))?
+        .get()
+        .map_err(|error| format!("无法准备 OCR 位图：{error}"))?;
+    let engine = OcrEngine::TryCreateFromUserProfileLanguages()
+        .map_err(|error| format!("Windows OCR 不可用，请安装相应语言包：{error}"))?;
+    let result = engine
+        .RecognizeAsync(&bitmap)
+        .map_err(|error| format!("OCR 启动失败：{error}"))?
+        .get()
+        .map_err(|error| format!("OCR 识别失败：{error}"))?;
+    result
+        .Text()
+        .map(|text| text.to_string())
+        .map_err(|error| format!("无法读取 OCR 结果：{error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_image_text_with_system_ocr(_path: &Path) -> Result<String, String> {
+    Err("图片 OCR 当前仅在 Windows 桌面 App 可用".to_string())
 }
 
 fn structure_entries_as_notes(entries: &[StructureEntry]) -> Vec<NoteFile> {
@@ -2305,6 +2581,17 @@ fn normalize_model_role(role: &str) -> &'static str {
 }
 
 fn normalize_model_name(model: Option<String>) -> String {
+    if let Some(candidate) = model.as_deref() {
+        if let Some(id) = candidate.strip_prefix("codex:") {
+            if !id.is_empty()
+                && id.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+                })
+            {
+                return format!("codex:{id}");
+            }
+        }
+    }
     match model.as_deref() {
         Some("deepseek-v4-flash") => "deepseek-v4-flash".to_string(),
         Some("deepseek-v4-pro") => "deepseek-v4-pro".to_string(),
@@ -2622,10 +2909,10 @@ mod trash_tests {
     #[cfg(windows)]
     #[test]
     fn windows_dpapi_round_trip_does_not_store_plaintext() {
-        let secret = b"sk-test-private-value";
+        let secret = b"test-private-value";
         let encrypted = protect_secret(secret).expect("DPAPI should encrypt");
         assert_ne!(encrypted, secret);
-        assert!(!String::from_utf8_lossy(&encrypted).contains("sk-test-private-value"));
+        assert!(!String::from_utf8_lossy(&encrypted).contains("test-private-value"));
         assert_eq!(
             unprotect_secret(&encrypted).expect("DPAPI should decrypt"),
             secret
@@ -2659,6 +2946,18 @@ mod tests {
 
         assert_eq!(plain.vault_path.as_deref(), Some("F:\\demo"));
         assert_eq!(with_bom.vault_path.as_deref(), Some("F:\\demo"));
+    }
+
+    #[test]
+    fn preserves_supported_codex_model_names() {
+        assert_eq!(
+            normalize_model_name(Some("codex:gpt-5.4".to_string())),
+            "codex:gpt-5.4"
+        );
+        assert_eq!(
+            normalize_model_name(Some("codex:../../unsafe".to_string())),
+            "deepseek-v4-pro"
+        );
     }
 
     #[test]
@@ -2880,6 +3179,58 @@ mod tests {
             .contains("项目说明"));
 
         fs::remove_dir_all(&root).expect("test folder should be removed");
+    }
+
+    #[test]
+    fn extracts_selected_agent_attachments_without_mutating_source_files() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("knowledge-agent-attachments-{stamp}"));
+        fs::create_dir_all(&root).expect("test folder should be created");
+        let text_path = root.join("研究笔记.md");
+        let docx_path = root.join("项目说明.docx");
+        fs::write(&text_path, "# 研究笔记\n\n附件内容进入模型上下文")
+            .expect("text attachment should be written");
+        write_minimal_docx(&docx_path, "Word 附件正文").expect("docx should be written");
+        let text_before = fs::read(&text_path).expect("text bytes should be readable");
+        let docx_before = fs::read(&docx_path).expect("docx bytes should be readable");
+
+        let selection =
+            build_agent_attachment_selection(vec![text_path.clone(), docx_path.clone()]);
+
+        assert!(selection.issues.is_empty());
+        assert_eq!(selection.attachments.len(), 2);
+        assert!(selection
+            .attachments
+            .iter()
+            .any(|attachment| attachment.kind == "text"
+                && attachment.content.contains("进入模型上下文")));
+        assert!(selection
+            .attachments
+            .iter()
+            .any(|attachment| attachment.kind == "document"
+                && attachment.content.contains("Word 附件正文")));
+        assert_eq!(
+            fs::read(&text_path).expect("text should remain readable"),
+            text_before
+        );
+        assert_eq!(
+            fs::read(&docx_path).expect("docx should remain readable"),
+            docx_before
+        );
+
+        fs::remove_dir_all(&root).expect("test folder should be removed");
+    }
+
+    #[test]
+    fn truncates_attachment_text_by_unicode_character_count() {
+        let input = "知识".repeat(MAX_AGENT_ATTACHMENT_CHARS + 4);
+        let (content, truncated) = truncate_attachment_text(&input, MAX_AGENT_ATTACHMENT_CHARS);
+
+        assert!(truncated);
+        assert_eq!(content.chars().count(), MAX_AGENT_ATTACHMENT_CHARS);
     }
 
     #[test]

@@ -38,4 +38,5 @@ private-vaults/
 # Local visual/debug scratch space.
 .debug-video-frames/
 .artifacts/
+.tmp/
 .omx/

@@ -139,10 +139,7 @@ describe("AgentConsole", () => {
     expect(screen.getByText("Local offline mode")).toBeTruthy();
   });
 
-  it("exposes real panel controls and credential lifecycle actions", () => {
-    const onDock = vi.fn();
-    const onFloat = vi.fn();
-    const onFocus = vi.fn();
+  it("keeps only the collapse control and exposes credential lifecycle actions", () => {
     const onHide = vi.fn();
     const onRequestApiKey = vi.fn();
     const onValidateApiKey = vi.fn();
@@ -156,18 +153,12 @@ describe("AgentConsole", () => {
       modelCredentialUpdatedLabel: "2026/07/23 21:00",
       modelCredentialValidatedLabel: "2026/07/23 21:01",
       onDeleteApiKey,
-      onDock,
-      onFloat,
-      onFocus,
       onHide,
       onRequestApiKey,
       onValidateApiKey,
       settingsOpen: true
     });
 
-    fireEvent.click(screen.getByLabelText("停靠右侧"));
-    fireEvent.click(screen.getByLabelText("浮动窗口"));
-    fireEvent.click(screen.getByLabelText("专注模式"));
     fireEvent.click(screen.getByLabelText("收起智能体"));
     fireEvent.click(screen.getByText("轮换"));
     fireEvent.click(screen.getByText("验证"));
@@ -176,13 +167,39 @@ describe("AgentConsole", () => {
     expect(screen.getByText("Windows DPAPI 已加密")).toBeTruthy();
     expect(screen.getByText("有效性检查通过")).toBeTruthy();
     expect(screen.getByText("最近验证：2026/07/23 21:01")).toBeTruthy();
-    expect(onDock).toHaveBeenCalledTimes(1);
-    expect(onFloat).toHaveBeenCalledTimes(1);
-    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("停靠右侧")).toBeNull();
+    expect(screen.queryByLabelText("浮动窗口")).toBeNull();
+    expect(screen.getByRole("button", { name: "Agent 设置" }).closest(".agent-footer-connection")).toBeTruthy();
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onRequestApiKey).toHaveBeenCalledTimes(1);
     expect(onValidateApiKey).toHaveBeenCalledTimes(1);
     expect(onDeleteApiKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("uploads files and removes a session attachment without touching the local file", () => {
+    const onUploadContext = vi.fn();
+    const onRemoveAttachment = vi.fn();
+
+    renderAgentConsole({
+      attachments: [
+        {
+          id: "attachment-1",
+          name: "研究截图.png",
+          kind: "image-ocr",
+          content: "OCR text",
+          size: 1_024
+        }
+      ],
+      onRemoveAttachment,
+      onUploadContext
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加 Agent 附件" }));
+    fireEvent.click(screen.getByRole("button", { name: "移除附件 研究截图.png" }));
+
+    expect(screen.getByText("图片 OCR")).toBeTruthy();
+    expect(onUploadContext).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith("attachment-1");
   });
 });
 
@@ -193,6 +210,7 @@ function renderAgentConsole(overrides: Partial<Parameters<typeof baseAgentConsol
 function baseAgentConsole({
   activeSessionId,
   agentModeOptions,
+  attachments,
   canConfigureModel = false,
   input = "",
   modelConfigured = false,
@@ -204,14 +222,13 @@ function baseAgentConsole({
   onAgentModeChange,
   onDeleteApiKey,
   onDeleteSession,
-  onDock,
-  onFloat,
-  onFocus,
   onHide,
   onModelChange,
   onRequestApiKey,
+  onRemoveAttachment,
   onSelectSession,
   onToggleSettings,
+  onUploadContext,
   onValidateApiKey,
   running = false,
   selectedAgentMode,
@@ -222,6 +239,13 @@ function baseAgentConsole({
 }: {
   activeSessionId?: string;
   agentModeOptions?: Array<{ value: string; label: string; description?: string }>;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    kind: "text" | "document" | "image-ocr";
+    content: string;
+    size: number;
+  }>;
   canConfigureModel?: boolean;
   input?: string;
   modelConfigured?: boolean;
@@ -233,14 +257,13 @@ function baseAgentConsole({
   onAgentModeChange?: (mode: string) => void;
   onDeleteApiKey?: () => void;
   onDeleteSession?: (sessionId: string) => void;
-  onDock?: () => void;
-  onFloat?: () => void;
-  onFocus?: () => void;
   onHide?: () => void;
   onModelChange?: (model: string) => void;
   onRequestApiKey?: () => void;
+  onRemoveAttachment?: (attachmentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onToggleSettings?: () => void;
+  onUploadContext?: () => void;
   onValidateApiKey?: () => void;
   running?: boolean;
   selectedAgentMode?: string;
@@ -253,6 +276,7 @@ function baseAgentConsole({
     <AgentConsole
       activeSessionId={activeSessionId}
       agentModeOptions={agentModeOptions}
+      attachments={attachments}
       canConfigureModel={canConfigureModel}
       diffs={[]}
       input={input}
@@ -265,18 +289,17 @@ function baseAgentConsole({
       onApply={vi.fn()}
       onAgentModeChange={onAgentModeChange}
       onDeleteApiKey={onDeleteApiKey}
-      onDock={onDock}
-      onFloat={onFloat}
-      onFocus={onFocus}
       onHide={onHide}
       onInputChange={vi.fn()}
       onModelChange={onModelChange}
       onRequestApiKey={onRequestApiKey}
+      onRemoveAttachment={onRemoveAttachment}
       onValidateApiKey={onValidateApiKey}
       onRun={onRun}
       onDeleteSession={onDeleteSession}
       onSelectSession={onSelectSession}
       onToggleSettings={onToggleSettings}
+      onUploadContext={onUploadContext}
       running={running}
       selectedAgentMode={selectedAgentMode}
       selectedModel={selectedModel}

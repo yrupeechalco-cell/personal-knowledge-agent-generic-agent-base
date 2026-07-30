@@ -4,5 +4,6 @@ export * from "./KnowledgeCanvas";
 export * from "./MiniStarGraph";
 export * from "./localization";
 export * from "./NoteEditor";
+export * from "./ArticleProfileCard";
 export * from "./NoteTagCloud";
 export * from "./StarGraph";

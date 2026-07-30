@@ -23,4 +23,4 @@ tauri-plugin-updater = "2"
 zip = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
+windows = { version = "0.61.3", features = ["Foundation", "Graphics_Imaging", "Media_Ocr", "Storage", "Storage_Streams", "Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }

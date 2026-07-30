@@ -1,17 +1,18 @@
-import type { AgentDiff, AgentMessage } from "@knowledge-agent/agent";
+import type { AgentAttachment, AgentDiff, AgentMessage } from "@knowledge-agent/agent";
 import {
-  Focus,
-  FolderUp,
+  FileText,
   History,
+  Image,
   KeyRound,
+  LoaderCircle,
   PanelRightClose,
-  PanelRightOpen,
-  PictureInPicture2,
+  Paperclip,
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
   SquarePlus,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
@@ -30,6 +31,8 @@ export interface AgentConsoleProps {
   diffs: AgentDiff[];
   input: string;
   running: boolean;
+  attachments?: AgentAttachment[];
+  attachmentBusy?: boolean;
   readOnly?: boolean;
   modelLabel?: string;
   modelShortLabel?: string;
@@ -55,16 +58,14 @@ export interface AgentConsoleProps {
   onRequestApiKey?(): void;
   onDeleteApiKey?(): void;
   onValidateApiKey?(): void;
-  onDock?(): void;
-  onFloat?(): void;
   onHide?(): void;
-  onFocus?(): void;
   onNewSession?(): void;
   onResetSession?(): void;
   onRestoreSession?(): void;
   onSelectSession?(sessionId: string): void;
   onDeleteSession?(sessionId: string): void;
   onUploadContext?(): void;
+  onRemoveAttachment?(attachmentId: string): void;
   onInputChange(input: string): void;
   onRun(): void;
   onApply(diff: AgentDiff): void;
@@ -90,6 +91,8 @@ export function AgentConsole({
   diffs,
   input,
   running,
+  attachments = [],
+  attachmentBusy = false,
   readOnly = false,
   modelLabel = "offline",
   modelShortLabel,
@@ -115,16 +118,14 @@ export function AgentConsole({
   onRequestApiKey,
   onDeleteApiKey,
   onValidateApiKey,
-  onDock,
-  onFloat,
   onHide,
-  onFocus,
   onNewSession,
   onResetSession,
   onRestoreSession,
   onSelectSession,
   onDeleteSession,
   onUploadContext,
+  onRemoveAttachment,
   onInputChange,
   onRun,
   onApply
@@ -187,37 +188,7 @@ export function AgentConsole({
           <h2>{t("笔记智能体")}</h2>
           <p>{t("知识库工作台智能控制器")}</p>
         </div>
-        <section className={modelConfigured ? "agent-model ready" : "agent-model"} aria-label={t("模型连接状态")}>
-          <div className="agent-model-state">
-            <span>{modelConfigured ? t("已连接") : t("离线")}</span>
-            <strong>{visibleModelLabel}</strong>
-          </div>
-          <button
-            aria-expanded={settingsOpen}
-            aria-label={t("Agent 设置")}
-            className="agent-settings-toggle agent-settings-icon"
-            disabled={readOnly}
-            onClick={onToggleSettings}
-            title={t("Agent 设置：模型、推理强度和权限")}
-            type="button"
-          >
-            <SlidersHorizontal className="agent-settings-icon-control" size={15} />
-          </button>
-          {settingsDialog}
-          {!modelConfigured && canConfigureModel ? (
-            <p className="agent-model-warning">{t("需要填写本机 DeepSeek API key 后才能使用在线模型。")}</p>
-          ) : null}
-        </section>
-        <div className="agent-panel-controls" aria-label={t("智能体面板布局")}>
-          <button aria-label={t("停靠右侧")} onClick={onDock} title={t("停靠右侧")} type="button">
-            <PanelRightOpen size={14} />
-          </button>
-          <button aria-label={t("浮动窗口")} onClick={onFloat} title={t("浮动窗口")} type="button">
-            <PictureInPicture2 size={14} />
-          </button>
-          <button aria-label={t("专注模式")} onClick={onFocus} title={t("专注模式")} type="button">
-            <Focus size={14} />
-          </button>
+        <div className="agent-panel-controls">
           <button aria-label={t("收起智能体")} onClick={onHide} title={t("收起智能体")} type="button">
             <PanelRightClose size={14} />
           </button>
@@ -289,6 +260,28 @@ export function AgentConsole({
           </button>
         </div>
         </div>
+        {attachments.length > 0 ? (
+          <div className="agent-attachment-list" aria-label={t("Agent 附件")}>
+            {attachments.map((attachment) => (
+              <div className="agent-attachment-item" key={attachment.id} title={attachment.warning || attachment.name}>
+                {attachment.kind === "image-ocr" ? <Image aria-hidden="true" size={14} /> : <FileText aria-hidden="true" size={14} />}
+                <span>
+                  <strong>{attachment.name}</strong>
+                  <small>{t(attachmentKindLabel(attachment.kind))}{attachment.truncated ? ` · ${t("已截断")}` : ""}</small>
+                </span>
+                <button
+                  aria-label={`${t("移除附件")} ${attachment.name}`}
+                  disabled={readOnly || attachmentBusy}
+                  onClick={() => onRemoveAttachment?.(attachment.id)}
+                  title={t("从 Agent 上下文移除，不会删除本地文件")}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <textarea
           aria-label={t("智能体输入")}
           disabled={readOnly}
@@ -310,9 +303,41 @@ export function AgentConsole({
             <i style={{ "--context-percent": `${contextUsage?.percent ?? 0}%` } as CSSProperties} />
             <strong>{contextUsage?.percent ?? 0}%</strong>
           </span>
-          <button className="agent-context-upload" disabled={readOnly} onClick={onUploadContext} title={contextUploadLabel} type="button">
-            <FolderUp size={14} />
+          <button
+            aria-label={t("添加 Agent 附件")}
+            className="agent-context-upload"
+            disabled={readOnly || attachmentBusy}
+            onClick={onUploadContext}
+            title={contextUploadLabel}
+            type="button"
+          >
+            {attachmentBusy ? <LoaderCircle className="agent-attachment-spinner" size={14} /> : <Paperclip size={14} />}
           </button>
+          <section
+            className={modelConfigured ? "agent-footer-connection ready" : "agent-footer-connection"}
+            aria-label={t("模型连接状态")}
+          >
+            <div className="agent-model-state">
+              <span>{modelConfigured ? t("已连接") : t("离线")}</span>
+              <strong>{visibleModelLabel}</strong>
+            </div>
+            <button
+              aria-expanded={settingsOpen}
+              aria-label={t("Agent 设置")}
+              className="agent-settings-toggle agent-settings-icon"
+              disabled={readOnly}
+              onClick={onToggleSettings}
+              title={modelConfigured
+                ? t("Agent 设置：模型、推理强度和权限")
+                : canConfigureModel
+                  ? t("需要填写本机 DeepSeek API key 后才能使用在线模型。")
+                  : t("Agent 设置：模型、推理强度和权限")}
+              type="button"
+            >
+              <SlidersHorizontal className="agent-settings-icon-control" size={15} />
+            </button>
+            {settingsDialog}
+          </section>
         </div>
       </footer>
     </aside>
@@ -337,6 +362,12 @@ function formatEffort(effort: "low" | "medium" | "high"): string {
   if (effort === "low") return "低";
   if (effort === "high") return "高";
   return "中";
+}
+
+function attachmentKindLabel(kind: AgentAttachment["kind"]): string {
+  if (kind === "image-ocr") return "图片 OCR";
+  if (kind === "document") return "文档文本";
+  return "文本文件";
 }
 
 interface SettingsDialogProps {

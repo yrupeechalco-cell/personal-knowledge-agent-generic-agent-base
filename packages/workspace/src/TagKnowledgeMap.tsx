@@ -16,10 +16,12 @@ import {
 } from "./tagKnowledgeModel";
 import { buildKnowledgeRoleModel } from "./knowledgeRoleModel";
 import { DomainRootMap } from "./KnowledgeRoleMap";
+import type { AppTheme } from "./themeModel";
 
 interface TagKnowledgeMapProps {
   index: VaultIndex;
   onSelectNote(path: string): void;
+  theme: AppTheme;
 }
 
 interface VisualNode {
@@ -63,7 +65,7 @@ const TAG_COLORS: Record<KnowledgeTagKind, number> = {
   evidence: 0x777a83
 };
 
-export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
+export function TagKnowledgeMap({ index, onSelectNote, theme }: TagKnowledgeMapProps) {
   const { runtime, t } = useLocalization();
   const model = useMemo(() => buildTagKnowledgeModel(index), [index]);
   const roleModel = useMemo(() => buildKnowledgeRoleModel(index), [index]);
@@ -95,7 +97,8 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(44, 1, 0.1, 180);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-    renderer.setClearColor(0x1e1e1e, 1);
+    const lightTheme = theme === "light";
+    renderer.setClearColor(lightTheme ? 0xfafafd : 0x1e1e1e, 1);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
@@ -112,7 +115,7 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
     controls.maxDistance = radius * 5.6;
     controls.target.set(0, 0, 0);
 
-    scene.add(new THREE.HemisphereLight(0xd8d3ff, 0x171719, 1.35));
+    scene.add(new THREE.HemisphereLight(lightTheme ? 0xffffff : 0xd8d3ff, lightTheme ? 0xc8c5cf : 0x171719, lightTheme ? 1.05 : 1.35));
     const keyLight = new THREE.PointLight(0xffdac8, 17, 28);
     keyLight.position.set(6, 7, 8);
     scene.add(keyLight);
@@ -131,16 +134,22 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
     let visibleLabelIds = rankedLabelIds(model, domain, host.clientWidth);
 
     for (const node of model.nodes) {
-      const color = new THREE.Color(TAG_COLORS[node.kind]).multiplyScalar(0.6);
-      const wash = new THREE.Sprite(new THREE.SpriteMaterial({ map: washTexture, color, transparent: true, opacity: 0.88, depthWrite: false }));
+      const color = new THREE.Color(TAG_COLORS[node.kind]).multiplyScalar(lightTheme ? 0.72 : 0.6);
+      const wash = new THREE.Sprite(new THREE.SpriteMaterial({ map: washTexture, color, transparent: true, opacity: lightTheme ? 0.72 : 0.88, depthWrite: false }));
       const rim = new THREE.Sprite(new THREE.SpriteMaterial({
         map: rimTexture,
-        color: new THREE.Color(TAG_COLORS[node.kind]).lerp(new THREE.Color(0xe5e1ea), 0.32),
+        color: new THREE.Color(TAG_COLORS[node.kind]).lerp(new THREE.Color(lightTheme ? 0x51495d : 0xe5e1ea), lightTheme ? 0.16 : 0.32),
         transparent: true,
-        opacity: 0.43,
+        opacity: lightTheme ? 0.34 : 0.43,
         depthWrite: false
       }));
-      const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: coreTexture, color: 0xebe8f0, transparent: true, opacity: 0.8, depthWrite: false }));
+      const core = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: coreTexture,
+        color: lightTheme ? 0x4e4658 : 0xebe8f0,
+        transparent: true,
+        opacity: lightTheme ? 0.58 : 0.8,
+        depthWrite: false
+      }));
       const root = new THREE.Group();
       root.position.copy(initialPositions.get(node.id) ?? new THREE.Vector3());
       root.userData = { id: node.id };
@@ -169,7 +178,9 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       const target = visualNodes.get(relation.target)?.root.position;
       if (!source || !target) continue;
       const geometry = new THREE.BufferGeometry().setFromPoints([source, target]);
-      const baseColor = relation.basis === "explicit-link" ? 0x615a72 : 0x454449;
+      const baseColor = lightTheme
+        ? relation.basis === "explicit-link" ? 0x93899f : 0xb9b6be
+        : relation.basis === "explicit-link" ? 0x615a72 : 0x454449;
       const baseOpacity = relationLineOpacity(relation.strength);
       const material = new THREE.LineBasicMaterial({
         color: baseColor,
@@ -366,7 +377,7 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       }
       applyCollisionAwareLabels(labelCandidates, rect.width, rect.height, focusedId);
       if (showMinimapRef.current && frame % 3 === 0 && minimapRef.current) {
-        drawTagMinimap(minimapRef.current, visualNodes, visualRelations, controls.target, modelNodesById);
+        drawTagMinimap(minimapRef.current, visualNodes, visualRelations, controls.target, modelNodesById, theme);
       }
     }
     animate();
@@ -394,7 +405,7 @@ export function TagKnowledgeMap({ index, onSelectNote }: TagKnowledgeMapProps) {
       renderer.domElement.remove();
       labelLayer.replaceChildren();
     };
-  }, [model, selectedId]);
+  }, [model, selectedId, theme]);
 
   if (model.nodes.length === 0) {
     return (
@@ -552,7 +563,8 @@ function drawTagMinimap(
   nodes: Map<string, VisualNode>,
   relations: VisualRelation[],
   target: THREE.Vector3,
-  modelNodesById: Map<string, TagKnowledgeNode>
+  modelNodesById: Map<string, TagKnowledgeNode>,
+  theme: AppTheme
 ) {
   const width = Math.max(1, Math.round(canvas.clientWidth));
   const height = Math.max(1, Math.round(canvas.clientHeight));
@@ -567,7 +579,7 @@ function drawTagMinimap(
   if (!context) return;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "rgba(25, 25, 28, 0.92)";
+  context.fillStyle = theme === "light" ? "rgba(248, 248, 251, 0.96)" : "rgba(25, 25, 28, 0.92)";
   context.fillRect(0, 0, width, height);
 
   const positions = [...nodes.values()].map((node) => node.root.position);
@@ -587,7 +599,7 @@ function drawTagMinimap(
     y: height - (offsetY + (position.y - minY) * scale)
   });
 
-  context.strokeStyle = "rgba(122, 117, 132, 0.22)";
+  context.strokeStyle = theme === "light" ? "rgba(92, 86, 104, 0.2)" : "rgba(122, 117, 132, 0.22)";
   context.lineWidth = 0.7;
   for (const relation of relations) {
     const source = nodes.get(relation.source)?.root.position;

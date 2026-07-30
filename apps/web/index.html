@@ -6,6 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Personal Knowledge Agent: a local-first Markdown knowledge base, relationship graph, and note Agent workspace. / 本地优先的 Markdown 知识库、关系图谱与笔记 Agent 工作台。" />
     <title>Personal Knowledge Agent</title>
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("knowledge-agent.theme") === "dark" ? "dark" : "light";
+      } catch {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ModelRequest, ModelTurnResponse } from "@knowledge-agent/agent";
 import { buildSafetyManifest, type NoteFile } from "@knowledge-agent/core";
 import type { KnowledgeCanvasDocument } from "@knowledge-agent/ui";
 import {
   createEmptyVault,
+  type AgentAttachmentSelection,
+  type CodexConnectionStatus,
   type DraftChange,
   type KnowledgeWorkspaceAdapter,
   type LoadedVault,
@@ -37,6 +40,12 @@ interface VaultChangedPayload {
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   return {
     canOpenVault: true,
+    windowControls: {
+      close: () => getCurrentWindow().close(),
+      minimize: () => getCurrentWindow().minimize(),
+      startDragging: () => getCurrentWindow().startDragging(),
+      toggleMaximize: () => getCurrentWindow().toggleMaximize()
+    },
     async loadInitialVault() {
       try {
         const settings = await invoke<AppSettings>("load_app_settings");
@@ -173,6 +182,9 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       }
       await invoke("save_canvas_document", { root: activeVaultPath, document });
     },
+    loadCodexStatus() {
+      return invoke<CodexConnectionStatus>("codex_status");
+    },
     loadModelSettings() {
       return invoke<ModelConnectionSettings>("load_model_settings");
     },
@@ -192,11 +204,20 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
     validateDeepSeekApiKey() {
       return invoke<ModelConnectionSettings>("validate_deepseek_api_key");
     },
+    selectAgentAttachments() {
+      return invoke<AgentAttachmentSelection>("select_agent_attachments");
+    },
     runModel(request: ModelRequest) {
-      return invoke<string>("deepseek_chat_completion", { request });
+      return invoke<string>(
+        request.model?.startsWith("codex:") ? "codex_chat_completion" : "deepseek_chat_completion",
+        { request }
+      );
     },
     runModelTurn(request: ModelRequest) {
-      return invoke<ModelTurnResponse>("deepseek_tool_completion", { request });
+      return invoke<ModelTurnResponse>(
+        request.model?.startsWith("codex:") ? "codex_tool_completion" : "deepseek_tool_completion",
+        { request }
+      );
     },
     getSourceLabel(sourceKind) {
       if (sourceKind === "desktop") return "桌面 vault";

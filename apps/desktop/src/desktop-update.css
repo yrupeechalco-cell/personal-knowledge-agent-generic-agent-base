@@ -176,3 +176,71 @@
   .desktop-update-icon { margin-bottom: 2px; }
   .desktop-update-actions { grid-column: 1; }
 }
+
+:root[data-theme="light"] .desktop-update-layer {
+  background: rgb(48 43 55 / 22%);
+}
+
+:root[data-theme="light"] .desktop-update-card {
+  background: #ffffff;
+  border-color: #d7d7dc;
+  box-shadow: 0 28px 70px rgb(42 34 50 / 20%);
+  color: #2d2d33;
+}
+
+:root[data-theme="light"] .desktop-update-icon {
+  background: #eee7f5;
+  border-color: #d8c9e7;
+  color: #72509f;
+}
+
+:root[data-theme="light"] .desktop-update-kicker {
+  color: #7855a5;
+}
+
+:root[data-theme="light"] .desktop-update-copy p {
+  color: #707078;
+}
+
+:root[data-theme="light"] .desktop-update-trust {
+  background: #f7f7f8;
+  border-color: #ddddE2;
+}
+
+:root[data-theme="light"] .desktop-update-trust dt {
+  color: #83838b;
+}
+
+:root[data-theme="light"] .desktop-update-trust dd,
+:root[data-theme="light"] .desktop-update-toggle {
+  color: #56565e;
+}
+
+:root[data-theme="light"] .desktop-update-close {
+  color: #818189;
+}
+
+:root[data-theme="light"] .desktop-update-close:hover {
+  background: #eeeeF1;
+  color: #33333a;
+}
+
+:root[data-theme="light"] .desktop-update-secondary {
+  background: #f7f7f8;
+  border-color: #d5d5da;
+  color: #4b4b52;
+}
+
+:root[data-theme="light"] .desktop-update-primary {
+  background: #7652aa;
+  border-color: #7652aa;
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .desktop-update-progress {
+  background: #e3e3e7;
+}
+
+:root[data-theme="light"] .desktop-update-progress span {
+  background: #7a57aa;
+}

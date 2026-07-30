@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import type { ParsedNote } from "@knowledge-agent/core";
+import { articleProfileFromNote, type ParsedNote } from "@knowledge-agent/core";
 
 export interface FileTreeProps {
   notes: ParsedNote[];
@@ -91,6 +91,8 @@ export function FileTree({ notes, currentPath, onFolderContextMenu, onNoteContex
   }
 
   function renderNote(note: ParsedNote, depth: number) {
+    const profile = articleProfileFromNote(note);
+    const classification = [profile.documentType, profile.category].filter(Boolean).join(" · ");
     return (
       <button
         className={`${note.path === currentPath ? "tree-note active" : "tree-note"} ${noteWeightClass(depth)}`}
@@ -98,11 +100,13 @@ export function FileTree({ notes, currentPath, onFolderContextMenu, onNoteContex
         onContextMenu={(event) => onNoteContextMenu?.(note, event)}
         onClick={() => onSelect(note.path)}
         style={treeDepthStyle(depth)}
-        title={note.path}
+        title={[note.path, profile.summary].filter(Boolean).join("\n")}
         type="button"
       >
         <span>{note.title}</span>
-        {note.tags.length > 0 ? <small>#{note.tags[0]}</small> : null}
+        {classification || note.tags.length > 0 ? (
+          <small>{classification || `#${note.tags[0]}`}</small>
+        ) : null}
       </button>
     );
   }

@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- Added a desktop-only Codex provider backed by the signed-in local Codex App Server, including real model discovery, connection state, independent Agent sessions, read-only text conversations, and original-image attachments without storing ChatGPT credentials in the repository.
+- Fixed the desktop startup flash by rendering the Agent panel collapsed from the first frame instead of opening it and hiding it after a delay.
+- Added a two-system document organization model: cross-document keyword tags plus a canonical article profile with summary, document type, category, source, author, entry date, and publication date.
+- Added an editable article profile card above every note, automatic metadata initialization for newly created notes, semantic tag-type filtering, clickable sidebar tag filters, and type/category labels in the file tree.
+- Added `docs/METADATA_AND_TAGS.md` to keep the metadata contract stable across Desktop, Web, GitHub, and future Agent workflows.
+- Removed the visible Windows system title bar from the desktop app and integrated drag, minimize, maximize/restore, and close controls into the existing workspace toolbar.
+- Consolidated appearance, language, storage, note workflow, graph, Agent, update, security, and hotkey controls into one settings center opened from the bottom-left gear.
+- Added a keyboard-first command registry with 37 configurable actions, Obsidian-inspired defaults, persistent per-device overrides, conflict prevention, clear/reset controls, and a full reset-to-default action.
+- Removed the separate top-bar theme/language controls and routed the Agent settings shortcut into the unified settings center.
+- Added a shared light theme for Web and Desktop with a persistent sun/moon switch, purpose-built light graph, canvas, editor, dialog, Trash, updater, and Agent surfaces, while preserving the existing dark theme.
+- Added a shared Obsidian-style command palette for Web and Desktop (`Ctrl+P`).
+- Added a quick switcher with title, path, and alias lookup (`Ctrl+O`), exact note creation, and new-tab opening.
+- Added full-vault search with content, path, tag, task, property, regular-expression, exclusion, and OR queries (`Ctrl+Shift+F`).
+- Added command actions for new, daily, and random notes plus graph, canvas, storage, Trash, sidebar, Agent, and settings navigation.
+- Made the Canvas entry open an editable blank canvas even before a local knowledge base is connected.
+- Fixed the Canvas entry so it always dismisses the storage chooser and navigates directly to the canvas, including on first launch.
+- Kept temporary notes visible and editable before a local knowledge base is connected instead of covering them with the empty-state screen.
+- Reserved `Ctrl+P` for the command palette in the desktop WebView instead of the browser print dialog.
+- Added editable frontmatter properties, a heading outline, backlinks/outgoing links, and per-vault local bookmarks.
+- Added configurable template and daily-note folders, date formatting, template variables, template insertion, and daily-note templates.
+- Added visible word, character, and estimated reading-time statistics that ignore frontmatter and Markdown syntax.
+- Added clickable wikilinks with resolved-note hover previews for title, path, excerpt, and tags.
+- Added keyboard-driven slash commands for headings, lists, tasks, quotes, code blocks, wikilinks, dividers, dates, and times.
+- Added unique timestamp notes plus native split-by-heading and non-destructive merge-note commands.
+- Added `docs/OBSIDIAN_PARITY_ROADMAP.md` as the verified core-feature matrix and implementation sequence.
+
 ## 0.2.6 - 2026-07-23
 
 ### Added

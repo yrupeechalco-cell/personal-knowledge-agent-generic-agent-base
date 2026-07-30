@@ -3,4 +3,7 @@ export * from "./parser";
 export * from "./path";
 export * from "./safety";
 export * from "./tags";
+export * from "./properties";
+export * from "./articleProfile";
+export * from "./formatConverter";
 export * from "./types";

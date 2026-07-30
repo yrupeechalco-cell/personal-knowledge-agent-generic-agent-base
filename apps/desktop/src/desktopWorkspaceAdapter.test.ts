@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDesktopWorkspaceAdapter } from "./desktopWorkspaceAdapter";
 
@@ -10,11 +11,39 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn()
 }));
 
+const windowControlMocks = vi.hoisted(() => ({
+  close: vi.fn(),
+  minimize: vi.fn(),
+  startDragging: vi.fn(),
+  toggleMaximize: vi.fn()
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => windowControlMocks)
+}));
+
 const invokeMock = vi.mocked(invoke);
+const getCurrentWindowMock = vi.mocked(getCurrentWindow);
 
 describe("desktop workspace startup", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    getCurrentWindowMock.mockClear();
+    Object.values(windowControlMocks).forEach((mock) => mock.mockReset());
+  });
+
+  it("connects the shared chrome controls to the active Tauri window", async () => {
+    const controls = createDesktopWorkspaceAdapter().windowControls;
+
+    await controls?.minimize();
+    await controls?.toggleMaximize();
+    await controls?.startDragging();
+    await controls?.close();
+
+    expect(windowControlMocks.minimize).toHaveBeenCalledOnce();
+    expect(windowControlMocks.toggleMaximize).toHaveBeenCalledOnce();
+    expect(windowControlMocks.startDragging).toHaveBeenCalledOnce();
+    expect(windowControlMocks.close).toHaveBeenCalledOnce();
   });
 
   it("opens an empty workspace when a new installation has no saved vault", async () => {
@@ -61,5 +90,42 @@ describe("desktop workspace startup", () => {
     });
     expect(result?.files?.map((file) => file.path)).toEqual(["new/topic.md"]);
     expect(result?.message).toContain("原子事务");
+  });
+
+  it("loads the real local Codex connection status", async () => {
+    invokeMock.mockResolvedValueOnce({
+      available: true,
+      authenticated: true,
+      planType: "plus",
+      models: []
+    });
+
+    const status = await createDesktopWorkspaceAdapter().loadCodexStatus?.();
+
+    expect(invokeMock).toHaveBeenCalledWith("codex_status");
+    expect(status?.authenticated).toBe(true);
+  });
+
+  it("routes Codex models to the Codex App Server commands", async () => {
+    invokeMock
+      .mockResolvedValueOnce("Codex reply")
+      .mockResolvedValueOnce({ content: "Codex turn", toolCalls: [] });
+    const adapter = createDesktopWorkspaceAdapter();
+    const request = {
+      system: "Answer directly",
+      messages: [{
+        id: "message-1",
+        role: "user" as const,
+        content: "Hello",
+        createdAt: "2026-07-31T00:00:00.000Z"
+      }],
+      model: "codex:gpt-5.4"
+    };
+
+    await adapter.runModel?.(request);
+    await adapter.runModelTurn?.(request);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "codex_chat_completion", { request });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "codex_tool_completion", { request });
   });
 });

@@ -13,12 +13,27 @@ export interface AgentMessage {
   reasoningContent?: string;
 }
 
+export type AgentAttachmentKind = "text" | "document" | "image-ocr";
+
+export interface AgentAttachment {
+  id: string;
+  name: string;
+  kind: AgentAttachmentKind;
+  content: string;
+  size: number;
+  mediaType?: string;
+  sourcePath?: string;
+  truncated?: boolean;
+  warning?: string;
+}
+
 export interface AgentContext {
   currentPath: string;
   files: NoteFile[];
   index: VaultIndex;
   messages?: AgentMessage[];
   pinnedPaths?: string[];
+  attachments?: AgentAttachment[];
 }
 
 export interface AgentDiff {
@@ -41,6 +56,9 @@ export interface ModelRequest {
   system: string;
   messages: AgentMessage[];
   model?: string;
+  conversationId?: string;
+  cwd?: string;
+  attachments?: AgentAttachment[];
   thinking?: boolean;
   reasoningEffort?: "low" | "medium" | "high";
   tools?: ModelToolDefinition[];

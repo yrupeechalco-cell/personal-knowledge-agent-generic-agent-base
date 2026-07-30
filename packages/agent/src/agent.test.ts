@@ -64,6 +64,41 @@ describe("NoteAgentKernel", () => {
     expect(captured?.system).toContain("Current note content");
   });
 
+  it("passes extracted attachment content to the model without exposing the local path", async () => {
+    const index = buildVaultIndex(files);
+    let captured: ModelRequest | undefined;
+    const agent = new NoteAgentKernel({
+      provider: {
+        name: "test-provider",
+        async generate(request) {
+          captured = request;
+          return "attachment answer";
+        }
+      }
+    });
+
+    await agent.run("请阅读附件", {
+      currentPath: "AIGC/AIGC.md",
+      files,
+      index,
+      attachments: [
+        {
+          id: "attachment-1",
+          name: "研究截图.png",
+          kind: "image-ocr",
+          content: "图中识别到的关键结论：系统需要持久化。",
+          size: 1_024,
+          sourcePath: "F:\\私密目录\\研究截图.png"
+        }
+      ]
+    });
+
+    expect(captured?.system).toContain("BEGIN ATTACHMENT: 研究截图.png");
+    expect(captured?.system).toContain("图中识别到的关键结论");
+    expect(captured?.system).toContain("the model did not receive image pixels");
+    expect(captured?.system).not.toContain("F:\\私密目录");
+  });
+
   it("executes model tool calls and returns the follow-up answer", async () => {
     const index = buildVaultIndex(files);
     const opened: string[] = [];

@@ -5,6 +5,7 @@ import {
   parseExtractedTags,
   classifyRestore,
   type AgentDiff,
+  type AgentAttachment,
   type AgentMessage,
   type AgentPermission,
   type AgentTool,
@@ -16,15 +17,26 @@ import {
   buildSafetyManifest,
   buildVaultGraph,
   buildVaultIndex,
+  convertMarkdownFormat,
+  createArticleNoteContent,
   ensureMarkdownPath,
+  ensureArticleProfile,
   getNote,
   normalizePath,
+  parseEditablePropertyValue,
   parseNote,
+  removeNoteProperty,
+  setNoteProperty,
+  setArticleProfile,
   setNoteTags,
+  type EditableArticleProfile,
+  type FrontmatterValue,
+  type MarkdownFormatConversionOptions,
   type NoteFile,
   type ParsedNote,
   type SafetyManifest,
-  type TagGranularity
+  type TagGranularity,
+  type VaultIndex
 } from "@knowledge-agent/core";
 import {
   AgentConsole,
@@ -44,6 +56,7 @@ import {
   ArrowUp,
   BookOpen,
   Bot,
+  Command,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -54,21 +67,25 @@ import {
   FolderOpen,
   GitBranch,
   HardDrive,
-  Languages,
+  Maximize2,
+  Minus,
   Network,
   PanelLeft,
   PanelsTopLeft,
+  Presentation,
   Search,
   RefreshCw,
   RotateCcw,
   Settings,
   ShieldCheck,
+  TableProperties,
   Trash2,
   X
 } from "lucide-react";
 import {
   lazy,
   Suspense,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -78,6 +95,60 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
+import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSelectionOptions } from "./WorkspaceLauncher";
+import { BasesView } from "./BasesView";
+import { SlidesView } from "./SlidesView";
+import { FormatConverterDialog } from "./FormatConverterDialog";
+import { NoteInspector, type NoteInspectorTab } from "./NoteInspector";
+import { NoteWorkflowSettingsDialog } from "./NoteWorkflowSettingsDialog";
+import { WorkspaceLayoutsDialog } from "./WorkspaceLayoutsDialog";
+import { AppSettingsDialog, type AppSettingsSection, type SettingsShortcutCommand } from "./AppSettingsDialog";
+import {
+  buildQuickSwitcherItems,
+  filterLauncherItems,
+  searchVaultNotes,
+  type WorkspaceLauncherItem
+} from "./workspaceLauncherModel";
+import {
+  bookmarkStorageKey,
+  buildInspectorLinks,
+  buildNoteOutline,
+  normalizeBookmarkPaths,
+  type NoteOutlineItem
+} from "./noteInspectorModel";
+import {
+  DEFAULT_NOTE_WORKFLOW_SETTINGS,
+  expandTemplate,
+  formatDailyPath,
+  normalizeNoteWorkflowSettings,
+  noteWorkflowStorageKey,
+  notesInTemplateFolder,
+  stripTemplateFrontmatter,
+  type NoteWorkflowSettings
+} from "./noteWorkflowModel";
+import {
+  normalizeWorkspaceLayouts,
+  upsertWorkspaceLayout,
+  workspaceLayoutsStorageKey,
+  type WorkspaceLayoutSnapshot
+} from "./workspaceLayoutsModel";
+import {
+  APP_THEME_STORAGE_KEY,
+  normalizeAppTheme,
+  oppositeAppTheme,
+  type AppTheme
+} from "./themeModel";
+import {
+  SHORTCUT_COMMANDS,
+  SHORTCUT_STORAGE_KEY,
+  normalizeShortcutOverrides,
+  resolveShortcutMap,
+  shortcutCommandFor,
+  shortcutDefinition,
+  shortcutFromKeyboardEvent,
+  type ShortcutCommandId,
+  type ShortcutOverrides
+} from "./shortcutModel";
 
 const TagKnowledgeMap = lazy(() => import("./TagKnowledgeMap").then((module) => ({ default: module.TagKnowledgeMap })));
 
@@ -85,14 +156,15 @@ const GRAPH_TAB_ID = "graph-overview";
 const CANVAS_TAB_ID = "knowledge-canvas";
 const EXPLORER_TAB_ID = "vault-explorer";
 const TRASH_TAB_ID = "vault-trash";
+const BASES_TAB_ID = "vault-bases";
 
-type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash";
+type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
 type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
-type AgentPanelMode = "docked" | "floating" | "hidden";
+type AgentPanelMode = "docked" | "hidden";
 
 interface AgentMutationApproval {
   create: boolean;
@@ -225,8 +297,34 @@ export interface ModelConnectionSettings {
   deepSeekApiKeyValidatedAtMs?: number;
 }
 
+export interface AgentAttachmentSelection {
+  attachments: AgentAttachment[];
+  issues: string[];
+}
+
+export interface CodexConnectionStatus {
+  available: boolean;
+  authenticated: boolean;
+  authMode?: string;
+  planType?: string;
+  models: Array<{
+    id: string;
+    label: string;
+    description: string;
+    isDefault: boolean;
+    supportsImages: boolean;
+  }>;
+  error?: string;
+}
+
 export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
+  windowControls?: {
+    close(): Promise<void> | void;
+    minimize(): Promise<void> | void;
+    startDragging(): Promise<void> | void;
+    toggleMaximize(): Promise<void> | void;
+  };
   loadInitialVault(): Promise<LoadedVault> | LoadedVault;
   openVault(): Promise<LoadedVault>;
   openPublicGitHubRepo?(repository: string): Promise<LoadedVault>;
@@ -247,11 +345,13 @@ export interface KnowledgeWorkspaceAdapter {
   restoreTrashEntry?(id: string): Promise<WriteChangesResult> | WriteChangesResult;
   loadCanvasDocument?(): Promise<KnowledgeCanvasDocument | null> | KnowledgeCanvasDocument | null;
   saveCanvasDocument?(document: KnowledgeCanvasDocument): Promise<void> | void;
+  loadCodexStatus?(): Promise<CodexConnectionStatus> | CodexConnectionStatus;
   loadModelSettings?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   saveModelSettings?(settings: Pick<ModelConnectionSettings, "provider" | "model" | "agentMode">): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   saveDeepSeekApiKey?(apiKey: string): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   deleteDeepSeekApiKey?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
   validateDeepSeekApiKey?(): Promise<ModelConnectionSettings> | ModelConnectionSettings;
+  selectAgentAttachments?(): Promise<AgentAttachmentSelection>;
   runModel?(request: ModelRequest): Promise<string>;
   runModelTurn?(request: ModelRequest): Promise<ModelTurnResponse>;
   getSourceLabel?(sourceKind: SourceKind): string;
@@ -275,6 +375,30 @@ interface WorkspaceTab {
   id: string;
   mode: CenterMode;
   path?: string;
+}
+
+export function adjacentWorkspaceTab(
+  tabs: WorkspaceTab[],
+  activeTabId: string,
+  direction: -1 | 1
+): WorkspaceTab | null {
+  const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+  if (activeIndex === -1) return null;
+  return tabs[activeIndex + direction] ?? null;
+}
+
+export function workspaceTabsAfterClose(tabs: WorkspaceTab[], tabId: string) {
+  if (tabId === GRAPH_TAB_ID) {
+    return { tabs, nextActiveTab: null };
+  }
+  const tabIndex = tabs.findIndex((tab) => tab.id === tabId);
+  if (tabIndex === -1) {
+    return { tabs, nextActiveTab: null };
+  }
+  const nextTabs = tabs.filter((tab) => tab.id !== tabId);
+  const safeTabs = nextTabs.length > 0 ? nextTabs : [{ id: GRAPH_TAB_ID, mode: "graph" as const }];
+  const nextActiveTab = safeTabs[Math.min(Math.max(0, tabIndex - 1), safeTabs.length - 1)] ?? safeTabs[0];
+  return { tabs: safeTabs, nextActiveTab };
 }
 
 type ClipboardMode = "copy" | "cut";
@@ -314,6 +438,7 @@ interface AgentSessionSnapshot {
   diffs: AgentDiff[];
   prompt: string;
   pinnedPaths: string[];
+  attachments: AgentAttachment[];
   savedAt: string;
 }
 
@@ -324,6 +449,7 @@ interface AgentConversationSession {
   diffs: AgentDiff[];
   prompt: string;
   pinnedPaths: string[];
+  attachments: AgentAttachment[];
   createdAt: string;
 }
 
@@ -335,6 +461,7 @@ function createAgentConversationSession(label: string): AgentConversationSession
     diffs: [],
     prompt: "",
     pinnedPaths: [],
+    attachments: [],
     createdAt: new Date().toISOString()
   };
 }
@@ -363,6 +490,23 @@ export function removeAgentConversationSession<T extends { id: string; label: st
 export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAdapter }) {
   const { locale, runtime, setLocale, t } = useLocalization();
   const initialVault = useMemo(() => createEmptyVault(), []);
+  const [appTheme, setAppTheme] = useState<AppTheme>(() => {
+    try {
+      return normalizeAppTheme(window.localStorage.getItem(APP_THEME_STORAGE_KEY));
+    } catch {
+      return normalizeAppTheme(null);
+    }
+  });
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [appSettingsSection, setAppSettingsSection] = useState<AppSettingsSection>("general");
+  const [shortcutOverrides, setShortcutOverrides] = useState<ShortcutOverrides>(() => {
+    try {
+      return normalizeShortcutOverrides(JSON.parse(window.localStorage.getItem(SHORTCUT_STORAGE_KEY) ?? "{}"));
+    } catch {
+      return {};
+    }
+  });
+  const shortcutMap = useMemo(() => resolveShortcutMap(shortcutOverrides), [shortcutOverrides]);
   const [files, setFiles] = useState<NoteFile[]>(initialVault.files);
   const [baseFiles, setBaseFiles] = useState<NoteFile[]>(initialVault.files);
   const [sourceName, setSourceName] = useState(initialVault.sourceName);
@@ -382,6 +526,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [trashAuthorizations, setTrashAuthorizations] = useState<Record<string, TrashAuthorization>>({});
   const [restoringTrashId, setRestoringTrashId] = useState<string | null>(null);
   const [runningAgentSessionIds, setRunningAgentSessionIds] = useState<Set<string>>(() => new Set());
+  const [agentAttachmentBusySessionId, setAgentAttachmentBusySessionId] = useState<string | null>(null);
   const [modelSettings, setModelSettings] = useState<ModelConnectionSettings>({
     provider: adapter.runModel ? "deepseek" : "offline",
     model: adapter.runModel ? "deepseek-v4-pro" : "offline",
@@ -390,22 +535,40 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     deepSeekApiKeyStorage: "none",
     deepSeekApiKeyStatus: "unchecked"
   });
+  const [codexStatus, setCodexStatus] = useState<CodexConnectionStatus | null>(null);
+  const [codexStatusLoaded, setCodexStatusLoaded] = useState(!adapter.loadCodexStatus);
   const [agentApiKeyInput, setAgentApiKeyInput] = useState("");
   const [savingAgentKey, setSavingAgentKey] = useState(false);
   const [modelCredentialBusy, setModelCredentialBusy] = useState(false);
   const [modelSettingsLoaded, setModelSettingsLoaded] = useState(!adapter.loadModelSettings);
-  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [agentKeyDialogOpen, setAgentKeyDialogOpen] = useState(false);
   const [agentKeyDialogDismissed, setAgentKeyDialogDismissed] = useState(false);
   const [status, setStatus] = useState("尚未连接知识库。请选择一个 Markdown 文件夹开始使用。");
   const [sourceSafety, setSourceSafety] = useState(initialVault.safetyManifest);
   const [leftVisible, setLeftVisible] = useState(true);
-  const [agentPanelMode, setAgentPanelMode] = useState<AgentPanelMode>("docked");
-  const [focusMode, setFocusMode] = useState(false);
+  const [agentPanelMode, setAgentPanelMode] = useState<AgentPanelMode>("hidden");
   const [noteFilter, setNoteFilter] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  const [launcherMode, setLauncherMode] = useState<WorkspaceLauncherMode>("commands");
+  const [launcherQuery, setLauncherQuery] = useState("");
+  const [recentCommandIds, setRecentCommandIds] = useState<string[]>([]);
+  const [recentNotePaths, setRecentNotePaths] = useState<string[]>([]);
+  const [noteInspectorTab, setNoteInspectorTab] = useState<NoteInspectorTab>("outline");
+  const [bookmarkStore, setBookmarkStore] = useState<{ key: string; paths: string[] }>({ key: "", paths: [] });
+  const [noteWorkflowDialogOpen, setNoteWorkflowDialogOpen] = useState(false);
+  const [noteWorkflowStore, setNoteWorkflowStore] = useState<{ key: string; settings: NoteWorkflowSettings }>({
+    key: "",
+    settings: DEFAULT_NOTE_WORKFLOW_SETTINGS
+  });
+  const [workspaceLayoutsOpen, setWorkspaceLayoutsOpen] = useState(false);
+  const [formatConverterOpen, setFormatConverterOpen] = useState(false);
+  const [workspaceLayoutsStore, setWorkspaceLayoutsStore] = useState<{ key: string; layouts: WorkspaceLayoutSnapshot[] }>({
+    key: "",
+    layouts: []
+  });
   const [explorerQuery, setExplorerQuery] = useState("");
   const [explorerScope, setExplorerScope] = useState("");
-  const [graphSettingsOpen, setGraphSettingsOpen] = useState(false);
   const [graphPerspective, setGraphPerspective] = useState<GraphPerspective>("knowledge");
   const [graphFilter, setGraphFilter] = useState("");
   const [graphViewport, setGraphViewport] = useState<Viewport | null>(null);
@@ -438,6 +601,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const filesRef = useRef(files);
   const currentPathRef = useRef(currentPath);
   const sourceKindRef = useRef<SourceKind>(sourceKind);
+  const sourceNameRef = useRef(sourceName);
+  const activeAgentSessionIdRef = useRef("");
+  const agentAttachmentsRef = useRef<AgentAttachment[]>([]);
   const agentMutationApprovalRef = useRef<AgentMutationApproval>({ create: false, delete: false, restore: false });
   const autoSaveInFlightRef = useRef(false);
   const canvasSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -445,17 +611,39 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const canvasDirtyRef = useRef(false);
   const canvasRevisionRef = useRef(0);
   const trashEntriesRef = useRef<TrashEntry[]>(trashEntries);
-  const agentAutoCollapseAppliedRef = useRef(false);
   filesRef.current = files;
   currentPathRef.current = currentPath;
   sourceKindRef.current = sourceKind;
+  sourceNameRef.current = sourceName;
   canvasDocumentRef.current = canvasDocument;
   trashEntriesRef.current = trashEntries;
   const selectedAgentMode = normalizeAgentMode(modelSettings.agentMode);
   const selectedAgentModel = normalizeAgentModel(modelSettings.model, Boolean(adapter.runModel));
+  const selectedAgentProvider = providerForAgentModel(selectedAgentModel);
+  const codexModelOptions = (codexStatus?.models ?? []).map((model) => ({
+    value: `codex:${model.id}`,
+    label: `Codex · ${model.label}`,
+    description: model.description
+  }));
   const agentModelOptions = adapter.runModel
-    ? AGENT_MODEL_OPTIONS
+    ? [...AGENT_MODEL_OPTIONS, ...codexModelOptions]
     : [{ value: "offline", label: "本地工具", description: "仅使用本地笔记工具，不调用在线模型。" }];
+  if (
+    adapter.runModel &&
+    selectedAgentProvider === "codex" &&
+    !agentModelOptions.some((option) => option.value === selectedAgentModel)
+  ) {
+    agentModelOptions.push({
+      value: selectedAgentModel,
+      label: `Codex · ${selectedAgentModel.slice("codex:".length)}`,
+      description: "Codex"
+    });
+  }
+  const selectedModelConfigured = selectedAgentProvider === "codex"
+    ? Boolean(codexStatus?.authenticated)
+    : selectedAgentProvider === "deepseek"
+      ? modelSettings.deepSeekApiKeyConfigured
+      : true;
   const localizedAgentModelOptions = agentModelOptions.map((option) => ({
     ...option,
     label: t(option.label),
@@ -537,13 +725,17 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           if (filesRef.current.some((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase())) {
             return `Cannot create note because it already exists: ${notePath}`;
           }
-          const directResult = await writeApprovedAgentChanges([{ path: notePath, kind: "created", after: String(content ?? "") }]);
+          const classifiedContent = ensureArticleProfile(
+            String(content ?? "") || createArticleNoteContent(leafName(notePath)),
+            { documentType: "Agent 文档" }
+          );
+          const directResult = await writeApprovedAgentChanges([{ path: notePath, kind: "created", after: classifiedContent }]);
           if (directResult) {
             openNoteTab(notePath);
             setStatus(`Agent 已按本轮用户授权直接创建本地文档：${notePath}`);
             return `Created and wrote note directly: ${notePath}. User authorization applies only to this request.`;
           }
-          const nextFiles = [...filesRef.current, { path: notePath, content: String(content ?? ""), modifiedAt: new Date().toISOString() }];
+          const nextFiles = [...filesRef.current, { path: notePath, content: classifiedContent, modifiedAt: new Date().toISOString() }];
           filesRef.current = nextFiles;
           setFiles(nextFiles);
           markDirty(notePath);
@@ -747,6 +939,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                   adapter.runModel?.({
                     ...request,
                     model: selectedAgentModel,
+                    conversationId: activeAgentSessionIdRef.current,
+                    cwd: sourceKindRef.current === "desktop" ? sourceNameRef.current : undefined,
+                    attachments: agentAttachmentsRef.current,
                     reasoningEffort: request.reasoningEffort ?? AGENT_MODE_REASONING[selectedAgentMode],
                     system: `${request.system}\n\n${AGENT_MODE_PROMPTS[selectedAgentMode]}`
                   }) ?? Promise.resolve(""),
@@ -755,6 +950,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                       adapter.runModelTurn!({
                         ...request,
                         model: selectedAgentModel,
+                        conversationId: activeAgentSessionIdRef.current,
+                        cwd: sourceKindRef.current === "desktop" ? sourceNameRef.current : undefined,
+                        attachments: agentAttachmentsRef.current,
                         reasoningEffort: request.reasoningEffort ?? AGENT_MODE_REASONING[selectedAgentMode],
                         system: `${request.system}\n\n${AGENT_MODE_PROMPTS[selectedAgentMode]}`
                       })
@@ -766,6 +964,24 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       }),
     [adapter, appAgentTools, selectedAgentMode, selectedAgentModel]
   );
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = appTheme;
+    document.body.dataset.theme = appTheme;
+    try {
+      window.localStorage.setItem(APP_THEME_STORAGE_KEY, appTheme);
+    } catch {
+      // The selected theme still applies for the current session.
+    }
+  }, [appTheme]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcutOverrides));
+    } catch {
+      // Shortcut changes remain available for the current session.
+    }
+  }, [shortcutOverrides]);
 
   useEffect(() => {
     let cancelled = false;
@@ -792,6 +1008,22 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }, [adapter]);
 
   useEffect(() => {
+    function handleGlobalShortcut(event: KeyboardEvent) {
+      if (event.isComposing || appSettingsOpen) return;
+      const shortcut = shortcutFromKeyboardEvent(event);
+      if (!shortcut) return;
+      const commandId = shortcutCommandFor(shortcut, shortcutMap);
+      if (!commandId) return;
+      if (isEditableShortcutTarget(event.target) && !shortcutDefinition(commandId).allowInInput) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runWorkspaceCommand(commandId);
+    }
+    window.addEventListener("keydown", handleGlobalShortcut, true);
+    return () => window.removeEventListener("keydown", handleGlobalShortcut, true);
+  });
+
+  useEffect(() => {
     if (canvasSaveTimerRef.current) {
       clearTimeout(canvasSaveTimerRef.current);
       canvasSaveTimerRef.current = null;
@@ -802,7 +1034,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       canvasDocumentRef.current = nextDocument;
       canvasDirtyRef.current = false;
       setCanvasDocument(nextDocument);
-      setCanvasSaveState(writableCanvas ? "idle" : "read-only");
+      setCanvasSaveState(isCanvasReadOnlySource(sourceKind) ? "read-only" : "idle");
       return;
     }
     let cancelled = false;
@@ -845,6 +1077,35 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }, [adapter]);
 
   useEffect(() => {
+    if (!adapter.loadCodexStatus) {
+      setCodexStatusLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(adapter.loadCodexStatus())
+      .then((status) => {
+        if (!cancelled) {
+          setCodexStatus(status);
+          setCodexStatusLoaded(true);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCodexStatus({
+            available: false,
+            authenticated: false,
+            models: [],
+            error: error instanceof Error ? error.message : String(error)
+          });
+          setCodexStatusLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter]);
+
+  useEffect(() => {
     if (!adapter.loadModelSettings) {
       setModelSettingsLoaded(true);
       return;
@@ -870,13 +1131,21 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       sourceKind !== "empty" &&
       sourceKind !== "structure" &&
       modelSettingsLoaded &&
+      selectedAgentProvider === "deepseek" &&
       adapter.saveDeepSeekApiKey &&
       !modelSettings.deepSeekApiKeyConfigured &&
       !agentKeyDialogDismissed
     ) {
       setAgentKeyDialogOpen(true);
     }
-  }, [adapter.saveDeepSeekApiKey, agentKeyDialogDismissed, modelSettings.deepSeekApiKeyConfigured, modelSettingsLoaded, sourceKind]);
+  }, [
+    adapter.saveDeepSeekApiKey,
+    agentKeyDialogDismissed,
+    modelSettings.deepSeekApiKeyConfigured,
+    modelSettingsLoaded,
+    selectedAgentProvider,
+    sourceKind
+  ]);
 
   useEffect(() => {
     if (!treeContextMenu) return;
@@ -933,8 +1202,36 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const currentNote = currentPath ? getNote(index, currentPath) : undefined;
   const graph = useMemo(() => buildVaultGraph(index), [index]);
   const currentNoteGraph = useMemo(() => (currentPath ? buildNoteGraph(index, currentPath) : undefined), [currentPath, index]);
+  const noteOutline = useMemo(() => buildNoteOutline(currentNote?.content ?? ""), [currentNote?.content]);
+  const inspectorLinks = useMemo(() => buildInspectorLinks(index, currentNote), [currentNote, index]);
+  const bookmarkKey = useMemo(() => bookmarkStorageKey(sourceKind, sourceName), [sourceKind, sourceName]);
+  const availableNotePathSignature = useMemo(() => index.notes.map((note) => note.path).join("\n"), [index.notes]);
+  const bookmarkedPaths = bookmarkStore.key === bookmarkKey ? bookmarkStore.paths : [];
+  const bookmarkedNotes = bookmarkedPaths
+    .map((path) => getNote(index, path))
+    .filter((note): note is ParsedNote => Boolean(note));
+  const noteWorkflowKey = useMemo(() => noteWorkflowStorageKey(sourceKind, sourceName), [sourceKind, sourceName]);
+  const noteWorkflowSettings = noteWorkflowStore.key === noteWorkflowKey
+    ? noteWorkflowStore.settings
+    : DEFAULT_NOTE_WORKFLOW_SETTINGS;
+  const workspaceLayoutsKey = useMemo(
+    () => workspaceLayoutsStorageKey(sourceKind, sourceName),
+    [sourceKind, sourceName]
+  );
+  const workspaceLayouts = workspaceLayoutsStore.key === workspaceLayoutsKey
+    ? workspaceLayoutsStore.layouts
+    : [];
+  const templateNotes = useMemo(
+    () => notesInTemplateFolder(index.notes, noteWorkflowSettings.templatesFolder),
+    [index.notes, noteWorkflowSettings.templatesFolder]
+  );
   const tags = useMemo(() => summarizeTags(index.notes.flatMap((note) => note.tags)), [index.notes]);
-  const filteredNotes = useMemo(() => filterNotes(index.notes, noteFilter), [index.notes, noteFilter]);
+  const filteredNotes = useMemo(
+    () => filterNotes(index.notes, noteFilter).filter((note) => (
+      !selectedTag || note.tags.some((tag) => tag.toLocaleLowerCase() === selectedTag.toLocaleLowerCase())
+    )),
+    [index.notes, noteFilter, selectedTag]
+  );
   const explorerModel = useMemo(() => buildExplorerModel(index.notes, explorerQuery, explorerScope), [explorerQuery, explorerScope, index.notes]);
   const draftChanges = useMemo(() => buildDraftChanges(baseFiles, files), [baseFiles, files]);
   const autoSaveChanges = useMemo(() => selectAutoSaveChanges(draftChanges), [draftChanges]);
@@ -949,6 +1246,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const diffs = activeAgentSession?.diffs ?? [];
   const prompt = activeAgentSession?.prompt ?? "";
   const agentPinnedPaths = activeAgentSession?.pinnedPaths ?? [];
+  const agentAttachments = activeAgentSession?.attachments ?? [];
+  activeAgentSessionIdRef.current = activeAgentSessionKey;
+  agentAttachmentsRef.current = agentAttachments;
   const running = runningAgentSessionIds.has(activeAgentSessionKey);
   const agentSessionTabs = agentSessions.map((session) => ({
     id: session.id,
@@ -957,48 +1257,141 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }));
   const reasoningEffort = AGENT_MODE_REASONING[selectedAgentMode] ?? "medium";
   const agentContextUsage = useMemo(
-    () => estimateAgentContextUsage(messages, files, currentPath, agentPinnedPaths, selectedAgentModel),
-    [agentPinnedPaths, currentPath, files, messages, selectedAgentModel]
+    () => estimateAgentContextUsage(messages, files, currentPath, agentPinnedPaths, agentAttachments, selectedAgentModel),
+    [agentAttachments, agentPinnedPaths, currentPath, files, messages, selectedAgentModel]
   );
+  const deferredLauncherQuery = useDeferredValue(launcherQuery);
+  const workspaceCommands = useMemo(
+    () => workspaceCommandItems(t, shortcutMap),
+    [shortcutMap, t]
+  );
+  const settingsShortcutCommands = useMemo(
+    () => SHORTCUT_COMMANDS.map((definition): SettingsShortcutCommand => {
+      const command = workspaceCommands.find((item) => item.id === definition.id);
+      return {
+        id: definition.id,
+        label: command?.label ?? definition.id,
+        detail: command?.detail,
+        category: definition.category,
+        shortcuts: shortcutMap[definition.id],
+        defaults: definition.defaults
+      };
+    }),
+    [shortcutMap, workspaceCommands]
+  );
+  const launcherItems = useMemo(() => {
+    if (!launcherOpen) return [];
+    if (launcherMode === "commands") {
+      return filterLauncherItems(workspaceCommands, deferredLauncherQuery, recentCommandIds).slice(0, 80);
+    }
+    if (launcherMode === "notes") {
+      return buildQuickSwitcherItems(index.notes, deferredLauncherQuery, !isReadOnlyContent, recentNotePaths);
+    }
+    if (launcherMode === "templates") {
+      return filterLauncherItems(
+        templateNotes.map((note) => ({
+          id: `template:${note.path}`,
+          kind: "note" as const,
+          label: note.title,
+          detail: note.path,
+          path: note.path,
+          keywords: note.tags
+        })),
+        deferredLauncherQuery
+      ).slice(0, 80);
+    }
+    if (launcherMode === "headings") {
+      return filterLauncherItems(
+        noteOutline.map((heading) => ({
+          id: `heading:${heading.line}`,
+          kind: "note" as const,
+          label: heading.text,
+          detail: `${"#".repeat(heading.level)} · 第 ${heading.line} 行`,
+          path: String(heading.line),
+          keywords: [`h${heading.level}`, "heading", "标题", "拆分"]
+        })),
+        deferredLauncherQuery
+      ).slice(0, 80);
+    }
+    if (launcherMode === "merge") {
+      return filterLauncherItems(
+        index.notes
+          .filter((note) => note.path !== currentNote?.path)
+          .map((note) => ({
+            id: `merge:${note.path}`,
+            kind: "note" as const,
+            label: note.title,
+            detail: note.path,
+            path: note.path,
+            keywords: [...note.tags, "merge", "合并"]
+          })),
+        deferredLauncherQuery,
+        recentNotePaths.map((path) => `merge:${path}`)
+      ).slice(0, 80);
+    }
+    return searchVaultNotes(index.notes, deferredLauncherQuery).map(
+      (match): WorkspaceLauncherItem => ({
+        id: `search:${match.note.path}`,
+        kind: "search",
+        label: match.note.title,
+        detail: `${match.note.path} · ${match.snippet}`,
+        path: match.note.path,
+        matchCount: match.matchCount
+      })
+    );
+  }, [
+    deferredLauncherQuery,
+    index.notes,
+    isReadOnlyContent,
+    launcherMode,
+    launcherOpen,
+    currentNote?.path,
+    noteOutline,
+    recentCommandIds,
+    recentNotePaths,
+    templateNotes,
+    workspaceCommands
+  ]);
   const dirtyPathsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    const waitingForFirstKeyDecision = Boolean(
-      adapter.saveDeepSeekApiKey
-      && sourceKind !== "empty"
-      && sourceKind !== "structure"
-      && !modelSettings.deepSeekApiKeyConfigured
-      && !agentKeyDialogDismissed
-    );
-    if (
-      agentAutoCollapseAppliedRef.current
-      || !modelSettingsLoaded
-      || waitingForFirstKeyDecision
-      || agentSettingsOpen
-      || agentKeyDialogOpen
-      || prompt.trim() !== ""
-      || runningAgentSessionIds.size > 0
-      || agentSessions.some((session) => session.messages.length > 0)
-    ) {
-      return;
+    let stored: unknown = [];
+    try {
+      stored = JSON.parse(window.localStorage.getItem(bookmarkKey) ?? "[]");
+    } catch {
+      stored = [];
     }
-    const timer = window.setTimeout(() => {
-      agentAutoCollapseAppliedRef.current = true;
-      setAgentPanelMode("hidden");
-    }, 1_200);
-    return () => window.clearTimeout(timer);
-  }, [
-    adapter.saveDeepSeekApiKey,
-    agentKeyDialogDismissed,
-    agentKeyDialogOpen,
-    agentSessions,
-    agentSettingsOpen,
-    modelSettings.deepSeekApiKeyConfigured,
-    modelSettingsLoaded,
-    prompt,
-    runningAgentSessionIds,
-    sourceKind
-  ]);
+    setBookmarkStore({
+      key: bookmarkKey,
+      paths: normalizeBookmarkPaths(stored, availableNotePathSignature.split("\n").filter(Boolean))
+    });
+  }, [availableNotePathSignature, bookmarkKey]);
+
+  useEffect(() => {
+    let stored: unknown = DEFAULT_NOTE_WORKFLOW_SETTINGS;
+    try {
+      stored = JSON.parse(window.localStorage.getItem(noteWorkflowKey) ?? "null");
+    } catch {
+      stored = DEFAULT_NOTE_WORKFLOW_SETTINGS;
+    }
+    setNoteWorkflowStore({
+      key: noteWorkflowKey,
+      settings: normalizeNoteWorkflowSettings(stored)
+    });
+  }, [noteWorkflowKey]);
+
+  useEffect(() => {
+    let stored: unknown = [];
+    try {
+      stored = JSON.parse(window.localStorage.getItem(workspaceLayoutsKey) ?? "[]");
+    } catch {
+      stored = [];
+    }
+    setWorkspaceLayoutsStore({
+      key: workspaceLayoutsKey,
+      layouts: normalizeWorkspaceLayouts(stored)
+    });
+  }, [workspaceLayoutsKey]);
 
   function updateAgentSession(sessionId: string, updater: (session: AgentConversationSession) => AgentConversationSession) {
     setAgentSessions((current) => updateConversationById(current, sessionId, updater));
@@ -1052,6 +1445,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     updateActiveAgentSession((session) => ({
       ...session,
       pinnedPaths: typeof next === "function" ? next(session.pinnedPaths) : next
+    }));
+  }
+
+  function setAgentAttachments(next: AgentAttachment[] | ((current: AgentAttachment[]) => AgentAttachment[])) {
+    updateActiveAgentSession((session) => ({
+      ...session,
+      attachments: typeof next === "function" ? next(session.attachments) : next
     }));
   }
 
@@ -1190,7 +1590,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setGraphDeleteTarget(null);
     if (vault.sourceKind === "structure") {
       setAgentKeyDialogOpen(false);
-      setAgentSettingsOpen(false);
     }
     setReadOnlyListing(vault.readOnlyStructure?.listing ?? null);
     setReadOnlyPreview(null);
@@ -1210,6 +1609,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     if (vault.sourceKind !== "desktop") setTrashEntries([]);
     setTrashPreview(null);
     setNoteFilter("");
+    setSelectedTag("");
     setExplorerQuery("");
     setExplorerScope("");
     setGraphFilter("");
@@ -1397,7 +1797,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       return;
     }
     const path = nextUntitledPath(files);
-    const content = `# ${leafName(path)}\n\n`;
+    const content = createArticleNoteContent(leafName(path));
     setFiles((current) => [...current, { path, content, modifiedAt: new Date().toISOString() }]);
     openNoteTab(path);
     setEditorMode("edit");
@@ -1412,9 +1812,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       return;
     }
     const folder = target?.type === "folder" ? target.folder.path : target?.type === "note" ? noteStemPath(target.note.path) : "Inbox";
-    const parentLink = target?.type === "note" ? `\n上级：[[${target.note.path.replace(/\.md$/i, "")}]]\n` : "";
+    const parentLink = target?.type === "note" ? `上级：[[${target.note.path.replace(/\.md$/i, "")}]]` : "";
     const path = uniqueNotePath(files, `${folder}/新文档.md`);
-    const content = `# ${leafName(path)}\n${parentLink}\n`;
+    const content = createArticleNoteContent(leafName(path), parentLink);
     setFiles((current) => [...current, { path, content, modifiedAt: new Date().toISOString() }]);
     setTreeContextMenu(null);
     openNoteTab(path);
@@ -1645,7 +2045,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   async function updateAgentModel(model: string) {
-    const nextSettings = normalizeModelSettings({ ...modelSettings, provider: adapter.runModel ? "deepseek" : "offline", model }, Boolean(adapter.runModel));
+    const nextSettings = normalizeModelSettings({
+      ...modelSettings,
+      provider: providerForAgentModel(model),
+      model
+    }, Boolean(adapter.runModel));
     setModelSettings(nextSettings);
     await persistModelSettings(nextSettings);
   }
@@ -1673,7 +2077,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   function snapshotAgentSession(title: string, session = activeAgentSession): AgentSessionSnapshot | null {
     if (!session) return null;
-    if (session.messages.length === 0 && session.diffs.length === 0 && session.prompt.trim() === "" && session.pinnedPaths.length === 0) return null;
+    if (
+      session.messages.length === 0
+      && session.diffs.length === 0
+      && session.prompt.trim() === ""
+      && session.pinnedPaths.length === 0
+      && session.attachments.length === 0
+    ) return null;
     return {
       id: crypto.randomUUID(),
       title,
@@ -1681,6 +2091,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       diffs: session.diffs,
       prompt: session.prompt,
       pinnedPaths: session.pinnedPaths,
+      attachments: session.attachments,
       savedAt: new Date().toISOString()
     };
   }
@@ -1719,6 +2130,59 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   function updateCurrentNoteTags(nextTags: string[]) {
     if (!currentNote || isReadOnlyContent) return;
     updateCurrentNote(setNoteTags(currentNote.content, nextTags));
+  }
+
+  function updateCurrentArticleProfile(profile: EditableArticleProfile) {
+    if (!currentNote || isReadOnlyContent) return;
+    updateCurrentNote(setArticleProfile(currentNote.content, profile));
+  }
+
+  function updateCurrentNoteProperty(key: string, value: FrontmatterValue) {
+    if (!currentNote || isReadOnlyContent) return;
+    updateCurrentNote(setNoteProperty(currentNote.content, key, value));
+  }
+
+  function removeCurrentNoteProperty(key: string) {
+    if (!currentNote || isReadOnlyContent) return;
+    updateCurrentNote(removeNoteProperty(currentNote.content, key));
+  }
+
+  function toggleCurrentNoteBookmark() {
+    if (!currentNote) return;
+    setBookmarkStore((current) => {
+      const base = current.key === bookmarkKey ? current.paths : [];
+      const exists = base.some((path) => path.toLocaleLowerCase() === currentNote.path.toLocaleLowerCase());
+      const paths = exists
+        ? base.filter((path) => path.toLocaleLowerCase() !== currentNote.path.toLocaleLowerCase())
+        : [currentNote.path, ...base];
+      try {
+        window.localStorage.setItem(bookmarkKey, JSON.stringify(paths));
+      } catch {
+        setStatus("书签已在当前会话更新，但浏览器未允许持久保存。");
+      }
+      return { key: bookmarkKey, paths };
+    });
+  }
+
+  function navigateToHeading(item: NoteOutlineItem) {
+    if (!currentNote) return;
+    openNoteTab(currentNote.path);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const textarea = document.querySelector<HTMLTextAreaElement>(".note-editor .markdown-input");
+      if (textarea) {
+        const lines = currentNote.content.split(/\r?\n/);
+        const offset = lines.slice(0, item.line - 1).reduce((total, line) => total + line.length + 1, 0);
+        textarea.focus();
+        textarea.setSelectionRange(offset, offset + (lines[item.line - 1]?.length ?? 0));
+        const lineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 22;
+        textarea.scrollTop = Math.max(0, (item.line - 3) * lineHeight);
+        return;
+      }
+      document.querySelector<HTMLElement>(`[data-outline-line="${item.line}"]`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }));
   }
 
   async function extractCurrentNoteTags(granularity: TagGranularity) {
@@ -1760,6 +2224,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setDiffs([]);
     setPrompt("");
     setAgentPinnedPaths([]);
+    setAgentAttachments([]);
   }
 
   function createAgentSession() {
@@ -1795,6 +2260,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setDiffs(snapshot.diffs);
     setPrompt(snapshot.prompt);
     setAgentPinnedPaths(snapshot.pinnedPaths);
+    setAgentAttachments(snapshot.attachments);
     setAgentSessionHistory(rest);
     setStatus(`已回溯最近聊天：${snapshot.title}，聊天记忆和上下文附件已恢复。`);
   }
@@ -1831,26 +2297,70 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setStatus(`已删除子 Agent ${target.label}；剩余会话已重新编号。`);
   }
 
-  function uploadCurrentNoteToAgent() {
+  async function selectFilesForAgent() {
     if (isReadOnlyStructure) {
-      setStatus("只读磁盘结构模式不会把目录信息发送给 Agent。");
+      setStatus("只读磁盘结构模式不会读取文件正文，也不会把目录或附件发送给 Agent。");
       return;
     }
-    if (!currentPath) {
-      setStatus("当前没有打开的笔记，无法加入 Agent 上下文。");
+    if (!adapter.selectAgentAttachments) {
+      setStatus("当前运行端不支持选择本地附件。");
       return;
     }
-    setAgentPinnedPaths((current) => (current.includes(currentPath) ? current : [...current, currentPath].slice(-6)));
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        role: "tool",
-        content: `已加入 Agent 上下文：${currentPath}`,
-        createdAt: new Date().toISOString()
+    const sessionId = activeAgentSessionKey;
+    if (!sessionId || agentAttachmentBusySessionId) return;
+    setAgentAttachmentBusySessionId(sessionId);
+    try {
+      const selection = await adapter.selectAgentAttachments();
+      const usable = selection.attachments.filter((attachment) => attachment.content.trim() !== "");
+      if (usable.length > 0) {
+        updateAgentSession(sessionId, (session) => {
+          const next = [...session.attachments];
+          for (const attachment of usable) {
+            const key = attachment.sourcePath
+              ? `${attachment.sourcePath.toLowerCase()}|${attachment.size}`
+              : `${attachment.name.toLowerCase()}|${attachment.size}|${attachment.content.slice(0, 64)}`;
+            const existingIndex = next.findIndex((item) => {
+              const itemKey = item.sourcePath
+                ? `${item.sourcePath.toLowerCase()}|${item.size}`
+                : `${item.name.toLowerCase()}|${item.size}|${item.content.slice(0, 64)}`;
+              return itemKey === key;
+            });
+            if (existingIndex >= 0) next[existingIndex] = attachment;
+            else next.push(attachment);
+          }
+          return {
+            ...session,
+            attachments: next.slice(-8),
+            messages: [
+              ...session.messages,
+              {
+                id: crypto.randomUUID(),
+                role: "tool",
+                content: `已加入 Agent 附件：${usable.map((attachment) => attachment.name).join("、")}`,
+                createdAt: new Date().toISOString()
+              }
+            ]
+          };
+        });
       }
-    ]);
-    setStatus(`已把当前笔记加入 Agent 上下文：${currentPath}`);
+      const issueSummary = selection.issues.length > 0 ? `；${selection.issues.join("；")}` : "";
+      setStatus(
+        usable.length > 0
+          ? `已提取 ${usable.length} 个附件并加入子 Agent 上下文${issueSummary}`
+          : selection.issues.length > 0
+            ? `没有可加入的附件：${selection.issues.join("；")}`
+            : "已取消选择附件。"
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? `附件读取失败：${error.message}` : "附件读取失败。");
+    } finally {
+      setAgentAttachmentBusySessionId(null);
+    }
+  }
+
+  function removeAgentAttachment(attachmentId: string) {
+    setAgentAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+    setStatus("已从当前子 Agent 上下文移除附件；本地原文件没有变化。");
   }
 
   async function runAgent() {
@@ -1872,9 +2382,20 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       await runInterlinkedVaultOperation(sessionId, input, localOperation);
       return;
     }
-    if (adapter.saveDeepSeekApiKey && !modelSettings.deepSeekApiKeyConfigured) {
+    if (selectedAgentProvider === "codex" && (!codexStatusLoaded || !codexStatus?.available || !codexStatus.authenticated)) {
+      setStatus(
+        !codexStatusLoaded
+          ? "正在检查本机 Codex 连接，请稍后再试。"
+          : codexStatus?.error || "Codex 尚未登录。请先在本机 Codex 中完成 ChatGPT 登录。"
+      );
+      return;
+    }
+    if (
+      selectedAgentProvider === "deepseek" &&
+      adapter.saveDeepSeekApiKey &&
+      !modelSettings.deepSeekApiKeyConfigured
+    ) {
       setAgentKeyDialogOpen(true);
-      setAgentSettingsOpen(true);
       setStatus("请先填写本机 DeepSeek API key，再让 Agent 调用在线模型。");
       return;
     }
@@ -1902,7 +2423,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       const agentInput = locale === "en"
         ? `Response language: English. Keep file names and quoted note content unchanged.\n\n${input}`
         : input;
-      const result = await agent.run(agentInput, { currentPath, files, index, messages: [...messages, userMessage], pinnedPaths: agentPinnedPaths });
+      const result = await agent.run(agentInput, {
+        currentPath,
+        files,
+        index,
+        messages: [...messages, userMessage],
+        pinnedPaths: agentPinnedPaths,
+        attachments: agentAttachments
+      });
       updateAgentSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.flatMap((message) =>
@@ -2084,15 +2612,483 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function focusSearch() {
-    setLeftVisible(true);
-    requestAnimationFrame(() => searchInputRef.current?.focus());
+    openWorkspaceLauncher("search");
+  }
+
+  function openAppSettings(section: AppSettingsSection = "general") {
+    setAppSettingsSection(section);
+    setAppSettingsOpen(true);
+    setStorageOpen(false);
+    setLauncherOpen(false);
+    setTreeContextMenu(null);
+  }
+
+  function updateShortcut(commandId: ShortcutCommandId, shortcuts: string[]) {
+    setShortcutOverrides((current) => ({ ...current, [commandId]: shortcuts }));
+  }
+
+  function resetShortcut(commandId: ShortcutCommandId) {
+    setShortcutOverrides((current) => {
+      const next = { ...current };
+      delete next[commandId];
+      return next;
+    });
   }
 
   function focusAgent() {
-    agentAutoCollapseAppliedRef.current = true;
-    setFocusMode(false);
     if (agentPanelMode === "hidden") setAgentPanelMode("docked");
     requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".agent-console textarea")?.focus());
+  }
+
+  function openWorkspaceLauncher(mode: WorkspaceLauncherMode) {
+    setLauncherMode(mode);
+    setLauncherQuery("");
+    setLauncherOpen(true);
+    setTreeContextMenu(null);
+  }
+
+  function closeWorkspaceLauncher() {
+    setLauncherOpen(false);
+    setLauncherQuery("");
+  }
+
+  function selectWorkspaceLauncherItem(item: WorkspaceLauncherItem, options: WorkspaceLauncherSelectionOptions) {
+    if (launcherMode === "headings" && item.path) {
+      splitCurrentNoteAtHeading(Number(item.path));
+      closeWorkspaceLauncher();
+      return;
+    }
+
+    if (launcherMode === "merge" && item.path) {
+      mergeNoteIntoCurrent(item.path);
+      closeWorkspaceLauncher();
+      return;
+    }
+
+    if (item.kind === "command") {
+      setRecentCommandIds((current) => [item.id, ...current.filter((id) => id !== item.id)].slice(0, 20));
+      closeWorkspaceLauncher();
+      runWorkspaceCommand(item.id);
+      return;
+    }
+
+    if (options.createExact && launcherMode === "notes") {
+      createNamedNote(launcherQuery);
+      closeWorkspaceLauncher();
+      return;
+    }
+
+    if (item.kind === "create") {
+      createNamedNote(item.path ?? launcherQuery);
+      closeWorkspaceLauncher();
+      return;
+    }
+
+    if (launcherMode === "templates" && item.path) {
+      insertTemplateIntoCurrentNote(item.path);
+      closeWorkspaceLauncher();
+      return;
+    }
+
+    if (item.path) {
+      openNoteFromLauncher(item.path, options.openInNewTab);
+      closeWorkspaceLauncher();
+    }
+  }
+
+  function runWorkspaceCommand(commandId: string) {
+    switch (commandId) {
+      case "command-palette":
+        openWorkspaceLauncher("commands");
+        break;
+      case "quick-switcher":
+        openWorkspaceLauncher("notes");
+        break;
+      case "search":
+        openWorkspaceLauncher("search");
+        break;
+      case "navigate-back":
+      case "previous-tab":
+        navigateWorkspaceTabs(-1);
+        break;
+      case "navigate-forward":
+      case "next-tab":
+        navigateWorkspaceTabs(1);
+        break;
+      case "close-tab":
+        closeTab(activeTabId);
+        break;
+      case "focus-editor":
+        if (currentNote) {
+          openNoteTab(currentNote.path);
+          setEditorMode("edit");
+          requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".markdown-input")?.focus());
+        }
+        break;
+      case "focus-agent":
+        focusAgent();
+        break;
+      case "new-note":
+        createNamedNote(`未命名笔记 ${nextUntitledNoteNumber(index.notes.map((note) => note.path))}`);
+        break;
+      case "unique-note":
+        createUniqueNote();
+        break;
+      case "daily-note":
+        openTodayDailyNote();
+        break;
+      case "split-note":
+        if (!currentNote || isReadOnlyContent) {
+          setStatus("请先打开一篇可编辑笔记，再按标题拆分。");
+        } else if (noteOutline.length === 0) {
+          setStatus("当前笔记没有可拆分的 Markdown 标题。");
+        } else {
+          openWorkspaceLauncher("headings");
+        }
+        break;
+      case "merge-note":
+        if (!currentNote || isReadOnlyContent) {
+          setStatus("请先打开一篇可编辑笔记，再合并其他内容。");
+        } else if (index.notes.length < 2) {
+          setStatus("知识库中没有其他可合并的笔记。");
+        } else {
+          openWorkspaceLauncher("merge");
+        }
+        break;
+      case "insert-template":
+        if (!currentNote) {
+          setStatus("请先打开一篇笔记，再插入模板。");
+        } else if (templateNotes.length === 0) {
+          setNoteWorkflowDialogOpen(true);
+          setStatus(`模板文件夹“${noteWorkflowSettings.templatesFolder}”中没有可用模板。`);
+        } else {
+          openWorkspaceLauncher("templates");
+        }
+        break;
+      case "workflow-settings":
+        openAppSettings("notes");
+        break;
+      case "workspaces":
+        setWorkspaceLayoutsOpen(true);
+        break;
+      case "format-converter":
+        if (isReadOnlyContent || index.notes.length === 0) {
+          setStatus("格式转换器只用于已连接且可编辑的 Markdown 知识库。");
+        } else {
+          setFormatConverterOpen(true);
+        }
+        break;
+      case "random-note":
+        openRandomNote();
+        break;
+      case "graph":
+        openGraphTab();
+        break;
+      case "canvas":
+        openCanvasTab();
+        break;
+      case "bases":
+        openBasesTab();
+        break;
+      case "slides":
+        openSlidesTab();
+        break;
+      case "explorer":
+        openExplorerTab();
+        break;
+      case "trash":
+        openTrashTab();
+        break;
+      case "toggle-editor":
+        if (centerMode === "edit") setEditorMode((mode) => (mode === "edit" ? "preview" : "edit"));
+        break;
+      case "toggle-left":
+        setLeftVisible((visible) => !visible);
+        break;
+      case "toggle-agent":
+        setAgentPanelMode((mode) => (mode === "hidden" ? "docked" : "hidden"));
+        break;
+      case "new-agent-session":
+        createAgentSession();
+        break;
+      case "reset-agent-session":
+        resetAgentSession();
+        break;
+      case "upload-agent-context":
+        void selectFilesForAgent();
+        break;
+      case "storage":
+        setStorageOpen(true);
+        break;
+      case "toggle-theme":
+        setAppTheme((theme) => oppositeAppTheme(theme));
+        break;
+      case "toggle-language":
+        setLocale(locale === "en" ? "zh-CN" : "en");
+        break;
+      case "shortcut-settings":
+        openAppSettings("shortcuts");
+        break;
+      case "settings":
+        openAppSettings("general");
+        break;
+      default:
+        break;
+    }
+  }
+
+  function createNamedNote(nameOrPath: string, initialContent?: string) {
+    const requested = normalizePath(nameOrPath.trim()).replace(/^\/+|\/+$/g, "");
+    if (!requested) {
+      setStatus("请输入笔记名称或路径。");
+      return;
+    }
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能新建笔记。");
+      return;
+    }
+
+    const notePath = ensureMarkdownPath(requested);
+    const existing = getNote(index, notePath);
+    if (existing) {
+      openNoteTab(existing.path);
+      return;
+    }
+
+    const safety = buildSafetyManifest([notePath]);
+    if (!isVaultRelativeNotePath(notePath) || safety.excluded.length > 0) {
+      setStatus(`已阻止不安全的笔记路径：${notePath}`);
+      return;
+    }
+
+    const content = ensureArticleProfile(
+      initialContent ?? createArticleNoteContent(leafName(notePath)),
+      { documentType: "笔记" }
+    );
+    const nextFile = { path: notePath, content, modifiedAt: new Date().toISOString() };
+    setFiles((current) => [...current, nextFile]);
+    markDirty(notePath);
+    openNoteTab(notePath);
+    setEditorMode("edit");
+    setStatus(`已创建笔记：${notePath}`);
+  }
+
+  function createUniqueNote() {
+    if (isReadOnlyContent) {
+      setStatus("当前来源为只读模式，不能创建唯一笔记。");
+      return;
+    }
+    const now = new Date();
+    const stamp = formatUniqueNoteStamp(now);
+    const path = uniqueNotePath(files, `唯一笔记/${stamp}.md`);
+    createNamedNote(path, createArticleNoteContent(stamp, "", { documentType: "速记" }));
+  }
+
+  function splitCurrentNoteAtHeading(line: number) {
+    if (!currentNote || isReadOnlyContent) return;
+    const extraction = extractHeadingSection(currentNote.content, line);
+    if (!extraction) {
+      setStatus("没有找到要拆分的标题，笔记内容可能已经变化。");
+      return;
+    }
+    const safeTitle = safeNoteFileName(extraction.title);
+    const sourceFolder = folderPathOf(currentNote.path);
+    const newPath = uniqueNotePath(files, `${sourceFolder ? `${sourceFolder}/` : ""}${safeTitle}.md`);
+    const safety = buildSafetyManifest([newPath]);
+    if (!isVaultRelativeNotePath(newPath) || safety.excluded.length > 0) {
+      setStatus(`已阻止不安全的拆分路径：${newPath}`);
+      return;
+    }
+    const replacement = `${"#".repeat(extraction.level)} [[${noteStemPath(newPath)}|${extraction.title}]]`;
+    const nextSourceContent = replaceHeadingSection(currentNote.content, extraction, replacement);
+    const nextFile: NoteFile = {
+      path: newPath,
+      content: ensureArticleProfile(`${extraction.content.trimEnd()}\n`, { documentType: "摘录" }),
+      modifiedAt: new Date().toISOString()
+    };
+    setFiles((current) => [
+      ...current.map((file) => (
+        file.path === currentNote.path
+          ? { ...file, content: nextSourceContent, modifiedAt: new Date().toISOString() }
+          : file
+      )),
+      nextFile
+    ]);
+    markDirty(currentNote.path);
+    openNoteTab(newPath);
+    setEditorMode("edit");
+    setStatus(`已将“${extraction.title}”拆分为 ${newPath}，原位置保留双链。`);
+  }
+
+  function mergeNoteIntoCurrent(sourcePath: string) {
+    if (!currentNote || isReadOnlyContent) return;
+    const source = getNote(index, sourcePath);
+    if (!source || source.path === currentNote.path) {
+      setStatus("没有找到可合并的来源笔记。");
+      return;
+    }
+    updateCurrentNote(mergeNoteContents(currentNote.content, source));
+    setStatus(`已把 ${source.path} 的内容合并到当前笔记；来源笔记仍然保留。`);
+  }
+
+  function openTodayDailyNote() {
+    const now = new Date();
+    const dailyPath = formatDailyPath(noteWorkflowSettings, now);
+    const existing = getNote(index, dailyPath);
+    if (existing) {
+      openNoteTab(existing.path);
+      return;
+    }
+    const configuredTemplate = noteWorkflowSettings.dailyTemplatePath
+      ? getNote(index, noteWorkflowSettings.dailyTemplatePath)
+      : undefined;
+    const content = configuredTemplate
+      ? ensureArticleProfile(`${expandTemplate(stripTemplateFrontmatter(configuredTemplate.content), dailyPath, now)}\n`, {
+          documentType: "日记"
+        })
+      : createArticleNoteContent(leafName(dailyPath), "", { documentType: "日记" });
+    createNamedNote(dailyPath, content);
+  }
+
+  function insertTemplateIntoCurrentNote(templatePath: string) {
+    if (!currentNote || isReadOnlyContent) return;
+    const template = getNote(index, templatePath);
+    if (!template) {
+      setStatus(`模板不存在：${templatePath}`);
+      return;
+    }
+    const expanded = expandTemplate(stripTemplateFrontmatter(template.content), currentNote.path);
+    if (!expanded) {
+      setStatus(`模板没有可插入的正文：${templatePath}`);
+      return;
+    }
+    const prefix = currentNote.content.trimEnd();
+    updateCurrentNote(`${prefix}${prefix ? "\n\n" : ""}${expanded}\n`);
+    setStatus(`已插入模板：${template.path}`);
+  }
+
+  function saveNoteWorkflowSettings(settings: NoteWorkflowSettings) {
+    const normalized = normalizeNoteWorkflowSettings(settings);
+    setNoteWorkflowStore({ key: noteWorkflowKey, settings: normalized });
+    try {
+      window.localStorage.setItem(noteWorkflowKey, JSON.stringify(normalized));
+      setStatus("模板与日记设置已按当前知识库保存在本机。");
+    } catch {
+      setStatus("模板与日记设置已在当前会话生效，但未能持久保存。");
+    }
+    setNoteWorkflowDialogOpen(false);
+  }
+
+  function persistWorkspaceLayouts(layouts: WorkspaceLayoutSnapshot[]) {
+    setWorkspaceLayoutsStore({ key: workspaceLayoutsKey, layouts });
+    try {
+      window.localStorage.setItem(workspaceLayoutsKey, JSON.stringify(layouts));
+    } catch {
+      setStatus("工作区布局已在当前会话生效，但未能持久保存。");
+    }
+  }
+
+  function saveCurrentWorkspaceLayout(name: string) {
+    const now = new Date().toISOString();
+    const next = upsertWorkspaceLayout(workspaceLayouts, {
+      id: `layout-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      leftWidth,
+      agentWidth,
+      leftVisible,
+      agentVisible: agentPanelMode !== "hidden",
+      centerMode,
+      graphPerspective,
+      updatedAt: now
+    });
+    persistWorkspaceLayouts(next);
+    setStatus(`已保存工作区布局：${name}`);
+  }
+
+  function applyFormatConversion(options: MarkdownFormatConversionOptions) {
+    const conversions = new Map<string, { content: string; changes: number }>();
+    let totalChanges = 0;
+    for (const note of index.notes) {
+      const result = convertMarkdownFormat(note.content, options);
+      if (result.changes === 0) continue;
+      conversions.set(note.path, result);
+      totalChanges += result.changes;
+    }
+    if (conversions.size === 0) {
+      setFormatConverterOpen(false);
+      setStatus("当前知识库没有匹配所选规则的旧格式。");
+      return;
+    }
+    const modifiedAt = new Date().toISOString();
+    setFiles((current) => current.map((file) => {
+      const conversion = conversions.get(file.path);
+      return conversion ? { ...file, content: conversion.content, modifiedAt } : file;
+    }));
+    setFormatConverterOpen(false);
+    setStatus(`格式转换完成：修改 ${conversions.size} 篇笔记，共 ${totalChanges} 处。`);
+  }
+
+  function restoreWorkspaceLayout(layout: WorkspaceLayoutSnapshot) {
+    setLeftWidth(layout.leftWidth);
+    setAgentWidth(layout.agentWidth);
+    setLeftVisible(layout.leftVisible);
+    setAgentPanelMode(layout.agentVisible ? "docked" : "hidden");
+    setGraphPerspective(layout.graphPerspective);
+    switch (layout.centerMode) {
+      case "canvas":
+        openCanvasTab();
+        break;
+      case "bases":
+        openBasesTab();
+        break;
+      case "slides":
+        if (currentNote) openSlidesTab();
+        else openGraphTab();
+        break;
+      case "explorer":
+        openExplorerTab();
+        break;
+      case "trash":
+        openTrashTab();
+        break;
+      case "edit":
+        if (currentNote) openNoteTab(currentNote.path);
+        else openGraphTab();
+        break;
+      default:
+        openGraphTab();
+        break;
+    }
+    setWorkspaceLayoutsOpen(false);
+    setStatus(`已恢复工作区布局：${layout.name}`);
+  }
+
+  function openRandomNote() {
+    if (index.notes.length === 0) {
+      setStatus("当前知识库没有可打开的笔记。");
+      return;
+    }
+    const target = index.notes[Math.floor(Math.random() * index.notes.length)];
+    openNoteTab(target.path);
+  }
+
+  function openNoteFromLauncher(path: string, openInNewTab: boolean) {
+    const existingTab = workspaceTabs.find((tab) => tab.path === path);
+    if (existingTab) {
+      activateTab(existingTab);
+    } else if (!openInNewTab) {
+      const activeIndex = workspaceTabs.findIndex((tab) => tab.id === activeTabId && tab.mode === "edit");
+      if (activeIndex >= 0) {
+        const nextTab = { id: tabIdForPath(path), mode: "edit" as const, path };
+        setWorkspaceTabs((current) => current.map((tab, index) => (index === activeIndex ? nextTab : tab)));
+        activateTab(nextTab);
+      } else {
+        openNoteTab(path);
+      }
+    } else {
+      openNoteTab(path);
+    }
+    setRecentNotePaths((current) => [path, ...current.filter((item) => item !== path)].slice(0, 24));
   }
 
   function openTreeNoteMenu(note: ParsedNote, event: ReactMouseEvent<HTMLElement>) {
@@ -2130,7 +3126,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
 
     const notePath = ensureMarkdownPath(path);
-    const content = `# ${leafName(notePath)}\n\n`;
+    const content = createArticleNoteContent(leafName(notePath), "", { documentType: "概念" });
     setFiles((current) => {
       if (current.some((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase())) return current;
       return [...current, { path: notePath, content, modifiedAt: new Date().toISOString() }];
@@ -2153,15 +3149,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function openCanvasTab() {
-    if (sourceKind === "empty") {
-      setStorageOpen(true);
-      setStatus("请先打开一个本地知识库，再建立知识画布。");
-      return;
-    }
-    if (sourceKind === "structure") {
-      setStatus("只读磁盘结构模式不会读取文件内容，因此不能建立知识画布。");
-      return;
-    }
+    setStorageOpen(false);
     setWorkspaceTabs((current) => (
       current.some((tab) => tab.id === CANVAS_TAB_ID)
         ? current
@@ -2169,6 +3157,11 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     ));
     setActiveTabId(CANVAS_TAB_ID);
     setCenterMode("canvas");
+    if (sourceKind === "empty") {
+      setStatus("已打开空白画布；连接本地知识库后可持续保存。");
+    } else if (sourceKind === "structure") {
+      setStatus("已打开只读画布；当前磁盘结构模式不会读取文件正文或写入源目录。");
+    }
   }
 
   function openExplorerTab() {
@@ -2177,6 +3170,34 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     );
     setActiveTabId(EXPLORER_TAB_ID);
     setCenterMode("explorer");
+  }
+
+  function openBasesTab() {
+    if (sourceKind === "structure") {
+      openExplorerTab();
+      setStatus("只读硬盘结构没有读取正文与属性，无法生成属性数据库。");
+      return;
+    }
+    setWorkspaceTabs((current) =>
+      current.some((tab) => tab.id === BASES_TAB_ID) ? current : [...current, { id: BASES_TAB_ID, mode: "bases" }]
+    );
+    setActiveTabId(BASES_TAB_ID);
+    setCenterMode("bases");
+  }
+
+  function openSlidesTab() {
+    if (!currentNote) {
+      setStatus("请先打开一篇笔记，再进入幻灯片演示。");
+      return;
+    }
+    const tabId = `slides:${currentNote.path.toLowerCase()}`;
+    setWorkspaceTabs((current) => (
+      current.some((tab) => tab.id === tabId)
+        ? current
+        : [...current, { id: tabId, mode: "slides", path: currentNote.path }]
+    ));
+    setActiveTabId(tabId);
+    setCenterMode("slides");
   }
 
   function openTrashTab() {
@@ -2210,6 +3231,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setActiveTabId(id);
     setCurrentPath(path);
     setCenterMode("edit");
+    setRecentNotePaths((current) => [path, ...current.filter((item) => item !== path)].slice(0, 24));
   }
 
   function activateTab(tab: WorkspaceTab) {
@@ -2218,14 +3240,18 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     if (tab.path) setCurrentPath(tab.path);
   }
 
+  function navigateWorkspaceTabs(direction: -1 | 1) {
+    const target = adjacentWorkspaceTab(workspaceTabs, activeTabId, direction);
+    if (target) activateTab(target);
+  }
+
   function closeTab(tabId: string) {
-    if (tabId === GRAPH_TAB_ID || tabId === CANVAS_TAB_ID || tabId === EXPLORER_TAB_ID || tabId === TRASH_TAB_ID) return;
-    const tabIndex = workspaceTabs.findIndex((tab) => tab.id === tabId);
-    if (tabIndex === -1) return;
-    const nextTabs = workspaceTabs.filter((tab) => tab.id !== tabId);
-    setWorkspaceTabs(nextTabs.length > 0 ? nextTabs : [{ id: GRAPH_TAB_ID, mode: "graph" }]);
+    if (sourceKind === "structure" && tabId === EXPLORER_TAB_ID) return;
+    const result = workspaceTabsAfterClose(workspaceTabs, tabId);
+    if (result.tabs === workspaceTabs) return;
+    setWorkspaceTabs(result.tabs);
     if (activeTabId === tabId) {
-      activateTab(nextTabs[Math.max(0, tabIndex - 1)] ?? nextTabs[0] ?? { id: GRAPH_TAB_ID, mode: "graph" });
+      activateTab(result.nextActiveTab ?? { id: GRAPH_TAB_ID, mode: "graph" });
     }
   }
 
@@ -2236,7 +3262,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setCanvasDocument(nextDocument);
     const writableCanvas = sourceKind === "desktop" || sourceKind === "browser-directory";
     if (!writableCanvas || !adapter.saveCanvasDocument) {
-      setCanvasSaveState("read-only");
+      setCanvasSaveState(isCanvasReadOnlySource(sourceKind) ? "read-only" : "idle");
       return;
     }
     if (canvasSaveTimerRef.current) clearTimeout(canvasSaveTimerRef.current);
@@ -2256,6 +3282,23 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           setStatus(error instanceof Error ? `画布保存失败：${error.message}` : "画布保存失败。");
         });
     }, 360);
+  }
+
+  function updateBaseProperty(path: string, key: string, rawValue: string) {
+    if (isReadOnlyContent) return;
+    const note = getNote(index, path);
+    if (!note) return;
+    const nextContent = rawValue.trim()
+      ? setNoteProperty(note.content, key, parseEditablePropertyValue(rawValue))
+      : removeNoteProperty(note.content, key);
+    if (nextContent === note.content) return;
+    setFiles((current) => current.map((file) => (
+      file.path === note.path
+        ? { ...file, content: nextContent, modifiedAt: new Date().toISOString() }
+        : file
+    )));
+    markDirty(note.path);
+    setStatus(rawValue.trim() ? `已更新 ${note.path} 的属性 ${key}。` : `已移除 ${note.path} 的属性 ${key}。`);
   }
 
   async function flushCanvasSaveBeforeSourceChange() {
@@ -2536,18 +3579,35 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   } as CSSProperties;
   const shellClassName = [
     "obsidian-shell",
-    leftVisible && !focusMode ? "" : "left-collapsed",
-    agentPanelMode === "hidden" && !focusMode ? "agent-collapsed" : "",
-    agentPanelMode === "floating" && !focusMode ? "agent-floating" : "",
-    focusMode ? "workspace-focus-mode" : ""
+    `theme-${appTheme}`,
+    leftVisible ? "" : "left-collapsed",
+    agentPanelMode === "hidden" ? "agent-collapsed" : ""
   ].filter(Boolean).join(" ");
+
+  function isInteractiveChromeTarget(target: EventTarget | null) {
+    return target instanceof Element
+      && Boolean(target.closest("button, [role='tab'], input, textarea, select, a, [contenteditable='true']"));
+  }
+
+  function startWindowDragging(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0 || !adapter.windowControls || isInteractiveChromeTarget(event.target)) return;
+    void adapter.windowControls.startDragging();
+  }
+
+  function toggleWindowMaximize(event: ReactMouseEvent<HTMLElement>) {
+    if (!adapter.windowControls || isInteractiveChromeTarget(event.target)) return;
+    void adapter.windowControls.toggleMaximize();
+  }
 
   return (
     <div ref={shellRef} className={shellClassName} style={shellStyle}>
-      <header className="app-chrome">
+      <header
+        className={adapter.windowControls ? "app-chrome app-chrome-desktop" : "app-chrome"}
+        onDoubleClick={toggleWindowMaximize}
+        onPointerDown={startWindowDragging}
+      >
         <div className="chrome-left">
-          <IconButton active={leftVisible && !focusMode} label={t("切换侧栏")} onClick={() => {
-            setFocusMode(false);
+          <IconButton active={leftVisible} label={t("切换侧栏")} onClick={() => {
             setLeftVisible((visible) => !visible);
           }}>
             <PanelLeft />
@@ -2580,12 +3640,16 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                     ? <PanelsTopLeft size={13} />
                     : tab.mode === "explorer"
                       ? <HardDrive size={13} />
+                      : tab.mode === "bases"
+                        ? <TableProperties size={13} />
+                        : tab.mode === "slides"
+                          ? <Presentation size={13} />
                       : tab.mode === "trash"
                         ? <Trash2 size={13} />
                       : <BookOpen size={13} />}
                 <span>{t(tabTitle(tab, index))}</span>
                 {tab.path && dirtyPaths.includes(tab.path) ? <b className="tab-dirty" aria-label="Unsaved changes" /> : null}
-                {tab.id !== GRAPH_TAB_ID && tab.id !== CANVAS_TAB_ID && tab.id !== EXPLORER_TAB_ID && tab.id !== TRASH_TAB_ID ? (
+                {tab.id !== GRAPH_TAB_ID && !(sourceKind === "structure" && tab.id === EXPLORER_TAB_ID) ? (
                   <button
                     aria-label={`Close ${tabTitle(tab, index)}`}
                     className="tab-close"
@@ -2618,18 +3682,37 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               {autoSaving ? `${t("保存中")} · ` : ""}{t("改动")} {draftChanges.length} · {t("回收站")} {trashEntries.length}
             </button>
           ) : null}
-          <button
-            aria-label={locale === "en" ? "Switch to Chinese" : "切换到英文"}
-            className="language-switch"
-            onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")}
-            title={locale === "en" ? "Switch to Chinese" : "Switch to English"}
-            type="button"
-          >
-            <Languages size={14} />
-            <span>{locale === "en" ? "中" : "EN"}</span>
-          </button>
           <span>{t(sourceLabel)}</span>
           {sourceKind === "empty" ? null : <span>{runtime(sourceName)}</span>}
+          {adapter.windowControls ? (
+            <div className="window-controls" aria-label={t("窗口控制")}>
+              <button
+                aria-label={t("最小化")}
+                onClick={() => void adapter.windowControls?.minimize()}
+                title={t("最小化")}
+                type="button"
+              >
+                <Minus />
+              </button>
+              <button
+                aria-label={t("最大化或还原")}
+                onClick={() => void adapter.windowControls?.toggleMaximize()}
+                title={t("最大化或还原")}
+                type="button"
+              >
+                <Maximize2 />
+              </button>
+              <button
+                aria-label={t("关闭窗口")}
+                className="window-close"
+                onClick={() => void adapter.windowControls?.close()}
+                title={t("关闭窗口")}
+                type="button"
+              >
+                <X />
+              </button>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -2657,12 +3740,96 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
+      <AppSettingsDialog
+        activeSection={appSettingsSection}
+        agentModeOptions={localizedAgentModeOptions}
+        appTheme={appTheme}
+        canConfigureModel={selectedAgentProvider === "deepseek" && Boolean(adapter.saveDeepSeekApiKey)}
+        graphFilter={graphFilter}
+        graphRadius={graphRadius}
+        graphShowLabels={graphShowLabels}
+        graphShowRelated={graphShowRelated}
+        locale={locale}
+        modelConfigured={selectedModelConfigured}
+        modelConnectionDescription={codexConnectionDescription(codexStatus, locale)}
+        modelCredentialBusy={modelCredentialBusy}
+        modelCredentialStatus={modelSettings.deepSeekApiKeyStatus ?? "unchecked"}
+        modelOptions={localizedAgentModelOptions}
+        modelProvider={selectedAgentProvider}
+        onAgentModeChange={(mode) => void updateAgentMode(mode)}
+        onClose={() => setAppSettingsOpen(false)}
+        onDeleteApiKey={() => void deleteAgentApiKey()}
+        onGraphFilterChange={(value) => {
+          setGraphViewport(null);
+          setGraphFilter(value);
+        }}
+        onGraphRadiusChange={setGraphRadius}
+        onGraphShowLabelsChange={setGraphShowLabels}
+        onGraphShowRelatedChange={(value) => {
+          setGraphViewport(null);
+          setGraphShowRelated(value);
+        }}
+        onLocaleChange={setLocale}
+        onModelChange={(model) => void updateAgentModel(model)}
+        onOpenFormatConverter={() => {
+          setAppSettingsOpen(false);
+          runWorkspaceCommand("format-converter");
+        }}
+        onOpenLayouts={() => {
+          setAppSettingsOpen(false);
+          setWorkspaceLayoutsOpen(true);
+        }}
+        onOpenNoteWorkflow={() => {
+          setAppSettingsOpen(false);
+          setNoteWorkflowDialogOpen(true);
+        }}
+        onOpenStorage={() => {
+          setAppSettingsOpen(false);
+          setStorageOpen(true);
+        }}
+        onOpenTrash={() => {
+          setAppSettingsOpen(false);
+          openTrashTab();
+        }}
+        onOpenUpdates={() => {
+          setAppSettingsOpen(false);
+          window.dispatchEvent(new Event("knowledge-agent:open-update-settings"));
+        }}
+        onRequestApiKey={() => {
+          setAppSettingsOpen(false);
+          setAgentApiKeyInput("");
+          setAgentKeyDialogOpen(true);
+        }}
+        onResetAllShortcuts={() => setShortcutOverrides({})}
+        onResetShortcut={resetShortcut}
+        onSectionChange={setAppSettingsSection}
+        onShortcutChange={updateShortcut}
+        onThemeChange={setAppTheme}
+        onValidateApiKey={() => void validateAgentApiKey()}
+        open={appSettingsOpen}
+        selectedAgentMode={selectedAgentMode}
+        selectedModel={selectedAgentModel}
+        shortcutMap={shortcutMap}
+        shortcuts={settingsShortcutCommands}
+        sourceName={sourceName}
+      />
+
       <aside className="vault-ribbon" aria-label={t("工具栏")}>
+        <IconButton
+          active={launcherOpen && launcherMode === "commands"}
+          label={t("命令面板")}
+          onClick={() => openWorkspaceLauncher("commands")}
+        >
+          <Command />
+        </IconButton>
         <IconButton active={centerMode === "graph"} label={t("关系图谱")} onClick={openGraphTab}>
           <Network />
         </IconButton>
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
+        </IconButton>
+        <IconButton active={centerMode === "bases"} label={t("属性数据库")} onClick={openBasesTab}>
+          <TableProperties />
         </IconButton>
         <IconButton active={centerMode === "explorer"} label={t("资源查询")} onClick={openExplorerTab}>
           <HardDrive />
@@ -2671,16 +3838,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <Trash2 />
         </IconButton>
         <div className="ribbon-spacer" />
-        <IconButton active={agentPanelMode !== "hidden" && !focusMode} label={t("智能体")} onClick={focusAgent}>
+        <IconButton active={agentPanelMode !== "hidden"} label={t("智能体")} onClick={focusAgent}>
           <Bot />
         </IconButton>
-        <IconButton active={graphSettingsOpen} label={t("设置")} onClick={() => {
-          if (centerMode === "graph" && graphPerspective === "files") {
-            setGraphSettingsOpen((open) => !open);
-            return;
-          }
-          window.dispatchEvent(new Event("knowledge-agent:open-update-settings"));
-        }}>
+        <IconButton active={appSettingsOpen} label={t("设置")} onClick={() => openAppSettings("general")}>
           <Settings />
         </IconButton>
       </aside>
@@ -2729,13 +3890,50 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
         {!isReadOnlyStructure ? <section className="vault-panel compact-panel">
           <div className="section-heading">
-            <h2>{t("标签")}</h2>
-            <span>{tags.length}</span>
+            <h2>{t("标签分类")}</h2>
+            <span>{selectedTag ? `${filteredNotes.length}/${index.notes.length}` : tags.length}</span>
           </div>
           <div className="tag-list">
-            {tags.length === 0 ? <p className="muted">{t("暂无标签")}</p> : tags.map((tag) => <span key={tag.name}>#{tag.name} {tag.count}</span>)}
+            {selectedTag ? (
+              <button className="tag-filter-clear" onClick={() => setSelectedTag("")} title={t("清除标签筛选")} type="button">
+                <X />
+                <span>{t("清除")} #{selectedTag}</span>
+              </button>
+            ) : null}
+            {tags.length === 0 ? <p className="muted">{t("暂无标签")}</p> : tags.map((tag) => (
+              <button
+                aria-pressed={selectedTag === tag.name}
+                className={selectedTag === tag.name ? "active" : ""}
+                key={tag.name}
+                onClick={() => setSelectedTag((current) => current === tag.name ? "" : tag.name)}
+                title={t("筛选此标签")}
+                type="button"
+              >
+                #{tag.name} <span>{tag.count}</span>
+              </button>
+            ))}
           </div>
         </section> : null}
+
+        {!isReadOnlyStructure && currentNote ? (
+          <NoteInspector
+            backlinks={inspectorLinks.backlinks}
+            bookmarkedNotes={bookmarkedNotes}
+            currentBookmarked={bookmarkedPaths.some((path) => path.toLocaleLowerCase() === currentNote.path.toLocaleLowerCase())}
+            note={currentNote}
+            onAddProperty={updateCurrentNoteProperty}
+            onNavigateHeading={navigateToHeading}
+            onOpenLink={selectNote}
+            onRemoveProperty={removeCurrentNoteProperty}
+            onTabChange={setNoteInspectorTab}
+            onToggleBookmark={toggleCurrentNoteBookmark}
+            onUpdateProperty={updateCurrentNoteProperty}
+            outline={noteOutline}
+            outlinks={inspectorLinks.outlinks}
+            readOnly={isReadOnlyContent}
+            tab={noteInspectorTab}
+          />
+        ) : null}
 
         <section className="vault-panel compact-panel safety-card">
           <div className="section-heading">
@@ -2798,6 +3996,43 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
+      <WorkspaceLauncher
+        items={launcherItems}
+        mode={launcherMode}
+        onClose={closeWorkspaceLauncher}
+        onQueryChange={setLauncherQuery}
+        onSelect={selectWorkspaceLauncherItem}
+        open={launcherOpen}
+        query={launcherQuery}
+      />
+
+      {noteWorkflowDialogOpen ? (
+        <NoteWorkflowSettingsDialog
+          onClose={() => setNoteWorkflowDialogOpen(false)}
+          onSave={saveNoteWorkflowSettings}
+          settings={noteWorkflowSettings}
+          templates={templateNotes}
+        />
+      ) : null}
+
+      {workspaceLayoutsOpen ? (
+        <WorkspaceLayoutsDialog
+          layouts={workspaceLayouts}
+          onClose={() => setWorkspaceLayoutsOpen(false)}
+          onDelete={(id) => persistWorkspaceLayouts(workspaceLayouts.filter((layout) => layout.id !== id))}
+          onRestore={restoreWorkspaceLayout}
+          onSave={saveCurrentWorkspaceLayout}
+        />
+      ) : null}
+
+      {formatConverterOpen ? (
+        <FormatConverterDialog
+          notes={index.notes}
+          onApply={applyFormatConversion}
+          onClose={() => setFormatConverterOpen(false)}
+        />
+      ) : null}
+
       {agentKeyDialogOpen ? (
         <AgentApiKeyDialog
           apiKeyInput={agentApiKeyInput}
@@ -2815,7 +4050,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      {leftVisible && !focusMode ? (
+      {leftVisible ? (
         <div
           aria-label={t("调整左侧栏宽度")}
           aria-orientation="vertical"
@@ -2825,7 +4060,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         />
       ) : null}
 
-      {agentPanelMode === "docked" && !focusMode ? (
+      {agentPanelMode === "docked" ? (
         <div
           aria-label={t("调整右侧 Agent 栏宽度")}
           aria-orientation="vertical"
@@ -2838,27 +4073,20 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       <main className="workspace">
         <header className="workspace-toolbar">
           <div className="nav-controls">
-            <IconButton label={t("后退")}>
+            <IconButton label={t("后退")} onClick={() => navigateWorkspaceTabs(-1)}>
               <ChevronLeft />
             </IconButton>
-            <IconButton label={t("前进")}>
+            <IconButton label={t("前进")} onClick={() => navigateWorkspaceTabs(1)}>
               <ChevronRight />
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{sourceKind === "empty" ? t("开始") : centerMode === "canvas" || centerMode === "explorer" || centerMode === "trash" ? runtime(sourceName) : currentPath.split("/").slice(0, -1).join(" / ") || t("关系图谱")}</span>
-            <strong>{sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "canvas" ? t("知识画布") : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
+            <span>{centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
+            <strong>{centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
-        {sourceKind === "empty" ? (
-          <WorkspaceEmptyState
-            canCreate={Boolean(adapter.createVaultFolder)}
-            canOpen={adapter.canOpenVault}
-            onCreate={() => setStorageOpen(true)}
-            onOpen={() => void openLocalVault()}
-          />
-        ) : centerMode === "canvas" ? (
+        {centerMode === "canvas" ? (
           <KnowledgeCanvas
             document={canvasDocument}
             notes={index.notes.map((note) => ({
@@ -2869,8 +4097,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             }))}
             onChange={updateCanvasDocument}
             onOpenNote={openNoteTab}
-            readOnly={sourceKind !== "desktop" && sourceKind !== "browser-directory"}
+            readOnly={isCanvasReadOnlySource(sourceKind)}
             saveState={canvasSaveState}
+          />
+        ) : shouldShowWorkspaceEmptyState(sourceKind, centerMode, Boolean(currentNote)) ? (
+          <WorkspaceEmptyState
+            canCreate={Boolean(adapter.createVaultFolder)}
+            canOpen={adapter.canOpenVault}
+            onCreate={() => setStorageOpen(true)}
+            onOpen={() => void openLocalVault()}
           />
         ) : centerMode === "graph" ? (
           <div className="graph-workspace">
@@ -2880,7 +4115,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 className={graphPerspective === "knowledge" ? "active" : ""}
                 onClick={() => {
                   setGraphPerspective("knowledge");
-                  setGraphSettingsOpen(false);
                 }}
                 role="tab"
                 type="button"
@@ -2899,7 +4133,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </div>
             {graphPerspective === "knowledge" ? (
               <Suspense fallback={<div className="knowledge-empty"><strong>{t("正在构建标签知识图谱")}</strong></div>}>
-                <TagKnowledgeMap index={index} onSelectNote={selectNote} />
+                <TagKnowledgeMap index={index} onSelectNote={selectNote} theme={appTheme} />
               </Suspense>
             ) : (
               <StarGraph
@@ -2917,61 +4151,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 viewport={graphViewport ?? undefined}
               />
             )}
-            {graphSettingsOpen && graphPerspective === "files" ? (
-              <aside className="graph-settings-panel" aria-label={t("图谱设置")}>
-                <header>
-                  <span>{t("图谱设置")}</span>
-                  <button onClick={() => setGraphSettingsOpen(false)} type="button">
-                    ×
-                  </button>
-                </header>
-                <section>
-                  <h3>{t("筛选")}</h3>
-                  <input
-                    aria-label={t("筛选图谱节点")}
-                    onChange={(event) => {
-                      setGraphViewport(null);
-                      setGraphFilter(event.target.value);
-                    }}
-                    placeholder={t("节点标题或路径")}
-                    value={graphFilter}
-                  />
-                </section>
-                <section>
-                  <h3>{t("显示")}</h3>
-                  <label>
-                    <input checked={graphShowLabels} onChange={(event) => setGraphShowLabels(event.target.checked)} type="checkbox" />
-                    {t("显示标签")}
-                  </label>
-                  <label>
-                    <input
-                      checked={graphShowRelated}
-                      onChange={(event) => {
-                        setGraphViewport(null);
-                        setGraphShowRelated(event.target.checked);
-                      }}
-                      type="checkbox"
-                    />
-                    {t("显示孤立节点")}
-                  </label>
-                </section>
-                <section>
-                  <h3>{t("力")}</h3>
-                  <label>
-                    {t("关系半径")}
-                    <input
-                      aria-label={t("图谱关系半径")}
-                      max="1.35"
-                      min="0.7"
-                      onChange={(event) => setGraphRadius(Number(event.target.value))}
-                      step="0.05"
-                      type="range"
-                      value={graphRadius}
-                    />
-                  </label>
-                </section>
-              </aside>
-            ) : null}
           </div>
         ) : centerMode === "trash" ? (
           <TrashWorkspace
@@ -2984,6 +4163,17 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             previewLoadingId={trashPreviewLoadingId}
             restoringId={restoringTrashId}
           />
+        ) : centerMode === "bases" ? (
+          <BasesView
+            notes={index.notes}
+            onOpenNote={openNoteTab}
+            onPropertyChange={isReadOnlyContent ? undefined : updateBaseProperty}
+            readOnly={isReadOnlyContent}
+            sourceKind={sourceKind}
+            sourceName={sourceName}
+          />
+        ) : centerMode === "slides" && currentNote ? (
+          <SlidesView note={currentNote} onClose={() => openNoteTab(currentNote.path)} />
         ) : centerMode === "explorer" ? (
           isReadOnlyStructure && readOnlyListing ? (
             <ReadOnlyStorageExplorer
@@ -3013,36 +4203,30 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             onChange={isReadOnlyContent ? () => undefined : updateCurrentNote}
             onExtractTags={isReadOnlyContent ? undefined : (granularity) => void extractCurrentNoteTags(granularity)}
             onModeChange={isReadOnlyContent ? () => undefined : setEditorMode}
+            onProfileSave={isReadOnlyContent ? undefined : updateCurrentArticleProfile}
             onSelectGraphNode={selectNote}
             onTagsChange={isReadOnlyContent ? undefined : updateCurrentNoteTags}
             readOnly={isReadOnlyContent}
+            resolveNote={(target) => resolveIndexedNote(index, target)}
             tagExtracting={tagExtractingPath === currentNote?.path}
           />
         )}
       </main>
 
-      {focusMode ? (
-        <button className="focus-mode-exit" onClick={() => {
-          setFocusMode(false);
-          setAgentPanelMode("docked");
-        }} type="button">
-          <Bot size={15} />
-          {t("退出专注模式")}
-        </button>
-      ) : null}
-
-      {agentPanelMode !== "hidden" || focusMode ? <AgentConsole
+      {agentPanelMode !== "hidden" ? <AgentConsole
         activeSessionId={activeAgentSessionKey}
         agentModeOptions={localizedAgentModeOptions}
-        canConfigureModel={Boolean(adapter.saveDeepSeekApiKey)}
+        canConfigureModel={selectedAgentProvider === "deepseek" && Boolean(adapter.saveDeepSeekApiKey)}
+        attachments={agentAttachments}
+        attachmentBusy={agentAttachmentBusySessionId === activeAgentSessionKey}
         diffs={diffs}
         input={prompt}
         readOnly={isReadOnlyStructure}
         messages={messages}
         canRestoreSession={agentSessionHistory.length > 0}
-        contextUploadLabel={currentPath ? `${t("加入 Agent 上下文")}: ${currentPath}` : t("当前没有可上传的笔记")}
+        contextUploadLabel={t("添加文件或图片到 Agent 上下文")}
         contextUsage={agentContextUsage}
-        modelConfigured={modelSettings.deepSeekApiKeyConfigured}
+        modelConfigured={selectedModelConfigured}
         modelCredentialBusy={modelCredentialBusy}
         modelCredentialStatus={modelSettings.deepSeekApiKeyStatus}
         modelCredentialStorage={modelSettings.deepSeekApiKeyStorage}
@@ -3052,7 +4236,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         modelCredentialValidatedLabel={modelSettings.deepSeekApiKeyValidatedAtMs
           ? formatTrashTime(modelSettings.deepSeekApiKeyValidatedAtMs, locale)
           : undefined}
-        modelLabel={`${modelSettings.provider}:${modelSettings.model}`}
+        modelLabel={selectedAgentModel}
         modelShortLabel={modelShortLabel(selectedAgentModel)}
         modelOptions={localizedAgentModelOptions}
         onApply={applyDiff}
@@ -3061,22 +4245,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         onNewSession={createAgentSession}
         onInputChange={setPrompt}
         onModelChange={(model) => void updateAgentModel(model)}
+        onRemoveAttachment={removeAgentAttachment}
         onDeleteApiKey={() => void deleteAgentApiKey()}
-        onDock={() => setAgentPanelMode("docked")}
-        onFloat={() => setAgentPanelMode("floating")}
-        onFocus={() => {
-          agentAutoCollapseAppliedRef.current = true;
-          setAgentSettingsOpen(false);
-          setAgentPanelMode("docked");
-          setFocusMode(true);
-        }}
         onHide={() => {
-          setAgentSettingsOpen(false);
           setAgentPanelMode("hidden");
         }}
         onRequestApiKey={() => {
           setAgentApiKeyInput("");
-          setAgentSettingsOpen(false);
           setAgentKeyDialogOpen(true);
         }}
         onValidateApiKey={() => void validateAgentApiKey()}
@@ -3084,14 +4259,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         onRestoreSession={restoreAgentSession}
         onRun={runAgent}
         onSelectSession={selectAgentSession}
-        onToggleSettings={() => setAgentSettingsOpen((open) => !open)}
-        onUploadContext={uploadCurrentNoteToAgent}
+        onToggleSettings={() => openAppSettings("agent")}
+        onUploadContext={() => void selectFilesForAgent()}
         reasoningEffort={reasoningEffort}
         running={running}
         selectedAgentMode={selectedAgentMode}
         selectedModel={selectedAgentModel}
         sessions={agentSessionTabs}
-        settingsOpen={agentSettingsOpen}
+        settingsOpen={false}
       /> : null}
     </div>
   );
@@ -3524,6 +4699,20 @@ function TrashWorkspace({
       </div>
     </section>
   );
+}
+
+export function resolveIndexedNote(index: VaultIndex, target: string): ParsedNote | undefined {
+  const normalizedTarget = ensureMarkdownPath(normalizePath(target));
+  const exact = getNote(index, normalizedTarget);
+  if (exact) return exact;
+
+  const targetStem = normalizedTarget.replace(/\.md$/i, "").toLowerCase();
+  const targetLeaf = targetStem.split("/").pop();
+  const matches = index.notes.filter((note) => {
+    const noteStem = normalizePath(note.path).replace(/\.md$/i, "").toLowerCase();
+    return noteStem === targetStem || noteStem.split("/").pop() === targetLeaf;
+  });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function DraftChangesPanel({
@@ -4018,6 +5207,8 @@ function tabIdForPath(path: string): string {
 function tabTitle(tab: WorkspaceTab, index: ReturnType<typeof buildVaultIndex>): string {
   if (tab.mode === "graph") return "关系图谱";
   if (tab.mode === "canvas") return "知识画布";
+  if (tab.mode === "bases") return "属性数据库";
+  if (tab.mode === "slides") return tab.path ? getNote(index, tab.path)?.title ?? leafName(tab.path) : "幻灯片";
   if (tab.mode === "explorer") return "资源查询";
   if (tab.mode === "trash") return "回收站";
   if (!tab.path) return "笔记";
@@ -4048,6 +5239,86 @@ function uniqueNotePath(files: NoteFile[], desiredPath: string): string {
     if (!existing.has(path.toLowerCase())) return path;
     index += 1;
   }
+}
+
+export interface HeadingSectionExtraction {
+  title: string;
+  level: number;
+  start: number;
+  end: number;
+  content: string;
+}
+
+export function extractHeadingSection(content: string, line: number): HeadingSectionExtraction | undefined {
+  const outline = buildNoteOutline(content);
+  const heading = outline.find((item) => item.line === line);
+  if (!heading) return undefined;
+  const nextHeading = outline.find((item) => item.line > line && item.level <= heading.level);
+  const lineStarts = [0];
+  const newlinePattern = /\r?\n/g;
+  while (newlinePattern.exec(content)) lineStarts.push(newlinePattern.lastIndex);
+  const start = lineStarts[line - 1];
+  const end = nextHeading ? lineStarts[nextHeading.line - 1] : content.length;
+  if (start === undefined || end === undefined) return undefined;
+  return {
+    title: heading.text,
+    level: heading.level,
+    start,
+    end,
+    content: content.slice(start, end).trimEnd()
+  };
+}
+
+export function replaceHeadingSection(
+  content: string,
+  extraction: HeadingSectionExtraction,
+  replacement: string
+): string {
+  const prefix = content.slice(0, extraction.start);
+  const suffix = content.slice(extraction.end).replace(/^(?:\r?\n)+/, "");
+  return `${prefix}${replacement}${suffix ? `\n\n${suffix}` : "\n"}`;
+}
+
+export function mergeNoteContents(targetContent: string, source: ParsedNote): string {
+  const sourceWithoutFrontmatter = stripTemplateFrontmatter(source.content).trim();
+  const sourceLines = sourceWithoutFrontmatter.split(/\r?\n/);
+  if (/^ {0,3}#\s+/.test(sourceLines[0] ?? "")) sourceLines.shift();
+  while (sourceLines[0]?.trim() === "") sourceLines.shift();
+  const body = demoteMarkdownHeadings(sourceLines.join("\n").trim());
+  const provenance = `> 合并来源：[[${noteStemPath(source.path)}|${source.title}]]`;
+  return `${targetContent.trimEnd()}\n\n## ${source.title}\n\n${provenance}${body ? `\n\n${body}` : ""}\n`;
+}
+
+export function formatUniqueNoteStamp(date: Date): string {
+  return [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+    String(date.getSeconds()).padStart(2, "0")
+  ].join("");
+}
+
+function safeNoteFileName(value: string): string {
+  const sanitized = value
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  return sanitized || "拆分笔记";
+}
+
+function demoteMarkdownHeadings(content: string): string {
+  let inFence = false;
+  return content.split(/\r?\n/).map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      return line;
+    }
+    if (inFence) return line;
+    return line.replace(/^ {0,3}(#{1,5})(\s+)/, (_match, hashes: string, spacing: string) => `${hashes}#${spacing}`);
+  }).join("\n");
 }
 
 export function buildDraftChanges(baseFiles: NoteFile[], files: NoteFile[]): DraftChange[] {
@@ -4089,9 +5360,10 @@ function draftKindLabel(kind: DraftChangeKind): string {
 }
 
 function normalizeModelSettings(settings: ModelConnectionSettings, canRunModel: boolean): ModelConnectionSettings {
+  const model = normalizeAgentModel(settings.model, canRunModel);
   return {
-    provider: canRunModel ? settings.provider || "deepseek" : "offline",
-    model: normalizeAgentModel(settings.model, canRunModel),
+    provider: canRunModel ? providerForAgentModel(model) : "offline",
+    model,
     agentMode: normalizeAgentMode(settings.agentMode),
     deepSeekApiKeyConfigured: settings.deepSeekApiKeyConfigured,
     deepSeekApiKeyStorage: settings.deepSeekApiKeyStorage ?? (settings.deepSeekApiKeyConfigured ? "environment" : "none"),
@@ -4113,6 +5385,7 @@ function estimateAgentContextUsage(
   files: NoteFile[],
   currentPath: string,
   pinnedPaths: string[],
+  attachments: AgentAttachment[],
   model: string
 ): AgentContextUsage {
   const current = files.find((file) => normalizePath(file.path).toLowerCase() === normalizePath(currentPath).toLowerCase());
@@ -4131,6 +5404,10 @@ function estimateAgentContextUsage(
     messageText,
     current?.content.slice(0, 7000) ?? "",
     pinned.map((file) => `Pinned ${file.path}\n${file.content.slice(0, 2200)}`).join("\n\n"),
+    attachments
+      .slice(0, 8)
+      .map((attachment) => `Attachment ${attachment.name}\n${attachment.content.slice(0, 6000)}`)
+      .join("\n\n"),
     vaultOverview
   ].join("\n\n");
   const usedTokens = estimateTokens(contextText);
@@ -4140,7 +5417,7 @@ function estimateAgentContextUsage(
     usedTokens,
     maxTokens,
     percent,
-    label: `上下文：约 ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens；包含聊天、当前笔记、上传笔记和 vault 概览。`
+    label: `上下文：约 ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens；包含聊天、当前笔记、固定笔记、附件提取文本和 vault 概览。`
   };
 }
 
@@ -4153,10 +5430,12 @@ function estimateTokens(text: string): number {
 function contextLimitForModel(model: string): number {
   if (/flash/i.test(model)) return 32_000;
   if (/offline/i.test(model)) return 16_000;
+  if (/^codex:/i.test(model)) return 128_000;
   return 64_000;
 }
 
 function modelShortLabel(model: string): string {
+  if (/^codex:/i.test(model)) return "Codex";
   if (/flash/i.test(model)) return "Flash";
   if (/pro/i.test(model)) return "Pro";
   if (/offline/i.test(model)) return "本地";
@@ -4228,7 +5507,33 @@ export function agentMutationApprovalFor(input: string): AgentMutationApproval {
 
 function normalizeAgentModel(model: string, canRunModel: boolean): string {
   if (!canRunModel) return "offline";
+  if (/^codex:[a-zA-Z0-9._-]+$/.test(model)) return model;
   return AGENT_MODEL_OPTIONS.some((option) => option.value === model) ? model : "deepseek-v4-pro";
+}
+
+function providerForAgentModel(model: string): "codex" | "deepseek" | "offline" {
+  if (model.startsWith("codex:")) return "codex";
+  if (model === "offline") return "offline";
+  return "deepseek";
+}
+
+function codexConnectionDescription(
+  status: CodexConnectionStatus | null,
+  locale: "zh-CN" | "en"
+): string {
+  if (!status) return locale === "en" ? "Checking the local Codex connection..." : "正在检查本机 Codex 连接…";
+  if (status.authenticated) {
+    const plan = status.planType ? ` ${status.planType}` : "";
+    return locale === "en"
+      ? `Connected through the signed-in Codex app${plan}.`
+      : `已通过本机 Codex 登录连接${plan ? `（${plan.trim()}）` : ""}。`;
+  }
+  if (status.available) {
+    return locale === "en"
+      ? "Codex is installed, but no ChatGPT account is signed in."
+      : "已检测到 Codex，但尚未登录 ChatGPT。";
+  }
+  return status.error || (locale === "en" ? "Codex CLI was not detected." : "未检测到 Codex CLI。");
 }
 
 function normalizeAgentMode(mode: string): AgentMode {
@@ -4281,6 +5586,297 @@ function filterNotes(notes: ReturnType<typeof buildVaultIndex>["notes"], query: 
       note.content.toLowerCase().includes(normalized)
     );
   });
+}
+
+export function isCanvasReadOnlySource(sourceKind: SourceKind): boolean {
+  return sourceKind === "structure" || sourceKind === "github-public";
+}
+
+export function shouldShowWorkspaceEmptyState(
+  sourceKind: SourceKind,
+  centerMode: CenterMode,
+  hasCurrentNote: boolean
+): boolean {
+  return sourceKind === "empty" && centerMode !== "canvas" && !hasCurrentNote;
+}
+
+function workspaceCommandItems(
+  t: (source: string) => string,
+  shortcuts: ReturnType<typeof resolveShortcutMap>
+): WorkspaceLauncherItem[] {
+  const items: WorkspaceLauncherItem[] = [
+    {
+      id: "command-palette",
+      kind: "command",
+      label: t("打开命令面板"),
+      detail: t("搜索并执行 App 中的全部命令"),
+      keywords: ["command", "palette", "命令", "面板"]
+    },
+    {
+      id: "quick-switcher",
+      kind: "command",
+      label: t("快速切换"),
+      detail: t("按标题、路径或别名打开笔记"),
+      keywords: ["open", "switch", "note", "打开", "切换", "笔记"]
+    },
+    {
+      id: "search",
+      kind: "command",
+      label: t("全库搜索"),
+      detail: t("搜索正文、标签、任务和属性"),
+      keywords: ["search", "find", "content", "搜索", "查找", "正文"]
+    },
+    {
+      id: "navigate-back",
+      kind: "command",
+      label: t("后退到上一个标签页"),
+      detail: t("在当前打开的工作区标签中向后移动"),
+      keywords: ["back", "previous", "tab", "后退", "上一个"]
+    },
+    {
+      id: "navigate-forward",
+      kind: "command",
+      label: t("前进到下一个标签页"),
+      detail: t("在当前打开的工作区标签中向前移动"),
+      keywords: ["forward", "next", "tab", "前进", "下一个"]
+    },
+    {
+      id: "previous-tab",
+      kind: "command",
+      label: t("切换到左侧标签页"),
+      detail: t("不使用鼠标切换到左边的标签页"),
+      keywords: ["previous", "left", "tab", "左侧", "标签页"]
+    },
+    {
+      id: "next-tab",
+      kind: "command",
+      label: t("切换到右侧标签页"),
+      detail: t("不使用鼠标切换到右边的标签页"),
+      keywords: ["next", "right", "tab", "右侧", "标签页"]
+    },
+    {
+      id: "close-tab",
+      kind: "command",
+      label: t("关闭当前标签页"),
+      detail: t("关闭当前工作区标签并返回相邻标签"),
+      keywords: ["close", "tab", "关闭", "标签页"]
+    },
+    {
+      id: "focus-editor",
+      kind: "command",
+      label: t("聚焦笔记编辑器"),
+      detail: t("把键盘焦点移到当前笔记正文"),
+      keywords: ["focus", "editor", "write", "聚焦", "编辑器"]
+    },
+    {
+      id: "focus-agent",
+      kind: "command",
+      label: t("聚焦智能体输入"),
+      detail: t("展开智能体并把键盘焦点移到输入框"),
+      keywords: ["focus", "agent", "prompt", "聚焦", "智能体"]
+    },
+    {
+      id: "new-note",
+      kind: "command",
+      label: t("新建笔记"),
+      detail: t("创建一篇新的 Markdown 笔记"),
+      keywords: ["new", "create", "note", "新建", "创建"]
+    },
+    {
+      id: "unique-note",
+      kind: "command",
+      label: t("创建唯一笔记"),
+      detail: t("使用本地时间戳创建不会重名的笔记"),
+      keywords: ["unique", "timestamp", "note", "唯一", "时间戳"]
+    },
+    {
+      id: "split-note",
+      kind: "command",
+      label: t("按标题拆分当前笔记"),
+      detail: t("将一个标题章节提取为新笔记，并在原位置保留双链"),
+      keywords: ["split", "extract", "heading", "拆分", "提取", "标题"]
+    },
+    {
+      id: "merge-note",
+      kind: "command",
+      label: t("合并笔记内容"),
+      detail: t("把另一篇笔记复制到当前笔记，并保留来源文档"),
+      keywords: ["merge", "append", "note", "合并", "追加", "保留"]
+    },
+    {
+      id: "daily-note",
+      kind: "command",
+      label: t("打开今日笔记"),
+      detail: t("打开或创建今天的日记"),
+      keywords: ["daily", "today", "journal", "今日", "日记"]
+    },
+    {
+      id: "insert-template",
+      kind: "command",
+      label: t("插入模板"),
+      detail: t("从当前知识库的模板文件夹插入内容"),
+      keywords: ["template", "insert", "模板", "插入"]
+    },
+    {
+      id: "workflow-settings",
+      kind: "command",
+      label: t("配置模板与日记"),
+      detail: t("设置模板文件夹、日记目录、日期格式和日记模板"),
+      keywords: ["template", "daily", "settings", "模板", "日记", "设置"]
+    },
+    {
+      id: "workspaces",
+      kind: "command",
+      label: t("管理工作区布局"),
+      detail: t("保存并恢复侧栏比例、显隐状态和当前主视图"),
+      keywords: ["workspace", "layout", "save", "工作区", "布局", "保存", "恢复"]
+    },
+    {
+      id: "format-converter",
+      kind: "command",
+      label: t("打开格式转换器"),
+      detail: t("批量转换 Roam、Bear 与旧属性 Markdown 格式"),
+      keywords: ["format", "converter", "roam", "bear", "property", "格式", "转换"]
+    },
+    {
+      id: "random-note",
+      kind: "command",
+      label: t("打开随机笔记"),
+      detail: t("从当前知识库随机打开一篇笔记"),
+      keywords: ["random", "note", "随机", "漫游"]
+    },
+    {
+      id: "graph",
+      kind: "command",
+      label: t("打开关系图谱"),
+      detail: t("查看文件关系和知识地形"),
+      keywords: ["graph", "network", "图谱", "关系"]
+    },
+    {
+      id: "canvas",
+      kind: "command",
+      label: t("打开知识画布"),
+      detail: t("在自由画布中连接文本、笔记和分组"),
+      keywords: ["canvas", "board", "画布"]
+    },
+    {
+      id: "bases",
+      kind: "command",
+      label: t("打开属性数据库"),
+      detail: t("按 frontmatter 属性筛选、排序和编辑全部笔记"),
+      keywords: ["bases", "database", "table", "property", "数据库", "表格", "属性"]
+    },
+    {
+      id: "slides",
+      kind: "command",
+      label: t("演示当前笔记"),
+      detail: t("按 --- 分页，以本地幻灯片模式阅读当前笔记"),
+      keywords: ["slides", "presentation", "deck", "幻灯片", "演示", "分页"]
+    },
+    {
+      id: "explorer",
+      kind: "command",
+      label: t("打开资源查询"),
+      detail: t("浏览当前知识库或只读硬盘结构"),
+      keywords: ["explorer", "storage", "files", "资源", "硬盘"]
+    },
+    {
+      id: "trash",
+      kind: "command",
+      label: t("打开回收站"),
+      detail: t("预览、恢复仍在保留期内的删除内容"),
+      keywords: ["trash", "restore", "recycle", "回收站", "恢复"]
+    },
+    {
+      id: "toggle-editor",
+      kind: "command",
+      label: t("切换编辑/阅读模式"),
+      detail: t("切换当前笔记的编辑与预览状态"),
+      keywords: ["edit", "preview", "reading", "编辑", "阅读", "预览"]
+    },
+    {
+      id: "toggle-left",
+      kind: "command",
+      label: t("切换左侧栏"),
+      detail: t("显示或隐藏文件树和标签"),
+      keywords: ["sidebar", "left", "文件树", "左侧栏"]
+    },
+    {
+      id: "toggle-agent",
+      kind: "command",
+      label: t("切换智能体栏"),
+      detail: t("显示或收起 Note Agent"),
+      keywords: ["agent", "assistant", "智能体", "助手"]
+    },
+    {
+      id: "new-agent-session",
+      kind: "command",
+      label: t("新建子智能体会话"),
+      detail: t("创建一个与现有记忆互不干扰的智能体会话"),
+      keywords: ["agent", "session", "new", "智能体", "会话"]
+    },
+    {
+      id: "reset-agent-session",
+      kind: "command",
+      label: t("刷新当前智能体会话"),
+      detail: t("清空当前会话并保留可回溯历史"),
+      keywords: ["agent", "reset", "refresh", "智能体", "刷新"]
+    },
+    {
+      id: "upload-agent-context",
+      kind: "command",
+      label: t("上传智能体上下文"),
+      detail: t("选择图片或文档并加入当前智能体上下文"),
+      keywords: ["agent", "upload", "context", "附件", "上下文"]
+    },
+    {
+      id: "storage",
+      kind: "command",
+      label: t("打开存储空间"),
+      detail: t("打开、创建知识库或读取硬盘结构"),
+      keywords: ["storage", "vault", "folder", "存储", "知识库"]
+    },
+    {
+      id: "toggle-theme",
+      kind: "command",
+      label: t("切换浅色/深色主题"),
+      detail: t("立即切换整个工作台的视觉主题"),
+      keywords: ["theme", "light", "dark", "主题", "浅色", "深色"]
+    },
+    {
+      id: "toggle-language",
+      kind: "command",
+      label: t("切换界面语言"),
+      detail: t("在中文与英文界面之间切换"),
+      keywords: ["language", "locale", "中文", "英文", "语言"]
+    },
+    {
+      id: "shortcut-settings",
+      kind: "command",
+      label: t("打开快捷键设置"),
+      detail: t("查看、修改、清除或恢复全部快捷键"),
+      keywords: ["shortcut", "hotkey", "keyboard", "快捷键", "键盘"]
+    },
+    {
+      id: "settings",
+      kind: "command",
+      label: t("打开应用设置"),
+      detail: t("集中管理外观、文件、图谱、智能体、快捷键和更新"),
+      keywords: ["settings", "preferences", "update", "设置", "更新"]
+    }
+  ];
+  return items.map((item) => ({
+    ...item,
+    shortcut: shortcuts[item.id as ShortcutCommandId]?.[0]
+  }));
+}
+
+function nextUntitledNoteNumber(paths: string[]): number {
+  const occupied = new Set(paths.map((path) => leafName(path).toLowerCase()));
+  for (let number = 1; number < 10000; number += 1) {
+    if (!occupied.has(`未命名笔记 ${number}`)) return number;
+  }
+  return Date.now();
 }
 
 function buildExplorerModel(notes: ReturnType<typeof buildVaultIndex>["notes"], query: string, scope: string): ExplorerModel {
@@ -4338,6 +5934,16 @@ function summarizeTags(tags: string[]): Array<{ name: string; count: number }> {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target.isContentEditable
+  );
 }
 
 function canCreateConceptNote(path: string) {

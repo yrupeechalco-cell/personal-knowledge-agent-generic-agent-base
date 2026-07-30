@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
-import type { NoteFile } from "@knowledge-agent/core";
+import { buildVaultIndex, parseNote, type NoteFile } from "@knowledge-agent/core";
 import {
   buildDraftChanges,
   buildStressGraphNotes,
   agentMutationApprovalFor,
+  adjacentWorkspaceTab,
   createEmptyVault,
   detectInterlinkedVaultRequest,
   detectWordDocumentRequest,
+  extractHeadingSection,
+  formatUniqueNoteStamp,
+  isCanvasReadOnlySource,
+  mergeNoteContents,
+  replaceHeadingSection,
+  resolveIndexedNote,
+  shouldShowWorkspaceEmptyState,
   removeAgentConversationSession,
   selectAutoSaveChanges,
-  updateConversationById
+  updateConversationById,
+  workspaceTabsAfterClose
 } from "./KnowledgeWorkspace";
 
 describe("createEmptyVault", () => {
@@ -21,6 +30,75 @@ describe("createEmptyVault", () => {
     expect(vault.files).toEqual([]);
     expect(vault.safetyManifest.allowed).toEqual([]);
     expect(vault.safetyManifest.excluded).toEqual([]);
+  });
+});
+
+describe("isCanvasReadOnlySource", () => {
+  it("keeps an unconnected blank canvas editable while protecting read-only sources", () => {
+    expect(isCanvasReadOnlySource("empty")).toBe(false);
+    expect(isCanvasReadOnlySource("desktop")).toBe(false);
+    expect(isCanvasReadOnlySource("browser-directory")).toBe(false);
+    expect(isCanvasReadOnlySource("structure")).toBe(true);
+    expect(isCanvasReadOnlySource("github-public")).toBe(true);
+  });
+});
+
+describe("shouldShowWorkspaceEmptyState", () => {
+  it("does not cover a temporary note or blank canvas before a vault is connected", () => {
+    expect(shouldShowWorkspaceEmptyState("empty", "graph", false)).toBe(true);
+    expect(shouldShowWorkspaceEmptyState("empty", "edit", true)).toBe(false);
+    expect(shouldShowWorkspaceEmptyState("empty", "canvas", false)).toBe(false);
+  });
+});
+
+describe("resolveIndexedNote", () => {
+  it("resolves exact paths and unique leaf names for page previews", () => {
+    const index = buildVaultIndex([
+      { path: "Folder/Topic.md", content: "# Topic" },
+      { path: "Other.md", content: "# Other" }
+    ]);
+
+    expect(resolveIndexedNote(index, "Folder/Topic")?.path).toBe("Folder/Topic.md");
+    expect(resolveIndexedNote(index, "Topic")?.path).toBe("Folder/Topic.md");
+  });
+
+  it("does not guess when a leaf name is ambiguous", () => {
+    const index = buildVaultIndex([
+      { path: "A/Topic.md", content: "# A" },
+      { path: "B/Topic.md", content: "# B" }
+    ]);
+
+    expect(resolveIndexedNote(index, "Topic")).toBeUndefined();
+  });
+});
+
+describe("note composition commands", () => {
+  it("extracts a heading with its nested subsections and leaves the next peer heading in place", () => {
+    const content = "# Root\n\n## Topic\nBody\n### Detail\nMore\n## Next\nLater\n";
+    const extraction = extractHeadingSection(content, 3);
+
+    expect(extraction?.title).toBe("Topic");
+    expect(extraction?.content).toBe("## Topic\nBody\n### Detail\nMore");
+    expect(replaceHeadingSection(content, extraction!, "## [[Topic|Topic]]")).toBe(
+      "# Root\n\n## [[Topic|Topic]]\n\n## Next\nLater\n"
+    );
+  });
+
+  it("merges note content below a provenance link without deleting the source", () => {
+    const source = parseNote({
+      path: "Research/Source.md",
+      content: "---\ntags: [evidence]\n---\n# Source\n\nIntro\n\n## Detail\nFact"
+    });
+    const merged = mergeNoteContents("# Target\n\nExisting", source);
+
+    expect(merged).toContain("## Source");
+    expect(merged).toContain("> 合并来源：[[Research/Source|Source]]");
+    expect(merged).toContain("### Detail");
+    expect(merged).not.toContain("tags: [evidence]");
+  });
+
+  it("formats unique note timestamps using local calendar fields", () => {
+    expect(formatUniqueNoteStamp(new Date(2026, 6, 24, 3, 7, 9))).toBe("20260724030709");
   });
 });
 
@@ -143,5 +221,33 @@ describe("agentMutationApprovalFor", () => {
     expect(agentMutationApprovalFor("删除这个笔记文件")).toEqual({ create: false, delete: true, restore: false });
     expect(agentMutationApprovalFor("撤回刚才删除的文档")).toEqual({ create: false, delete: false, restore: true });
     expect(agentMutationApprovalFor("总结当前笔记")).toEqual({ create: false, delete: false, restore: false });
+  });
+});
+
+describe("workspace tab navigation", () => {
+  const tabs = [
+    { id: "graph-overview", mode: "graph" as const },
+    { id: "note:A.md", mode: "edit" as const, path: "A.md" },
+    { id: "vault-explorer", mode: "explorer" as const }
+  ];
+
+  it("moves backward and forward between visible tabs", () => {
+    expect(adjacentWorkspaceTab(tabs, "vault-explorer", -1)).toEqual(tabs[1]);
+    expect(adjacentWorkspaceTab(tabs, "note:A.md", 1)).toEqual(tabs[2]);
+    expect(adjacentWorkspaceTab(tabs, "graph-overview", -1)).toBeNull();
+  });
+
+  it("closes the resource explorer and returns to the preceding tab", () => {
+    expect(workspaceTabsAfterClose(tabs, "vault-explorer")).toEqual({
+      tabs: tabs.slice(0, 2),
+      nextActiveTab: tabs[1]
+    });
+  });
+
+  it("keeps the graph overview as the permanent home tab", () => {
+    expect(workspaceTabsAfterClose(tabs, "graph-overview")).toEqual({
+      tabs,
+      nextActiveTab: null
+    });
   });
 });

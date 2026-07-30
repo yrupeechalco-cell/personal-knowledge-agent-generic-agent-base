@@ -1,4 +1,10 @@
-import { buildNoteTagCloud, tagTargetCount, type ParsedNote, type TagGranularity } from "@knowledge-agent/core";
+import {
+  buildNoteTagCloud,
+  tagTargetCount,
+  type KnowledgeTagKind,
+  type ParsedNote,
+  type TagGranularity
+} from "@knowledge-agent/core";
 import { Check, PencilLine, Plus, Sparkles, Tags, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocalization } from "./localization";
@@ -19,16 +25,26 @@ const GRANULARITY_LABELS: Record<TagGranularity, string> = {
   5: "术语"
 };
 
+const TAG_KIND_FILTERS: Array<{ id: "all" | KnowledgeTagKind; label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "concept", label: "主题概念" },
+  { id: "method", label: "方法" },
+  { id: "entity", label: "对象" },
+  { id: "evidence", label: "证据" }
+];
+
 export function NoteTagCloud({ note, readOnly = false, extracting = false, onExtract, onTagsChange }: NoteTagCloudProps) {
   const { runtime, t } = useLocalization();
   const [granularity, setGranularity] = useState<TagGranularity>(3);
   const [editing, setEditing] = useState(false);
   const [draftTag, setDraftTag] = useState("");
+  const [kindFilter, setKindFilter] = useState<"all" | KnowledgeTagKind>("all");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const cloud = useMemo(() => buildNoteTagCloud(note, 5).filter((item) => item.existing), [note]);
   const visibleLimit = tagTargetCount(granularity, note.content.length);
-  const visible = editing ? cloud : cloud.slice(0, visibleLimit);
+  const visible = (editing ? cloud : cloud.slice(0, visibleLimit))
+    .filter((item) => kindFilter === "all" || item.kind === kindFilter);
 
   function commitTags(tags: string[]) {
     onTagsChange?.(tags);
@@ -60,12 +76,12 @@ export function NoteTagCloud({ note, readOnly = false, extracting = false, onExt
   }
 
   return (
-    <section className="note-tag-cloud" aria-label={t("资料词云")}>
+    <section className="note-tag-cloud" aria-label={t("标签体系")}>
       <header className="note-tag-cloud-toolbar">
         <div className="note-tag-cloud-title">
           <Tags aria-hidden="true" size={14} />
-          <strong>{t("资料词云")}</strong>
-          <span>{runtime(`${visible.length}/${cloud.length} 个标签`)}</span>
+          <strong>{t("标签体系")}</strong>
+          <span>{runtime(`${visible.length}/${cloud.length} 个关键词`)}</span>
         </div>
         <label className="tag-granularity">
           <span>{t("颗粒度")} {granularity} · {t(GRANULARITY_LABELS[granularity])}</span>
@@ -109,6 +125,20 @@ export function NoteTagCloud({ note, readOnly = false, extracting = false, onExt
         </div>
       </header>
 
+      <div className="tag-kind-filters" aria-label={t("标签类型筛选")}>
+        {TAG_KIND_FILTERS.map((filter) => (
+          <button
+            aria-pressed={kindFilter === filter.id}
+            className={kindFilter === filter.id ? `active kind-${filter.id}` : `kind-${filter.id}`}
+            key={filter.id}
+            onClick={() => setKindFilter(filter.id)}
+            type="button"
+          >
+            {t(filter.label)}
+          </button>
+        ))}
+      </div>
+
       <div className="note-tag-cloud-words">
         {visible.map((item) => {
           const size = 11 + item.weight * 10;
@@ -143,6 +173,7 @@ export function NoteTagCloud({ note, readOnly = false, extracting = false, onExt
           );
         })}
         {cloud.length === 0 && !editing ? <span className="tag-cloud-empty">{t("尚无标签，使用 Agent 拆解或手动添加。")}</span> : null}
+        {cloud.length > 0 && visible.length === 0 && !editing ? <span className="tag-cloud-empty">{t("当前类型下没有标签。")}</span> : null}
         {editing ? (
           <span className="tag-cloud-add">
             <input
