@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.7 - 2026-08-08
+
+### Added and improved
+
 - Added a desktop-only Codex provider backed by the signed-in local Codex App Server, including real model discovery, connection state, independent Agent sessions, read-only text conversations, and original-image attachments without storing ChatGPT credentials in the repository.
 - Fixed the desktop startup flash by rendering the Agent panel collapsed from the first frame instead of opening it and hiding it after a delay.
 - Added a two-system document organization model: cross-document keyword tags plus a canonical article profile with summary, document type, category, source, author, entry date, and publication date.
