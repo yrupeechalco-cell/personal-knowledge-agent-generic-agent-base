@@ -6,6 +6,7 @@
 - 上游作者/维护者：**zyronon 及 TypeWords 贡献者**。
 - 上游仓库：<https://github.com/zyronon/TypeWords>
 - 官方站点：<https://typewords.cc>
+- GitHub 核对日期：**2026-09-16**；已搜索并核对原仓库 [zyronon/TypeWords](https://github.com/zyronon/TypeWords)、[上游 README](https://github.com/zyronon/TypeWords/blob/master/README.md) 和 [上游 LICENSE](https://github.com/zyronon/TypeWords/blob/master/LICENSE)。这些链接用于项目身份与许可来源引用，不代表本地快照与上游当前分支逐文件一致。
 - 本次直接来源：用户提供的本地 **`TypeWords-3.0.7`** 文件夹，整理日期 **2026-09-16**。
 - 本仓库存放位置：[third_party/typewords](third_party/typewords)。
 - 原项目说明：[README](third_party/typewords/README.md)、[中文说明](third_party/typewords/docs/README.zh-CN.md)。
