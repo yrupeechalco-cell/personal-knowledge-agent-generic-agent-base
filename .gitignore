@@ -40,3 +40,10 @@ private-vaults/
 .artifacts/
 .tmp/
 .omx/
+.local-plugin-logs/
+typewords-*.log
+third_party/typewords/.nuxt/
+third_party/typewords/.output/
+third_party/typewords/.nitro/
+third_party/typewords/.cache/
+third_party/typewords/.data/

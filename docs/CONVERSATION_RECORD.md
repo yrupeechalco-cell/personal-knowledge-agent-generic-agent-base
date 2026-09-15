@@ -123,3 +123,15 @@ The product continues toward a daily-use personal knowledge application with:
 - GitHub collaboration and publishing capabilities added only after the local workflow is reliable.
 
 This record should be updated when those durable decisions change.
+
+## 2026-09-16: Strengthen the Existing Daily Knowledge Workflow
+
+The immediate priority is the reliability and usability of existing note reading, writing, retrieval, and Agent-assisted organization. New short-drama production and ComfyUI features are deferred.
+
+The local implementation replaces the limited note preview parser with CommonMark/GFM rendering while retaining wikilink previews and outline source positions. Large or destructive Agent replacement edits now produce a review proposal; applying a proposal checks that the note still matches its original content. Local attachment resolution, atomic saves, external-edit conflicts, and version recovery remain separate follow-up work. These changes have not yet been published as a release.
+
+## 2026-09-16: Local English Learning Plugin Trial
+
+The user requested integrating an already installed TypeWords application as a knowledge-workspace plugin. A dedicated English-learning tab embeds the existing loopback service without modifying TypeWords or granting it note tools. The plugin supports disabling, retrying a connection, and opening independently; switching workspace tabs retains its frame. A local launcher starts the two services for evaluation. Study-record synchronization, a general plugin marketplace, and an updated desktop installer are outside this trial.
+
+The user subsequently requested organizing all source code for upload to the existing GitHub repository with clear provenance. The supplied TypeWords source snapshot is now included separately under `third_party/typewords`, preserving its original README, GPL license, and file bytes. A source manifest records all imported files; generated outputs, dependencies, environment files, and logs are excluded. The folder label is documented without inventing an upstream commit or claiming a verified release tag.

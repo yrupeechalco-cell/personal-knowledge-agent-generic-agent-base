@@ -1,4 +1,6 @@
 import type { EditableArticleProfile, NoteGraph, ParsedNote, TagGranularity } from "@knowledge-agent/core";
+import Markdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   createElement,
   useMemo,
@@ -353,52 +355,61 @@ function visibleNoteText(content: string): string {
 }
 
 function renderPreview(content: string, options: InlinePreviewOptions) {
-  const lines = content.split(/\r?\n/);
-  const footnotes = collectFootnotes(content);
-  const previewOptions = { ...options, footnotes };
-  let inFrontmatter = lines[0]?.trim() === "---";
-  const blocks = lines.map((line, index) => {
-    if (index > 0 && inFrontmatter && line.trim() === "---") {
-      inFrontmatter = false;
-      return null;
+  // Keep original source line numbers so the existing outline still locates headings.
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, (frontmatter) => frontmatter.replace(/[^\r\n]/g, ""));
+  const components: Components = {
+    span: ({ node, children, ...props }) => {
+      const wikilink = node?.properties?.["data-wikilink"];
+      return typeof wikilink === "string"
+        ? <>{renderInlineMarkdownNodes(wikilink, options, node?.position?.start.line ?? 0)}</>
+        : <span {...props}>{children}</span>;
+    },
+    a: ({ node: _node, href, children, ...props }) => {
+      const external = /^(?:https?:)?\/\//i.test(href ?? "");
+      return <a {...props} href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined}>{children}</a>;
+    },
+    img: ({ node: _node, src, alt, ...props }) => {
+      // Vault attachment resolution is not yet provided by the adapters.
+      if (!src || !/^https?:\/\//i.test(src)) return <span className="markdown-local-image">{alt || "图片"}（本地附件预览尚未接入）</span>;
+      return <img {...props} src={src} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />;
+    },
+    table: ({ node: _node, children, ...props }) => <div className="markdown-table-scroll"><table {...props}>{children}</table></div>
+  };
+  for (const tag of ["h1", "h2", "h3", "h4", "h5", "h6"] as const) {
+    components[tag] = ({ node, children, ...props }) => createElement(tag, { ...props, "data-outline-line": node?.position?.start.line }, children);
+  }
+  return <Markdown remarkPlugins={[remarkGfm, remarkKnowledgeLinks]} components={components} skipHtml remarkRehypeOptions={{ footnoteLabel: options.t?.("脚注") ?? "脚注" }}>{body}</Markdown>;
+}
+
+interface MarkdownTreeNode {
+  type: string;
+  value?: string;
+  children?: MarkdownTreeNode[];
+  data?: { hName: string; hProperties: Record<string, string> };
+}
+
+function remarkKnowledgeLinks() {
+  return (tree: MarkdownTreeNode) => {
+    function walk(parent: MarkdownTreeNode) {
+      if (!parent.children || ["link", "linkReference", "code", "inlineCode", "html"].includes(parent.type)) return;
+      parent.children = parent.children.flatMap((child) => {
+        if (child.type !== "text" || !child.value) { walk(child); return [child]; }
+        const parts: MarkdownTreeNode[] = [];
+        const pattern = /!?\[\[[^\]\n]+\]\]/g;
+        let cursor = 0;
+        for (const match of child.value.matchAll(pattern)) {
+          const index = match.index!;
+          if (index > cursor) parts.push({ type: "text", value: child.value.slice(cursor, index) });
+          parts.push({ type: "knowledgeLink", data: { hName: "span", hProperties: { "data-wikilink": match[0] } }, children: [{ type: "text", value: match[0] }] });
+          cursor = index + match[0].length;
+        }
+        if (!parts.length) return [child];
+        if (cursor < child.value.length) parts.push({ type: "text", value: child.value.slice(cursor) });
+        return parts;
+      });
     }
-    if (inFrontmatter) return null;
-    if (/^\[\^[^\]]+\]:\s*/.test(line)) return null;
-    const heading = /^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (heading) {
-      return createElement(
-        `h${heading[1].length}`,
-        { key: index, "data-outline-line": index + 1 },
-        renderInlineMarkdownNodes(heading[2], previewOptions, index)
-      );
-    }
-    if (line.startsWith("- ")) {
-      return <li key={index}>{renderInlineMarkdownNodes(line.slice(2), previewOptions, index)}</li>;
-    }
-    if (line.trim() === "") return <br key={index} />;
-    return <p key={index}>{renderInlineMarkdownNodes(line, previewOptions, index)}</p>;
-  });
-  if (footnotes.size === 0) return blocks;
-  blocks.push(
-    <section className="markdown-footnotes" key="footnotes">
-      <h2>{options.t?.("脚注") ?? "脚注"}</h2>
-      <ol>
-        {[...footnotes.entries()].map(([id, text]) => (
-          <li id={`footnote-${safeFootnoteId(id)}`} key={id}>
-            {renderInlineMarkdownNodes(text, { ...previewOptions, footnotes: new Map() }, lines.length + id.length)}
-            <button
-              aria-label={options.t?.("返回脚注引用") ?? "返回脚注引用"}
-              onClick={() => document.querySelector<HTMLElement>(`[data-footnote-ref="${safeFootnoteId(id)}"]`)?.scrollIntoView({ block: "center" })}
-              type="button"
-            >
-              ↩
-            </button>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-  return blocks;
+    walk(tree);
+  };
 }
 
 function renderInlineMarkdownNodes(

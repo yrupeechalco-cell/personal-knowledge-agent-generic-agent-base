@@ -14,7 +14,9 @@
     "@knowledge-agent/core": "0.1.0",
     "lucide-react": "^1.21.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "exports": {
     ".": "./src/index.ts"

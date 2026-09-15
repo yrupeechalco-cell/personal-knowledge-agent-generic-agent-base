@@ -2,6 +2,16 @@
 
 **文档语言：** [简体中文](README.md) | [English](README_EN.md)
 
+## 本地英语学习插件与源码来源
+
+本轮增加 TypeWords 本地插件试用版，以及 Markdown 阅读和 Agent 改写审核修复。
+
+- [插件构建与启动说明](docs/TYPEWORDS_PLUGIN.md)
+- [第三方来源、作者与许可证](THIRD_PARTY_NOTICES.md)
+- [TypeWords 源码快照](third_party/typewords)（来自用户提供的本地目录，保留原项目许可证）
+
+此版本源码尚未代表新的 Windows 安装包发布。
+
 ## 中文介绍
 
 个人知识库 Agent 是一款本地优先的 Windows 知识库应用。它直接使用普通 Markdown 文件夹，把文件管理、知识关系、笔记阅读编辑和 AI Agent 放在同一个三栏工作台中。

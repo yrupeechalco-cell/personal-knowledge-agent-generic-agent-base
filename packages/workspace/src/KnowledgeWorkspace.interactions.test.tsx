@@ -8,8 +8,12 @@ import { createEmptyVault, KnowledgeWorkspace, type KnowledgeWorkspaceAdapter } 
 import { APP_THEME_STORAGE_KEY } from "./themeModel";
 import { SHORTCUT_STORAGE_KEY } from "./shortcutModel";
 
+// These are workspace interaction tests; jsdom cannot create a WebGL context.
+vi.mock("./TagKnowledgeMap", () => ({ TagKnowledgeMap: () => null }));
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   window.localStorage.clear();
   delete document.documentElement.dataset.theme;
   delete document.body.dataset.theme;
@@ -41,6 +45,61 @@ function createLoadedAdapter(): KnowledgeWorkspaceAdapter {
 }
 
 describe("KnowledgeWorkspace navigation", () => {
+  it("opens the English plugin without a vault and retains its iframe across tabs", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({}));
+    const adapter = createEmptyAdapter();
+    render(<KnowledgeWorkspace adapter={adapter} />);
+    await waitFor(() => expect(screen.getAllByText(/请选择一个|未连接|尚未连接/).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "英语学习" }));
+    const frame = await screen.findByTitle("TypeWords 英语学习");
+    expect(adapter.openVault).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "关系图谱" }));
+    expect(frame.closest(".typewords-plugin-host")?.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "英语学习" }));
+    expect(screen.getByTitle("TypeWords 英语学习")).toBe(frame);
+    expect(frame.closest(".typewords-plugin-host")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it.each([false, true])("stages destructive Agent edits and guards stale proposals (stale=%s)", async (stale) => {
+    const files = [{ path: "A.md", content: "# A\n\n" + "需要保留的重要笔记内容。".repeat(30) }];
+    const vault = { files, sourceName: "Review vault", sourceKind: "desktop" as const, safetyManifest: buildSafetyManifest(["A.md"]) };
+    let refresh: Parameters<NonNullable<KnowledgeWorkspaceAdapter["watchVault"]>>[0] | undefined;
+    let turns = 0;
+    const writeChanges = vi.fn(async (_changes: Parameters<NonNullable<KnowledgeWorkspaceAdapter["writeChanges"]>>[0]) => ({ message: "saved" }));
+    const adapter: KnowledgeWorkspaceAdapter = {
+      canOpenVault: true,
+      loadInitialVault: () => vault,
+      openVault: vi.fn(),
+      writeChanges,
+      watchVault: (callback) => { refresh = callback; return () => undefined; },
+      runModel: async () => "ready",
+      runModelTurn: async () => ++turns === 1
+        ? { content: "", toolCalls: [{ id: "edit-1", name: "app_replace_note", arguments: JSON.stringify({ path: "A.md", content: "# A\n\n摘要" }) }] }
+        : { content: "提案已准备好", toolCalls: [] }
+    };
+    render(<KnowledgeWorkspace adapter={adapter} />);
+    await waitFor(() => expect(refresh).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "智能体" }));
+    fireEvent.change(screen.getByLabelText("智能体输入"), { target: { value: "请精简当前笔记" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("提案已准备好");
+    const apply = screen.getByRole("button", { name: "确认应用" });
+    expect(writeChanges).not.toHaveBeenCalled();
+    if (stale) {
+      const { act } = await import("@testing-library/react");
+      act(() => refresh!({ ...vault, files: [{ ...files[0], content: "# A\n\n外部编辑的新内容" }] }, ["A.md"]));
+    }
+    fireEvent.click(apply);
+    if (stale) {
+      expect(screen.getByText("笔记已发生变化，旧提案未应用。请根据最新内容重新生成提案。")).toBeTruthy();
+      expect(writeChanges).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(writeChanges).toHaveBeenCalled());
+      expect(writeChanges.mock.calls[0]?.[0]).toEqual([{ path: "A.md", kind: "modified", before: files[0].content, after: "# A\n\n摘要" }]);
+      expect(screen.queryByRole("button", { name: "确认应用" })).toBeNull();
+    }
+  });
+
   it("starts with the Agent panel collapsed and opens it only on demand", () => {
     const { container } = render(<KnowledgeWorkspace adapter={createEmptyAdapter()} />);
     const shell = container.querySelector(".obsidian-shell");

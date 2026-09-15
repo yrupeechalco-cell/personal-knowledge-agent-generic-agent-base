@@ -1,0 +1,1640 @@
+{
+  "project": "TypeWords",
+  "upstream": "https://github.com/zyronon/TypeWords",
+  "source": "User-provided local folder TypeWords-3.0.7",
+  "importedAt": "2026-09-16",
+  "upstreamCommit": null,
+  "versionVerification": "Folder label only; no Git metadata or package version available.",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "bytes": 223,
+      "sha256": "71affc3dc51049673eb3bd2b037276ca58b79b2900d805267ab825c65662080e"
+    },
+    {
+      "path": ".editorconfig",
+      "bytes": 188,
+      "sha256": "6d6796f174b736bcd7a68999e30d2f19a3719ad92355dcc0cfdfce8a66864553"
+    },
+    {
+      "path": ".github/workflows/docker-release.yml",
+      "bytes": 1761,
+      "sha256": "ca120dcb72f5db1e6583465bbddd8905509db48290d484c1669b87733e7ebebe"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 434,
+      "sha256": "a6ed7dab33a68917b52012ce836aa31fb081007a0af718563ea1d92e9fc7c565"
+    },
+    {
+      "path": ".prettierignore",
+      "bytes": 18,
+      "sha256": "a2409cab6567095750a1a50cbfb5c19cefdb84e10fb48a6cac3f92c4939dfea3"
+    },
+    {
+      "path": ".prettierrc",
+      "bytes": 159,
+      "sha256": "aebf419555cb625dd841e4419558f73c4db088af7d255b1a49fa371173167ef0"
+    },
+    {
+      "path": "app/app.vue",
+      "bytes": 1320,
+      "sha256": "63a5c6edafbaeef1f718ee0a78dea6c325ddabb2f47066a1df9fb3babed27a9c"
+    },
+    {
+      "path": "app/assets/css/anim.scss",
+      "bytes": 1863,
+      "sha256": "29019beb834c8858514b1a2db307c80e3f30f27b8904bb23edfffc9e43c2853b"
+    },
+    {
+      "path": "app/assets/css/main.scss",
+      "bytes": 9144,
+      "sha256": "b3a9501b535c27205eb8c7322e9753f73ccf3e89a39fc380db4969bd91fc44af"
+    },
+    {
+      "path": "app/assets/css/shepherd.css",
+      "bytes": 3448,
+      "sha256": "dfc127ac83349706eb062e4b4aa81d9eadba8148feb54d84a3bd599d1c354742"
+    },
+    {
+      "path": "app/base/Audio.vue",
+      "bytes": 18628,
+      "sha256": "ef4d87cf48799b561b1ed53e587a0ec12ada8f3dc02658bef27ae8c1b5ccbc61"
+    },
+    {
+      "path": "app/base/BaseButton.vue",
+      "bytes": 2854,
+      "sha256": "b27e51858a6ca27d870c9224fdf3bc2f0a5a8562d8a90b8405a13166335badca"
+    },
+    {
+      "path": "app/base/BaseIcon.vue",
+      "bytes": 868,
+      "sha256": "365d46bea7176050f14096cf20dcfaff7f52fcfeff933c43b3cd731a661e680c"
+    },
+    {
+      "path": "app/base/BaseInput.vue",
+      "bytes": 5765,
+      "sha256": "c8c63736180270ac6b196dbc10c0c430458b11fafa83e8c7fe2fe5008706cfb1"
+    },
+    {
+      "path": "app/base/BaseOptionButton.vue",
+      "bytes": 386,
+      "sha256": "d764f4fa3597b79a673b0ec6c8fc173e20b47859b1f58e235db9c20894d5efc0"
+    },
+    {
+      "path": "app/base/BasePage.vue",
+      "bytes": 654,
+      "sha256": "908fe4c9b6fb8f437a5401fc03d14f5822221f472aa6d714ca4b306579b3c318"
+    },
+    {
+      "path": "app/base/Calendar.vue",
+      "bytes": 6752,
+      "sha256": "5b1c71bc5385071c2b64c1c847b5f834805cecddfef275968936cfca57c0069c"
+    },
+    {
+      "path": "app/base/checkbox/Checkbox.vue",
+      "bytes": 1659,
+      "sha256": "626a1e568b6a0b07954d99c29cbe76d7e80521a2a970b13e2dba477aebd3a5de"
+    },
+    {
+      "path": "app/base/Collapse.vue",
+      "bytes": 772,
+      "sha256": "fa5be8bd62d403fe2e26315914d820f61da238acbc2de616dda37b30fec8e807"
+    },
+    {
+      "path": "app/base/dialog/Dialog.vue",
+      "bytes": 6299,
+      "sha256": "bcb41005d4668771462f54dc049ef01d5a394a64137af74b31d64ab835ed3bef"
+    },
+    {
+      "path": "app/base/dialog/index.ts",
+      "bytes": 96,
+      "sha256": "f93d3c8ed757e30b46c423c38e5d2d53fe8529daf4320b710f4826ab75322eef"
+    },
+    {
+      "path": "app/base/dialog/stack.ts",
+      "bytes": 416,
+      "sha256": "ea56942a25880ef1b24e35478c70ba357181f8f48f33c8505e17d5bae8c9f5d5"
+    },
+    {
+      "path": "app/base/form/Form.vue",
+      "bytes": 1206,
+      "sha256": "560263abd2490238c87c9b88483b07ac85db6d727302764065b41279beddb482"
+    },
+    {
+      "path": "app/base/form/FormItem.vue",
+      "bytes": 3000,
+      "sha256": "802a60524dd4988497582ec321eb01930a78fed87c62662732e9be0259cf7d33"
+    },
+    {
+      "path": "app/base/form/types.ts",
+      "bytes": 1726,
+      "sha256": "7ff0c73ded4909eec448da1961badb59ed9dee481b15140027077c4d3321213c"
+    },
+    {
+      "path": "app/base/icon/BackIcon.vue",
+      "bytes": 429,
+      "sha256": "a54459248dee7f06aa06ad30a3f3b2c70b631c245a19a73c7ba301d80ccfe9ce"
+    },
+    {
+      "path": "app/base/icon/Close.vue",
+      "bytes": 619,
+      "sha256": "3499b2318112c0f449877a24a58439adae3ea6c4d73b39143b417521a025a403"
+    },
+    {
+      "path": "app/base/icon/DeleteIcon.vue",
+      "bytes": 89,
+      "sha256": "412066ddbfd1db921523052537af8076fcbe17c182e97bbcc45f33948c92f1ae"
+    },
+    {
+      "path": "app/base/icon/index.ts",
+      "bytes": 214,
+      "sha256": "4d8d34a5a24e3bab908340bfa22c0a4ffbe8f02864f7e3f62446e38f04dcd530"
+    },
+    {
+      "path": "app/base/icon/VolumeIcon.vue",
+      "bytes": 1299,
+      "sha256": "a613d7382b369b094f0aa8ba3581b7ffa165ddc0a0b308fd17fd925b410d792a"
+    },
+    {
+      "path": "app/base/index.ts",
+      "bytes": 1619,
+      "sha256": "dcea8a845114495c6df6b8b783a5673b8804e280b8bbffc960c8c803360e265b"
+    },
+    {
+      "path": "app/base/InputNumber.vue",
+      "bytes": 4964,
+      "sha256": "7b691e5786e496ac65820f8813279f0255c20ef07c027a79137f66d39cdb5032"
+    },
+    {
+      "path": "app/base/Loading.vue",
+      "bytes": 380,
+      "sha256": "0ae441a6939e7b167b0ce37c9f44094034d0f397732236dc88e3cb38d99bf89c"
+    },
+    {
+      "path": "app/base/MiniDialog.vue",
+      "bytes": 1257,
+      "sha256": "e816edfba482d6ce0e1d5e270d0ac003bf5c1820ee5f7edc9c0e7f127e6ac9f6"
+    },
+    {
+      "path": "app/base/OptionButton.vue",
+      "bytes": 1302,
+      "sha256": "773428fa3ddbfa523d8b14d443d0f1cb7ef45fea8aa7e49c332fe324e181d8a8"
+    },
+    {
+      "path": "app/base/Pagination.vue",
+      "bytes": 6759,
+      "sha256": "70e6b0f10865c46f2ef287524f7bfd392c37e26241879dbdf29f9c702606bc4b"
+    },
+    {
+      "path": "app/base/PopConfirm.vue",
+      "bytes": 3993,
+      "sha256": "8e55d5c17595221f309c72ef072e55219136036758b95cb40ab223baf952edf9"
+    },
+    {
+      "path": "app/base/Progress.vue",
+      "bytes": 2479,
+      "sha256": "93ac69d811cf74d5c671dc98b83d33d54f7e018793766d027f7d7b228857e330"
+    },
+    {
+      "path": "app/base/radio/Radio.vue",
+      "bytes": 2409,
+      "sha256": "22d761bc163e455872b030ed4a8342b3fe3fdcba85505909849a31fdf614142a"
+    },
+    {
+      "path": "app/base/radio/RadioGroup.vue",
+      "bytes": 854,
+      "sha256": "0ad453644f912864c6837fbcb4807927327d9d698765fbba67041a3d127bd2de"
+    },
+    {
+      "path": "app/base/select/index.ts",
+      "bytes": 94,
+      "sha256": "d9cc8d442168e6c2c84d67b6da2e67d2ec08402da5922f76b656d8910da49629"
+    },
+    {
+      "path": "app/base/select/Option.vue",
+      "bytes": 1479,
+      "sha256": "6e5ae889335c0496d86d21878efe32251e374dd61f04faeac89bb139630983ff"
+    },
+    {
+      "path": "app/base/select/Select.vue",
+      "bytes": 6276,
+      "sha256": "f76d02e519ad6f482894196f33694f52c30a03da5944066e8c3dc5be1fa5b952"
+    },
+    {
+      "path": "app/base/Slider.vue",
+      "bytes": 11569,
+      "sha256": "1955bbe229429b8cb8526219111465c1a70608a3fe617c438686214319f435fa"
+    },
+    {
+      "path": "app/base/Switch.vue",
+      "bytes": 2937,
+      "sha256": "2d8bcaf21c48fb3ce47564b4f1f81ae5a29555f9d344f5678e827dc6e491694d"
+    },
+    {
+      "path": "app/base/Textarea.vue",
+      "bytes": 3292,
+      "sha256": "b5b83cfea6a685153f54563462bac9fbede5dec6d0c06d2709e7311d743c80f1"
+    },
+    {
+      "path": "app/base/toast/Toast.ts",
+      "bytes": 3215,
+      "sha256": "bf63b9b511003c7c2ac25c3ff9c3eb5c1b54c94dc8a72675fad2d381e3679655"
+    },
+    {
+      "path": "app/base/toast/ToastComponent.vue",
+      "bytes": 4116,
+      "sha256": "c5649790ebeddc3ba89abba7f625f0fdc521706260f9056f1ccf63c85a0f1601"
+    },
+    {
+      "path": "app/base/toast/type.ts",
+      "bytes": 802,
+      "sha256": "2cca0f82a34c4550ced13e5401ca8a069adfcde4ef01f849f2951cbb698e2fa9"
+    },
+    {
+      "path": "app/base/Tooltip.vue",
+      "bytes": 1859,
+      "sha256": "90957d8bd181ce32338d1318ea259c9867c50fc1b333c2be92901e4d65e284db"
+    },
+    {
+      "path": "app/base/tsconfig.json",
+      "bytes": 1026,
+      "sha256": "9e786775b079af289cdbbb496f62de0a5ee2d471859292d92cd52e0abd3e0278"
+    },
+    {
+      "path": "app/base/types.ts",
+      "bytes": 196,
+      "sha256": "d34b99da7f30d4743595fa15a6b5bc3e5b0de82ae39ef55a5b8bcc935183ded0"
+    },
+    {
+      "path": "app/base/UploadButton.vue",
+      "bytes": 1192,
+      "sha256": "9e5a0ceb712c0b446c21fc8621ffec14d2850d256c5b8601f0027653f19099fd"
+    },
+    {
+      "path": "app/components/About.vue",
+      "bytes": 1107,
+      "sha256": "ed28aec6e1976a4ac7145e0fb2182df42ef8bf4993ac18590a24c08649cf24ce"
+    },
+    {
+      "path": "app/components/article/ArticleAudio.vue",
+      "bytes": 3313,
+      "sha256": "af259deaaf07b1a69ebf98d0ffe75497f9338b7277804ab6127aa5b1cb22cd66"
+    },
+    {
+      "path": "app/components/article/EditArticle.vue",
+      "bytes": 30241,
+      "sha256": "d55fd930dcd4d23f25ef9ce6c279b56f1e790b64c8bc7287c18383b36d5c04b8"
+    },
+    {
+      "path": "app/components/article/EditBook.vue",
+      "bytes": 5050,
+      "sha256": "b4f7ff421883a8ec397eca843dfc4f6f38186c7a23bd5c9125c7953a995190a9"
+    },
+    {
+      "path": "app/components/article/EditSingleArticleModal.vue",
+      "bytes": 1078,
+      "sha256": "707eb1fd89d9431888516d3fb16812b9c6ba7c144e7bde9a41c6a079b59c5faf"
+    },
+    {
+      "path": "app/components/article/QuestionForm.vue",
+      "bytes": 2580,
+      "sha256": "647bea190775a522c3d8e5749545904128f85a04be3f8fd95885535cae44002b"
+    },
+    {
+      "path": "app/components/article/QuestionItem.vue",
+      "bytes": 5465,
+      "sha256": "548d283a6dae808678c3aa61609c1b43fccf8fd1bb15eb5c48c6502e1961b4b2"
+    },
+    {
+      "path": "app/components/article/Space.vue",
+      "bytes": 1870,
+      "sha256": "69c38c1ccf8f11705a822a7188fac68a61775fdc0608399e42c0ad8ec1b18763"
+    },
+    {
+      "path": "app/components/article/TypingArticle.vue",
+      "bytes": 30395,
+      "sha256": "af03464205678c7ecfef11ea13288f6456fe83aebc149d2f57ac526f6d14bd83"
+    },
+    {
+      "path": "app/components/article/TypingWord.vue",
+      "bytes": 3401,
+      "sha256": "35bbe4729e9b8a6e4e2c66a6d5e8bb7b549f6e1ac1e2a16ae216d18caff129e1"
+    },
+    {
+      "path": "app/components/BaseTable.vue",
+      "bytes": 9959,
+      "sha256": "b41901e38af4c980cf3725956ad33a4dfc78761f6abd28a6c8f0ae3c53939f46"
+    },
+    {
+      "path": "app/components/Book.vue",
+      "bytes": 3510,
+      "sha256": "eef671106b795f61b6ad5e3a9c9dc58c07131108f3f5ec1f46a67b7a6af4dc2b"
+    },
+    {
+      "path": "app/components/channel-icons/ChannelIcons.vue",
+      "bytes": 2501,
+      "sha256": "3f84b41c6769b049414d7c11d1cd5017092777d4e99a5e6230237aaca3fefe88"
+    },
+    {
+      "path": "app/components/channel-icons/Github.vue",
+      "bytes": 423,
+      "sha256": "016055c08c0c62970f9a2521fc4dde37a3264043f70945c25174c578f8780869"
+    },
+    {
+      "path": "app/components/channel-icons/ShareIcon.vue",
+      "bytes": 10667,
+      "sha256": "4d696b30e45c878499d9faae17aa270ab8bc3d1080ec73be381260d6c9625387"
+    },
+    {
+      "path": "app/components/channel-icons/WeChat.vue",
+      "bytes": 1092,
+      "sha256": "930964757d6e1274c9fcaa86f96c139c876624cd09c3f6af3f75b348ead6c04a"
+    },
+    {
+      "path": "app/components/dialog/BackupGateDialog.vue",
+      "bytes": 1227,
+      "sha256": "627724bbdd651e670540d61cceda544381c0ad094a3e623f46a59c3fe03274c7"
+    },
+    {
+      "path": "app/components/dialog/CollectNotice.vue",
+      "bytes": 3413,
+      "sha256": "13926b91b3d2d79db361ee04bfe05780505d7d3b59d0ef3e0b659f980237e96a"
+    },
+    {
+      "path": "app/components/dialog/ConflictNotice.vue",
+      "bytes": 1328,
+      "sha256": "22d7fcb34870a2f2a405eee760750d723b7abfa176bf54b3015463066ff3bff9"
+    },
+    {
+      "path": "app/components/dialog/ConflictNotice2.vue",
+      "bytes": 789,
+      "sha256": "e82f5476733b66a6812540d08e63eaa2c26cbac405c4890e185fb14e619427a1"
+    },
+    {
+      "path": "app/components/dialog/ConflictNoticeText.vue",
+      "bytes": 2317,
+      "sha256": "10d9f35a537739c93b93e6eafc69a606d03ae4fd4a3c83862287f3b90514a4db"
+    },
+    {
+      "path": "app/components/dialog/IeDialog.vue",
+      "bytes": 1656,
+      "sha256": "ee07aee5d958557130753b2330d0d2937e513b1c653008d0c482fd217f7cd4a8"
+    },
+    {
+      "path": "app/components/dialog/MigrateDialog.vue",
+      "bytes": 3069,
+      "sha256": "22905f2f2cd7263d6101a5ec87a225d6fedca5276bcf57c151ff5edb4106ba59"
+    },
+    {
+      "path": "app/components/EditAbleText.vue",
+      "bytes": 1358,
+      "sha256": "92dbc712420dc284614ff897167d0a8c334710b4b9221a3b428d2a467bc08f55"
+    },
+    {
+      "path": "app/components/Empty.vue",
+      "bytes": 727,
+      "sha256": "c12c44dc2518d2ed45573ddb0abe0da157c8e3330a90f35204367a4956f5982e"
+    },
+    {
+      "path": "app/components/Header.vue",
+      "bytes": 540,
+      "sha256": "f8f9fceb81b5ae04abb2cb3e5c9a17ff1a47d4eb28dcf859804c3590db07a328"
+    },
+    {
+      "path": "app/components/import/WordFailedTable.vue",
+      "bytes": 5158,
+      "sha256": "9a20aa3c94e5e54667e474a5dfe49f5d2a04dceb218b5f2a8276991721ff71c2"
+    },
+    {
+      "path": "app/components/list/ArticleList.vue",
+      "bytes": 4399,
+      "sha256": "3754bf7e36c7955e287e5777bd7e1ffbc5d9503ccec4e40216e3e92dc4761551"
+    },
+    {
+      "path": "app/components/list/BaseList.vue",
+      "bytes": 3308,
+      "sha256": "8db5358b39e3fb957c0435f3e1170bbc5c338c0fedbe265ba1a244dfee0a944b"
+    },
+    {
+      "path": "app/components/list/DictGroup.vue",
+      "bytes": 2074,
+      "sha256": "7e0dfb165583e543b357fe6ee438d0bf5dbf72b3300463765cb04c4dd75e5aeb"
+    },
+    {
+      "path": "app/components/list/DictList.vue",
+      "bytes": 1975,
+      "sha256": "83adc63812db960180b96ced69a1654b2b947f9d3c37ed3cc9d5b76efac4f832"
+    },
+    {
+      "path": "app/components/list/List.vue",
+      "bytes": 4332,
+      "sha256": "d24d31e87ff70262157ac17c88783d3edeb5764568728a4dab7c61324497ac50"
+    },
+    {
+      "path": "app/components/list/WordList.vue",
+      "bytes": 1168,
+      "sha256": "936800e44578041453b3017e148f07ab0ea6ce6be46ce276c0dfc79f1578fa95"
+    },
+    {
+      "path": "app/components/Logo.vue",
+      "bytes": 883,
+      "sha256": "96bb616470b96c5311ab717114835d68ec40e69a3c0fe33b00720d56b35090d0"
+    },
+    {
+      "path": "app/components/MiniProgram.vue",
+      "bytes": 2201,
+      "sha256": "f3c226d9adb783395eadb47d6cee6b5588972d513fcd4e6f61e0fce1e4008f2c"
+    },
+    {
+      "path": "app/components/Panel.vue",
+      "bytes": 1656,
+      "sha256": "a40b9c9da1606a6f92702d00813e62c0f98e755e2f34a60f72e147a0c146ff78"
+    },
+    {
+      "path": "app/components/practice-sentences/TypingArticleWord.vue",
+      "bytes": 4005,
+      "sha256": "054c96d081535baf607af5f1db6b9bd7b669f961ab3a9ba9ff5dab94feaa469e"
+    },
+    {
+      "path": "app/components/practice-sentences/TypingSentence.vue",
+      "bytes": 5504,
+      "sha256": "98962e08fb97e316b6a6545776fba1952f05da9ee6c988c50867b1c35dd9c9c3"
+    },
+    {
+      "path": "app/components/practice-sentences/TypingSentenceItem.vue",
+      "bytes": 12510,
+      "sha256": "1ebd386c1f19eb29bfe3c39ec02db2958cae55ba8747da3d8e7c514dfadcf916"
+    },
+    {
+      "path": "app/components/PracticeLayout.vue",
+      "bytes": 2577,
+      "sha256": "b965e3513b83dc07633e7ccd1c5c689ae0cb80f540e17ffd79bcdb706eb531c7"
+    },
+    {
+      "path": "app/components/ResourceCard.vue",
+      "bytes": 3475,
+      "sha256": "42fce8a9fbdd834df867b904fd67cd5034635a4032ce346c8c57b3dc82f07a34"
+    },
+    {
+      "path": "app/components/setting/ArticleSetting.vue",
+      "bytes": 421,
+      "sha256": "0b762cecca2a17867f247d3274c3fda721406e983b929943597314a0a8b0f602"
+    },
+    {
+      "path": "app/components/setting/CommonSetting.vue",
+      "bytes": 1291,
+      "sha256": "bcbfd87237ab2ff3e424011c3d16e7607047159459621e38600099739368861c"
+    },
+    {
+      "path": "app/components/setting/FsrsSetting.vue",
+      "bytes": 2390,
+      "sha256": "bf018c9d094955b0e05a024f7f1b2f57bb14e366ac1a4525fb51321120edacfb"
+    },
+    {
+      "path": "app/components/setting/Log.vue",
+      "bytes": 8002,
+      "sha256": "566cf9df3bb7cd85f760ef8b4cd6a08eb10c921aed7781a8c4020564b492bd97"
+    },
+    {
+      "path": "app/components/setting/SettingDialog.vue",
+      "bytes": 3562,
+      "sha256": "81d2012d69c221f4e19668459803614e8024e4f7cc267c846a565562f9ced218"
+    },
+    {
+      "path": "app/components/setting/SettingItem.vue",
+      "bytes": 2128,
+      "sha256": "66fd2a522b644c5d23da99cc800408358c85e1b9ee302668324e36651817691b"
+    },
+    {
+      "path": "app/components/setting/SoundMasterControl.vue",
+      "bytes": 2227,
+      "sha256": "6c8c745970c5ef0079dc35069919266f1cca082696728eab9e4f6091a11cea5b"
+    },
+    {
+      "path": "app/components/setting/SoundSetting.vue",
+      "bytes": 8169,
+      "sha256": "37d8fe97d56c5f0a8442f81259600da76ca4d6f7beed63de8e31dccfe8af28d9"
+    },
+    {
+      "path": "app/components/setting/WordSetting.vue",
+      "bytes": 4055,
+      "sha256": "cc0fb22d418fb0e4c74f0d5c1e72789a7aa9d31c63af8a9f4decd40a7cb76cef"
+    },
+    {
+      "path": "app/components/StageProgress.vue",
+      "bytes": 1447,
+      "sha256": "bf23a07b329425d2ac1272847f8f036e09f313c0cbfcf6ad9aacb51f80284adf"
+    },
+    {
+      "path": "app/components/word/ChangeLastPracticeIndexDialog.vue",
+      "bytes": 1407,
+      "sha256": "45587fef8fae6830da5175f0deb1ca198970a9e3c75cf779ad15a57c539b4c35"
+    },
+    {
+      "path": "app/components/word/ClickableEnglishText.vue",
+      "bytes": 1585,
+      "sha256": "50c7881cb5d9f02348276198288a742bdfc4a59b2dd158703781940008ca598b"
+    },
+    {
+      "path": "app/components/word/ClickableWord.vue",
+      "bytes": 619,
+      "sha256": "6edfcbbafd9b978833e60b2cf8066b193d2e1f74b3bbe835bb76d9317a93095c"
+    },
+    {
+      "path": "app/components/word/Footer.vue",
+      "bytes": 9553,
+      "sha256": "8720d9659371f670ddf5c29dd2d1b783bdac27ff41b1675a9044b5e06d6033c4"
+    },
+    {
+      "path": "app/components/word/GroupList.vue",
+      "bytes": 3503,
+      "sha256": "43955539e5e5d8ff4862338328eb32ae0a9bbf5f897f0e0843f0e5abbf32343a"
+    },
+    {
+      "path": "app/components/word/PracticeOnboardingHost.vue",
+      "bytes": 2509,
+      "sha256": "b5712d50f9aa5556c5a33a6d42c648f1df1ad578bef573d302c2b03e94bda59b"
+    },
+    {
+      "path": "app/components/word/PracticeSettingDialog.vue",
+      "bytes": 5963,
+      "sha256": "4f6d6443206412188f49b1f2c5966a14e2c2a00e392cc4dc1f3ad536bd1fa93c"
+    },
+    {
+      "path": "app/components/word/PracticeWordListDialog.vue",
+      "bytes": 1874,
+      "sha256": "a166320cac47d31daeeb6dedeac115b84b52d91487fbdfe123925ce86624e982"
+    },
+    {
+      "path": "app/components/word/PrevAndNextWord.vue",
+      "bytes": 1989,
+      "sha256": "b2d864ade9212a98ea89527a696751f272194752a1569364585c1dab0272ef54"
+    },
+    {
+      "path": "app/components/word/SentenceHightLightWord.vue",
+      "bytes": 668,
+      "sha256": "16f8f8e7c9211aeb0f694b6dcdc903569cdb6050075152356195b8c5227091f2"
+    },
+    {
+      "path": "app/components/word/ShufflePracticeSettingDialog.vue",
+      "bytes": 8936,
+      "sha256": "51dbc4042eb7724a2cf96d2d716373dcaa2d204c5d4f04625a4c9e170ad0a179"
+    },
+    {
+      "path": "app/components/word/Statistics.vue",
+      "bytes": 9487,
+      "sha256": "5c4b50bdcad1fa666a61ce595118b04f32de0ae9dcb25bbe2bb0c8033d957ed0"
+    },
+    {
+      "path": "app/components/word/TranslationList.vue",
+      "bytes": 2578,
+      "sha256": "25186e9ad8ce8bfde9ea68a21e30b32c532a285c3c6870178a38363ff02b9a6c"
+    },
+    {
+      "path": "app/components/word/TypeWord.vue",
+      "bytes": 15165,
+      "sha256": "bf8f2b16daad072475afd4d3f78632beb2288a6fb794236b190d52a9a87fd93b"
+    },
+    {
+      "path": "app/components/word/VolumeSettingMiniDialog.vue",
+      "bytes": 3956,
+      "sha256": "b859141c58b5e1994f83e9f0cb46fae193dd973cb5f93604b855a27b3ade4e90"
+    },
+    {
+      "path": "app/components/word/WordCollectPopover.vue",
+      "bytes": 7820,
+      "sha256": "25cfce29fbb9730323e32d11ca934cf3e8f0ce0e79baa22071ea78bcbdb33483"
+    },
+    {
+      "path": "app/components/word/WordIdentifyPanel.vue",
+      "bytes": 6795,
+      "sha256": "e3caeaac872229bc19f70bd533585b9dc667157268b642d57c15a76cc2931b79"
+    },
+    {
+      "path": "app/components/word/WordItem.vue",
+      "bytes": 2822,
+      "sha256": "f4150f18d79ed8c45fb69b889c3ffeaf8f6dad8e5f163fd0bca543b85da5a35b"
+    },
+    {
+      "path": "app/components/word/WordLookupPopover.vue",
+      "bytes": 5535,
+      "sha256": "6d3a33ebfd6120616f9f91bacc0e5335e21a28a6b990150e310a3c04991c7633"
+    },
+    {
+      "path": "app/components/word/WordMarkPickList.vue",
+      "bytes": 6726,
+      "sha256": "dc7d3f1e7cf9cc4ef4f0c71855127d1f0f3332e5e03bb0f82952552348101e0a"
+    },
+    {
+      "path": "app/components/word/WordMetaPanel.vue",
+      "bytes": 10044,
+      "sha256": "72c6563a7a66d5ace8b928cba056e98ae5b0177173528bde5e0bb484946aae0e"
+    },
+    {
+      "path": "app/components/word/WordTypingCore.vue",
+      "bytes": 6655,
+      "sha256": "0e9a22d09a9359d57460c4725f7011f6a006a2e6c5f1b535788450557c7d694a"
+    },
+    {
+      "path": "app/components.d.ts",
+      "bytes": 19980,
+      "sha256": "c3c63eb01cfedc762a6e5bf855b07092bd6b94f65a54f5538beb793fdb2e54ad"
+    },
+    {
+      "path": "app/composables/practice-sentences/practice-sentence-cache.ts",
+      "bytes": 1841,
+      "sha256": "c1791132b35f0727b009b97f5c67a89927309da9321471023a0f1705c5b43b05"
+    },
+    {
+      "path": "app/composables/practice-sentences/types.ts",
+      "bytes": 566,
+      "sha256": "f86bdedeb979e4a21ddf46daa388ea1db55a13823ed3a35b89db0fc4d0542bf8"
+    },
+    {
+      "path": "app/composables/practice-sentences/usePracticeSentenceInit.ts",
+      "bytes": 2903,
+      "sha256": "fd5fab19643b8a325ec013ed5aab25fca9993d91d0e15fc163772e872cd9aada"
+    },
+    {
+      "path": "app/composables/practice-sentences/usePracticeSentencePersistence.ts",
+      "bytes": 632,
+      "sha256": "1e374f2747eb6c8d8072c5f844e969657839e48b73a27fd8eb5f993b02f3bfa0"
+    },
+    {
+      "path": "app/composables/practice-sentences/usePracticeSentenceSession.ts",
+      "bytes": 3022,
+      "sha256": "71920f011dd1892f2ebb9204b1b2fb696ef71a193dd43ef9353035239da7c3b7"
+    },
+    {
+      "path": "app/composables/practice-sentences/useSentenceTypingFlow.ts",
+      "bytes": 7562,
+      "sha256": "e6fe0773754d866f4edef18d4fc0db03fab704c5ce99daf697f88df4881a013f"
+    },
+    {
+      "path": "app/core/apis/words.ts",
+      "bytes": 193,
+      "sha256": "74f370defe679162df6d160e9177a9ba8c373cce4913a15fd0910f46d9abc1d1"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-audio.ts",
+      "bytes": 749,
+      "sha256": "cbc187f27f174f3080773085ecd6986271b2f98628419552c423195cad53fcd1"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-flow-config.ts",
+      "bytes": 8022,
+      "sha256": "9d9dd283c4ce1ff187fd33afb3dcaa723082198813be260ea3f331cf962712d3"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-flow-display.ts",
+      "bytes": 2860,
+      "sha256": "b6d94fddc7c17677c2eaf5db01647ed36246fc6d61f1df3dd81b8a5ff0179673"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-flow-runtime.ts",
+      "bytes": 12552,
+      "sha256": "47685796c891a5c0633c6eba0dae65eeca1e4114604c32ab559eb66466f2bcfc"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-flow-types.ts",
+      "bytes": 6103,
+      "sha256": "ca2212c873cdf3a223b3bda70f5bb22207114a4c5befd33790bd22497c343dc0"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-question.ts",
+      "bytes": 532,
+      "sha256": "dc4451271f7cc0be0ca55ac0015ce718b304011a2ba2b12021b5d1caf44a3f01"
+    },
+    {
+      "path": "app/core/composables/practice-words/practice-word-session.ts",
+      "bytes": 8472,
+      "sha256": "45bbb0300bc63bac733edfdaa2dbb4dfb673db07b8f3265140c8845e64951bfd"
+    },
+    {
+      "path": "app/core/composables/practice-words/study-task.ts",
+      "bytes": 2047,
+      "sha256": "e3ee4d1aff2b6ff7b69d0659cb3854fac231458d22c4bbe3b5c99432084073c4"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeDisplayPolicy.ts",
+      "bytes": 3350,
+      "sha256": "3f20c2fe8999cf541c201be3e7672112d4d9a1f6aa94c253213a59c194b41ad7"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeIdleTimer.ts",
+      "bytes": 5075,
+      "sha256": "8515f368369a9887554e66515c8246362bf2dc1ef761203771537df72a819a04"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeTypeWordController.ts",
+      "bytes": 2949,
+      "sha256": "0f4c467029ee49618edb652c97f39f3d4c5aee0ab018d9a5acd70f2123ecd457"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeWordNavigator.ts",
+      "bytes": 21013,
+      "sha256": "a19a875bbc6101fd32f53d907028af100a013fb33232c4215064e88798313957"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeWordSession.ts",
+      "bytes": 12639,
+      "sha256": "929db9be13d9735f04f8a8445ea8594579df7cadb471f83c82c369066b12aa1d"
+    },
+    {
+      "path": "app/core/composables/practice-words/usePracticeWordTyping.ts",
+      "bytes": 10269,
+      "sha256": "c7394f92a03537f68baf50e3f2cd3629574c44d962225a15d7270c1cac081505"
+    },
+    {
+      "path": "app/core/composables/practice-words/visible-word-typing.ts",
+      "bytes": 2545,
+      "sha256": "853f2e26b936f087334fb02790c5879fb7ec739fa6e16b78e181a1c0aa344757"
+    },
+    {
+      "path": "app/core/composables/useDataSyncPersistence.ts",
+      "bytes": 20588,
+      "sha256": "5c0bc10e009b43bc53803b6e81dd27ce1e458780bc497fc082cd7372ea35cea1"
+    },
+    {
+      "path": "app/core/composables/useInit.ts",
+      "bytes": 4079,
+      "sha256": "ce3e40a9efd2204e2b54856173fd2d740a5eec0b779fb10385178bdb66a5fc34"
+    },
+    {
+      "path": "app/core/composables/usePracticePersistence.ts",
+      "bytes": 6816,
+      "sha256": "a1929481c9e6c1460c764fdc148a45f1d96f6042abe1dca3067f9d3c0e67b4fc"
+    },
+    {
+      "path": "app/core/composables/useSoundMasterSettings.ts",
+      "bytes": 2616,
+      "sha256": "f84375d2fa206bc5f6576eb1ee51fc98a13de62e642f07d131b04cc78d3ab22b"
+    },
+    {
+      "path": "app/core/composables/useWordPracticeAudio.ts",
+      "bytes": 4002,
+      "sha256": "b2aa322b22a40e9dd4b8ce3be8e6a258bc7c46b4f71ba63e8399e9f2385443fa"
+    },
+    {
+      "path": "app/core/config/env.ts",
+      "bytes": 7535,
+      "sha256": "b49762590e8a955d3b5fcdef0369ed4ac7778b98e2f19c8e0e7d8323059faf39"
+    },
+    {
+      "path": "app/core/hooks/article.ts",
+      "bytes": 15963,
+      "sha256": "130c6e9f50d223c3ccbedbb32c1a4b5d79e4112165613f9de7bda8c8c9a06b1c"
+    },
+    {
+      "path": "app/core/hooks/dict.ts",
+      "bytes": 9624,
+      "sha256": "94cdd07e79241fec2f020e984a798e8b65213a215f34adadcfa893540c86be00"
+    },
+    {
+      "path": "app/core/hooks/event.ts",
+      "bytes": 13382,
+      "sha256": "2a233fd45549e3a8e807e40dbb59fa4d9efed02813224b50d24653db3fb6adce"
+    },
+    {
+      "path": "app/core/hooks/export.ts",
+      "bytes": 2908,
+      "sha256": "043723063100f5788b863f67f483349a9c2391b6bd25b4bba9fbd9b61f2baa91"
+    },
+    {
+      "path": "app/core/hooks/fsrs.ts",
+      "bytes": 880,
+      "sha256": "d8a4fafc67a42aeb3b090f8b7b00af644fe79321a2490337bee2f34a3e1b864b"
+    },
+    {
+      "path": "app/core/hooks/sound.ts",
+      "bytes": 8953,
+      "sha256": "fadea2da15a0ec240babb4a449364b1dd34a4055b3a2c00eb84588fed5871f94"
+    },
+    {
+      "path": "app/core/hooks/theme.ts",
+      "bytes": 2371,
+      "sha256": "a714239c3b0489a6e376279d4fcf8491895e1bcaa90ddb06d74d0d25d00152fb"
+    },
+    {
+      "path": "app/core/hooks/translate.ts",
+      "bytes": 4201,
+      "sha256": "7fc0288dda4979a13857891e4cb17285344fa6193c114dc6ad749ff1060ff714"
+    },
+    {
+      "path": "app/core/hooks/useWordCollectPicker.ts",
+      "bytes": 1391,
+      "sha256": "25994d770d8660c055b06bacda58c47cbea2603465dfea3320811cd5c73c6ba9"
+    },
+    {
+      "path": "app/core/hooks/useWordLookup.ts",
+      "bytes": 1670,
+      "sha256": "6464c0368d7cf72165c252817d82d659e7c8f6b335a7dfd26bad6a8f9437b6b4"
+    },
+    {
+      "path": "app/core/index.ts",
+      "bytes": 48,
+      "sha256": "9d29e7d9e6f685fb57b92a647ee7e51c2d8fd2669c38e4061d69c319561319c8"
+    },
+    {
+      "path": "app/core/stores/base.ts",
+      "bytes": 8887,
+      "sha256": "660b23b44c05ed00df360ce6ef5d2f1e6e727ff5b4bcde405998ba72154d9141"
+    },
+    {
+      "path": "app/core/stores/index.ts",
+      "bytes": 102,
+      "sha256": "82a963618451652b06383a2f9c8097c76a6c3364e88062e42276d39456a1505b"
+    },
+    {
+      "path": "app/core/stores/practice.ts",
+      "bytes": 2414,
+      "sha256": "576fdae8c5f41066c4c748d191c26b1bd47b5d3f44b61bd0bc29dd32b6b4d0e1"
+    },
+    {
+      "path": "app/core/stores/runtime.ts",
+      "bytes": 1231,
+      "sha256": "255e947ea0ae297a6c1a15abd2c455607e5b20b389115caf75f536149d278d61"
+    },
+    {
+      "path": "app/core/stores/setting.ts",
+      "bytes": 6403,
+      "sha256": "fe669df1f80176d4d954cde90af31c4d7a5c0d10484ecf501647d9b015d01f2e"
+    },
+    {
+      "path": "app/core/types/enum.ts",
+      "bytes": 4068,
+      "sha256": "232c21f1a7c22f0409a875edde4443418e5676f834888bac3e0ee5ba5fdcad2f"
+    },
+    {
+      "path": "app/core/types/func.ts",
+      "bytes": 2009,
+      "sha256": "f231fca4bdb926c4c9eda9836adb7190e0354336c74318d2fe397fccd42f2928"
+    },
+    {
+      "path": "app/core/types/index.ts",
+      "bytes": 70,
+      "sha256": "83dd7e0541071b83abcbf9f72481d7ea04ba433bda25ab3de2f786101bfcd547"
+    },
+    {
+      "path": "app/core/types/types.ts",
+      "bytes": 4886,
+      "sha256": "6f0caa2f9a53e50bcf6130bdf412e1f21a6f7154d0999432178ad01651a006dc"
+    },
+    {
+      "path": "app/core/utils/base-url.ts",
+      "bytes": 3097,
+      "sha256": "7a94b99972daabe3e7179cb2369e2c55fa65c42a28a2691319abdd081a565901"
+    },
+    {
+      "path": "app/core/utils/cache.ts",
+      "bytes": 10341,
+      "sha256": "a405fe8e2b890de6adf8ad5ce523e9d88e2feee225cf020b931e52f8d9ab680a"
+    },
+    {
+      "path": "app/core/utils/eventBus.ts",
+      "bytes": 1101,
+      "sha256": "417caee4cd2d3e0ffa95a08f68a38da86874c447c78899b8539df53f4bea46a8"
+    },
+    {
+      "path": "app/core/utils/http.ts",
+      "bytes": 2187,
+      "sha256": "73a108bba19362cfd3e96b2fdee7f5a41c91d7347a118ce830c2d6d66c3dc62d"
+    },
+    {
+      "path": "app/core/utils/index.ts",
+      "bytes": 26391,
+      "sha256": "489e30cc9d187a051d12d02734bd246f7749b47b7e176fee6997b12f17c52b07"
+    },
+    {
+      "path": "app/core/utils/MessageBox.tsx",
+      "bytes": 1897,
+      "sha256": "27bd053ffaa21b8000584e61d38ae2262819f05c98a4ec7c8575f1b95a159002"
+    },
+    {
+      "path": "app/core/utils/rsa-password.ts",
+      "bytes": 979,
+      "sha256": "9c29b55d235a3da14aa6e35e4f007b717289c8f58692ee4df234c42c2aeaaf89"
+    },
+    {
+      "path": "app/core/utils/supabase.ts",
+      "bytes": 4039,
+      "sha256": "c818f9a51171ac9c4660e09a675297e1a46ad75ca39a21e28e7755fec5bb1c3c"
+    },
+    {
+      "path": "app/core/utils/word-test.ts",
+      "bytes": 3864,
+      "sha256": "ee1170d2538d3647a2a603fb495beddf338f235bd619cb2535d5eb6ef630e294"
+    },
+    {
+      "path": "app/core/utils/wordLookup.ts",
+      "bytes": 3047,
+      "sha256": "ef44cccf0b9241a7230aac2d395638ec01ba61ee94cba05f52fa3e019da8ea39"
+    },
+    {
+      "path": "app/error.vue",
+      "bytes": 335,
+      "sha256": "90c90357f2320711695ae1975af1369b3a61193d1894f3dece90853f84e805ff"
+    },
+    {
+      "path": "app/global.d.ts",
+      "bytes": 496,
+      "sha256": "bfab06767fc3ad123f7bb30a76d74084a4b4de4b4ee9444af9d259a489119a9c"
+    },
+    {
+      "path": "app/layouts/default.vue",
+      "bytes": 10210,
+      "sha256": "3e2d8ef15b7bf9f5dff3cea4a10fd5e74bd5ec715c0995086fe8501e2820fde1"
+    },
+    {
+      "path": "app/layouts/empty.vue",
+      "bytes": 76,
+      "sha256": "630feb07b4c119c2fb84db6cbbfca61b451dc485b3a88dc3bb004f945d75d567"
+    },
+    {
+      "path": "app/libs/index.ts",
+      "bytes": 146,
+      "sha256": "5a7b531090ef97136f771174342a469cb47b69915254cf99ecd05d1b322a775e"
+    },
+    {
+      "path": "app/libs/qs.ts",
+      "bytes": 219,
+      "sha256": "6473fa5b19055b6b991e8ff97ed8400f38e87cf3b4a787b1f3afb7406691a506"
+    },
+    {
+      "path": "app/libs/translate/baidu.ts",
+      "bytes": 3268,
+      "sha256": "d19b670fcbf07dfc6572e83b5fa9268c3733d757c470489dd785ee4ada761791"
+    },
+    {
+      "path": "app/libs/translate/languages/index.ts",
+      "bytes": 56,
+      "sha256": "f5bc1ccc2f2c28e4a8dc2262bcbeaca3cffcbd0d3d4fa5c1e3c7e6603e273ea0"
+    },
+    {
+      "path": "app/libs/translate/languages/languages.ts",
+      "bytes": 1136,
+      "sha256": "bf24ed0faa894a50ee5e635f539ba26468f71bee478be436d916cc9b8cd9aa24"
+    },
+    {
+      "path": "app/libs/translate/languages/locales.ts",
+      "bytes": 98,
+      "sha256": "662aeabe0509c0f5ef3082f1f853f0845292cac3906363c02be6c927347984f9"
+    },
+    {
+      "path": "app/libs/translate/README.md",
+      "bytes": 88,
+      "sha256": "0447d1a339436ebe793e1b277208bd64fe97363e242f94eb051c9c8832a9ba27"
+    },
+    {
+      "path": "app/libs/translate/translator/index.ts",
+      "bytes": 84,
+      "sha256": "edbb149e7592b0ffc780bc2d14c4073a6b93f8477fba69f178d45f3ad868a539"
+    },
+    {
+      "path": "app/libs/translate/translator/translator.ts",
+      "bytes": 2076,
+      "sha256": "29f1e5b0884bb25950c484b43596cbb40c9444599c7bc8eb2b1c2277f43fb3b1"
+    },
+    {
+      "path": "app/libs/translate/translator/type.ts",
+      "bytes": 921,
+      "sha256": "33087c7ae488fb03db46627653ba41fa206ca33146bc85e41dea7ad54f4d2228"
+    },
+    {
+      "path": "app/pages/(articles)/articles.vue",
+      "bytes": 12326,
+      "sha256": "e07431a9915c699cd848c9c2568f9d852720c7d83546b3aad0ebe63c2ad5e8a6"
+    },
+    {
+      "path": "app/pages/(articles)/book/[id].vue",
+      "bytes": 24049,
+      "sha256": "8d9342f56e92b8bcd68c08d27138348c2a544cd407a0ebe74188ff93796a25ce"
+    },
+    {
+      "path": "app/pages/(articles)/book-list.vue",
+      "bytes": 3062,
+      "sha256": "8159e71bcc3d70e7e36fe3b962151bceb3ea52377d4a70472ef770c25d1434d0"
+    },
+    {
+      "path": "app/pages/(articles)/practice-articles/[id].vue",
+      "bytes": 21495,
+      "sha256": "6027cd5e3e36deb182ed38249d92a3c3f2c71631b5d4fa09226850325bcb5066"
+    },
+    {
+      "path": "app/pages/(words)/dict-list.vue",
+      "bytes": 5979,
+      "sha256": "0bfcf42b8cf445d13b6a242fff1f720029fcb25e767e122395f4d3abfce45285"
+    },
+    {
+      "path": "app/pages/(words)/dict.vue",
+      "bytes": 28638,
+      "sha256": "75a0747184bdf24953daad581516f92e7a3f2c7131793d7cfaac6c5e953bd61c"
+    },
+    {
+      "path": "app/pages/(words)/practice-words/[id].vue",
+      "bytes": 23134,
+      "sha256": "ab8e82099058a5af879e8789df2e1721157bd536446f14c31d3a57227e1f819d"
+    },
+    {
+      "path": "app/pages/(words)/words-test/[id].vue",
+      "bytes": 6038,
+      "sha256": "651a305b9c21a694b8bfd77f8cfe64d80e8adc429f3d3a78168ec01a745703ae"
+    },
+    {
+      "path": "app/pages/(words)/words.vue",
+      "bytes": 33447,
+      "sha256": "216d742e8090a748f3f149f3679e4b3b7010a0fa0aecaa7357f0a4f04d442cf0"
+    },
+    {
+      "path": "app/pages/about.vue",
+      "bytes": 709,
+      "sha256": "889e4a2c0f848b29cec7219b72bae596f2f89bfcd19f6ea3479eb663869ca205"
+    },
+    {
+      "path": "app/pages/doc.vue",
+      "bytes": 15555,
+      "sha256": "91c84839a379ffbc613653705922306bc48211c21c07e419c5bd91e4814391d8"
+    },
+    {
+      "path": "app/pages/feedback.vue",
+      "bytes": 615,
+      "sha256": "a6e4acc63701c9065a6c3de94efb6bb9a90921de7c63133c5f114335f7dcf634"
+    },
+    {
+      "path": "app/pages/help.vue",
+      "bytes": 3685,
+      "sha256": "13bfdfb5bf754713ba2993a06237d4431413592c2b372973eebcb45123c16af9"
+    },
+    {
+      "path": "app/pages/index.vue",
+      "bytes": 26016,
+      "sha256": "b03335e8632545855f7e4060d7a7fff3fee07d879d794569e2617a963a92b41f"
+    },
+    {
+      "path": "app/pages/setting.vue",
+      "bytes": 32960,
+      "sha256": "cd574c204c8f13e0d2740e4666bd169a90358061c18108dc7cb460d6a0cf4503"
+    },
+    {
+      "path": "app/plugins/01.error.client.ts",
+      "bytes": 965,
+      "sha256": "9e9c04d79987714a697fe4a65fcc921d9515c14b623d78c18ea093918656896a"
+    },
+    {
+      "path": "app/plugins/02.init.client.ts",
+      "bytes": 1822,
+      "sha256": "bf6793150c3bf926920f8402eee1f6887790e19f2b72ceb7e2496dfea3d7dee5"
+    },
+    {
+      "path": "app/plugins/03.directives.client.ts",
+      "bytes": 1663,
+      "sha256": "686190a47a51c1da958c14d50b7e6f0ad7f04e6c5ffecfa4d18f2b3504bb15c5"
+    },
+    {
+      "path": "app/plugins/04.directives.server.ts",
+      "bytes": 167,
+      "sha256": "203a85d3d27907e46948aa3be8fed0dc00967f9b1c78b7e6e25b328fe4989d60"
+    },
+    {
+      "path": "app/router.options.ts",
+      "bytes": 287,
+      "sha256": "520edb595a716aa40df8fd12a8af05b34f917593aad210c7cabe599468c8882e"
+    },
+    {
+      "path": "docker-compose.yml",
+      "bytes": 539,
+      "sha256": "7368191d2496abe777286c1e4533a43c4013097f8f30ae74c93fe59bfc704921"
+    },
+    {
+      "path": "Dockerfile",
+      "bytes": 531,
+      "sha256": "1663f6e15cb2bb5e8475b77cbb0f809b918b25c3160a6f4d558c76528283c7e6"
+    },
+    {
+      "path": "docs/CONTRIBUTING.md",
+      "bytes": 3028,
+      "sha256": "598327bd9fd68151595850f9130e870d6936b635b7a24c94f9eed8107a378082"
+    },
+    {
+      "path": "docs/README.de.md",
+      "bytes": 4871,
+      "sha256": "505f79ed17c5150cb4358431d94c38c9a81460086ab5ce75066e45523bf83fe3"
+    },
+    {
+      "path": "docs/README.es.md",
+      "bytes": 4913,
+      "sha256": "618d8bbf943b86f52092fe5f7cf8e592d9b4d7a99c43857a3555fe052443fdf7"
+    },
+    {
+      "path": "docs/README.fr.md",
+      "bytes": 5075,
+      "sha256": "f491c9aed3e0ba71cfc2e3323d1c1a94ee63ba8c1c62a2075bc42ff7356f3790"
+    },
+    {
+      "path": "docs/README.id.md",
+      "bytes": 4552,
+      "sha256": "9f5db06e2cc6abf902379c2a3bceaa3e276129575eb94160e17b617850797c55"
+    },
+    {
+      "path": "docs/README.ja.md",
+      "bytes": 5110,
+      "sha256": "4236476bdfe6477ea9bda90d36defa7e71e7ee4cd65ced4599cd23c85e1364b2"
+    },
+    {
+      "path": "docs/README.ko.md",
+      "bytes": 4733,
+      "sha256": "b025c6cf1b4da51fe4af68a89517902d2b42b3156bb841418a00af0f5ac6c8a6"
+    },
+    {
+      "path": "docs/README.pt.md",
+      "bytes": 4869,
+      "sha256": "f2d60c512162afb9874f4cb33c676b5af6e44324aae3c47fed6f8291fcbfeb77"
+    },
+    {
+      "path": "docs/README.ru.md",
+      "bytes": 7379,
+      "sha256": "7a641d9afc99e119d585fe107466081711ca569c06d8c881da9d5bc71547c975"
+    },
+    {
+      "path": "docs/README.th.md",
+      "bytes": 8644,
+      "sha256": "82a99b270d7c850f77df79298ba69b4b6e521e1e956c3a54709c257dad0601d9"
+    },
+    {
+      "path": "docs/README.uk.md",
+      "bytes": 7127,
+      "sha256": "07f575456af584b74af8d782b99cf16f3d3916b291177f641e5d5d778d2c252d"
+    },
+    {
+      "path": "docs/README.vi.md",
+      "bytes": 5225,
+      "sha256": "a038a25d48b50c7b82625ee9da97d67f41d907f91a55573443d07d5625166c2f"
+    },
+    {
+      "path": "docs/README.zh-CN.md",
+      "bytes": 4806,
+      "sha256": "dd3f39166a0c2a66e09d1afc4af22f60da3b9631bcb1b674a19fb4ada8b00b3a"
+    },
+    {
+      "path": "docs/README.zh-TW.md",
+      "bytes": 3907,
+      "sha256": "9d7bf676ceab7810ad1c3ef1bc4ae9806bbb8ce1b124f57295a9d86c161142d1"
+    },
+    {
+      "path": "gulpfile.js",
+      "bytes": 1999,
+      "sha256": "7c913394d3da7fafba477887573be1cc77ef02ed7f53a7678b84c14694b827a1"
+    },
+    {
+      "path": "i18n/i18n.xlsx",
+      "bytes": 334733,
+      "sha256": "fa7cd802884c0f6e7a76625e131ced27d35944f910aaf207a22950b477252db9"
+    },
+    {
+      "path": "i18n/locales/de.json",
+      "bytes": 53565,
+      "sha256": "7478d14db761becfcb55a7b2db2d7751c86c0ecca1c1f1b8e2ae9ed2f8e129e5"
+    },
+    {
+      "path": "i18n/locales/en.json",
+      "bytes": 47495,
+      "sha256": "82dedbdd705f562e882e6a472e9ec52b75fda4fab2e4d8ab25500d1ad612fca2"
+    },
+    {
+      "path": "i18n/locales/es.json",
+      "bytes": 53495,
+      "sha256": "1091528bdddc5e8ad819250c82e5b5a740fc74b0b31d8ef6bcb31bf6300dc98a"
+    },
+    {
+      "path": "i18n/locales/fr.json",
+      "bytes": 55565,
+      "sha256": "8a18ba412cdf4bc1739dd007d0de992056c51ae68923bf6dc335712d63fb7db0"
+    },
+    {
+      "path": "i18n/locales/id.json",
+      "bytes": 49044,
+      "sha256": "4b261d03dc871fb5859bdbdffbb1f0ff0858badfa2335440ca7b9f092ef2ce33"
+    },
+    {
+      "path": "i18n/locales/ja.json",
+      "bytes": 56266,
+      "sha256": "3ec3d311784ffd80e0f69155ba5a8cc843c7e3b535902c50d88108da4d1a744c"
+    },
+    {
+      "path": "i18n/locales/ko.json",
+      "bytes": 52417,
+      "sha256": "16a51b9dd2e3aef9b7e2e3b4e146b04b2ed9ab2957367e800990254867c092c0"
+    },
+    {
+      "path": "i18n/locales/pt.json",
+      "bytes": 53180,
+      "sha256": "83cb011fcd9bf8d30bfccfd4cf99291fb24d9dcab3d09fcabe4d1164a022e3ed"
+    },
+    {
+      "path": "i18n/locales/ru.json",
+      "bytes": 77883,
+      "sha256": "7c65a82d722b65aa2476a7e6ae32c32bd210760c10928bb240b6d94a0090831f"
+    },
+    {
+      "path": "i18n/locales/th.json",
+      "bytes": 91492,
+      "sha256": "8d1cf00d140cdb9a6fd22db84b36936057f9a1e9d098068031b647d708369b39"
+    },
+    {
+      "path": "i18n/locales/tw.json",
+      "bytes": 42719,
+      "sha256": "e405e6f0dcb5f299e534ca49395e0d717d5a52779dfd620f06b7a0d6e2fb3ddb"
+    },
+    {
+      "path": "i18n/locales/uk.json",
+      "bytes": 76297,
+      "sha256": "1318ee0cfd4ac36a33e1f343aeee72a1e3cd0bde22c47fbd309afb5f9b8fb131"
+    },
+    {
+      "path": "i18n/locales/vi.json",
+      "bytes": 57011,
+      "sha256": "e8c52c148f09d0e60df72afa6ae0dc04f6258bfbbfe32888542b9a8ae4fab210"
+    },
+    {
+      "path": "i18n/locales/zh.json",
+      "bytes": 42610,
+      "sha256": "c21f462ff49599054fd81c179895c6010f6d74e118e2026a3b9518fe34e2391e"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 35148,
+      "sha256": "8b1ba204bb69a0ade2bfcf65ef294a920f6bb361b317dba43c7ef29d96332b9b"
+    },
+    {
+      "path": "nuxt.config.ts",
+      "bytes": 5432,
+      "sha256": "73ecf528223edd28ae5cc6a4efdd4a542fff782115713851ac1e8744e07112b1"
+    },
+    {
+      "path": "package.json",
+      "bytes": 3092,
+      "sha256": "cc08f568b5e44e1108130c2f1e140a8925ed6eb32447daa8983615dda8727676"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "bytes": 649690,
+      "sha256": "97323910a1f19036f59f47858090cd906f3494f370cecd9492eeabe9471991ca"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "bytes": 69,
+      "sha256": "75192432155921d98d54cb9279277e19eb130063b3ac0c6a2786814e6245d51b"
+    },
+    {
+      "path": "public/_redirects",
+      "bytes": 20,
+      "sha256": "59c1d6c788c85ae536fb7688a90d9c4211fe99ecdc69e840395b323e15de1640"
+    },
+    {
+      "path": "public/dicts/en/article/NCE_1.json",
+      "bytes": 10748,
+      "sha256": "4f8f9860ee6e3bcf1ea333696f209498993036f5ed21f8e9353b735520694697"
+    },
+    {
+      "path": "public/dicts/en/word/CET4_T.json",
+      "bytes": 4487640,
+      "sha256": "6cff081aeabb1b76b9ad7ddd61c730f048c425d8fe355a8bec24b21dd0d781e9"
+    },
+    {
+      "path": "public/favicon.ico",
+      "bytes": 4309,
+      "sha256": "bbbf0159e2cf9d583ecd856a742bb5f0cc998ec5e7996d2429d00a016cb1deb2"
+    },
+    {
+      "path": "public/imgs/articles.png",
+      "bytes": 322198,
+      "sha256": "b4fd5582e06e44be8a73b838616542569b0b596983bb02cb1434f2b5df9979d7"
+    },
+    {
+      "path": "public/imgs/channel/qq.jpg",
+      "bytes": 187436,
+      "sha256": "1937df231d709b898c37d8c13b7fc599d0932b5e7955cc68b7a15e9ce44fc759"
+    },
+    {
+      "path": "public/imgs/channel/wechat.png",
+      "bytes": 194325,
+      "sha256": "1bb49c8af2497ece93c2460593e5515c0d762d8e19478efc42d95a01f72df558"
+    },
+    {
+      "path": "public/imgs/channel/xhs.png",
+      "bytes": 7797,
+      "sha256": "6545d0ec2a24bba3e99786bbc3601ea389fc7d3ebd4286c8f48cd76026059f80"
+    },
+    {
+      "path": "public/imgs/covers/nce-1.png",
+      "bytes": 58361,
+      "sha256": "6e8cd6f9243bdb98fd7e7a16511ba47c6e71e1248b8143062d7ccff71f12ebea"
+    },
+    {
+      "path": "public/imgs/covers/nce-2.png",
+      "bytes": 154179,
+      "sha256": "0c03ac6fcd532bc5a27737b28f1ac191f819e632719db121da9a86e531082c74"
+    },
+    {
+      "path": "public/imgs/covers/nce-3.png",
+      "bytes": 165224,
+      "sha256": "79c5ec4b51ce45d39a6f6d76f305bd7c1397317fd98d9e53dedde0704c9eb2f5"
+    },
+    {
+      "path": "public/imgs/covers/nce-4.png",
+      "bytes": 155793,
+      "sha256": "f6e30ffcd981abeeabf928a9ffaf4b99434ea9c17c99364a2dfb1248cf92bb63"
+    },
+    {
+      "path": "public/imgs/empty.svg",
+      "bytes": 2550,
+      "sha256": "12124d4cc76fc70ec099abdc75bb1fce9bd32bac3aa745ee3a132291bd1fe3b2"
+    },
+    {
+      "path": "public/imgs/logo/logo-text-black.png",
+      "bytes": 1433,
+      "sha256": "176432a537e5cbaba0394e012ec3af61b4e9522b74df84ee282ce6bffa486594"
+    },
+    {
+      "path": "public/imgs/logo/logo-text-white.png",
+      "bytes": 1434,
+      "sha256": "acb973cd7f62d736fef9dbf272548c4d0e340d3c227e7514610a44257187e322"
+    },
+    {
+      "path": "public/imgs/mini.png",
+      "bytes": 37562,
+      "sha256": "c0fc99a1ed478c10871a62bd39c1dc76f413a3927628dec00330e21ef3437169"
+    },
+    {
+      "path": "public/imgs/share/bg/0.jpg",
+      "bytes": 15224,
+      "sha256": "42763168a7e1ecb01eb8a1025a1a2e757b1183b24081e3a4128b56fa4b50e724"
+    },
+    {
+      "path": "public/imgs/share/bg/1.jpg",
+      "bytes": 12832,
+      "sha256": "a0f41d2718b70b916690402f0a0c8961bd694ef2cee327898779b8c6025849ef"
+    },
+    {
+      "path": "public/imgs/share/bg/2.jpg",
+      "bytes": 9400,
+      "sha256": "b6a7112b5997b830cca0939d2125c35c7190ffe2b739821fdfdb348610ad0c6a"
+    },
+    {
+      "path": "public/imgs/share/bg/3.jpg",
+      "bytes": 6824,
+      "sha256": "b3e6887d80634067fba9447e23510a0b2ba580318b0c4d713913220ff4bcd027"
+    },
+    {
+      "path": "public/imgs/share/bg/4.jpg",
+      "bytes": 15769,
+      "sha256": "14c5c6277d81e3bee51b8b682f7d53a60c71c20fcc341e5ee8e3b2cbf01967ea"
+    },
+    {
+      "path": "public/imgs/share/bg/5.jpg",
+      "bytes": 7722,
+      "sha256": "302d432bf356c4fb88df1745569e27bb8d4530a1de9e1d83758e16670b12ac3f"
+    },
+    {
+      "path": "public/imgs/share/bg/6.jpg",
+      "bytes": 12669,
+      "sha256": "cda95a0d5da3dcc11d091acd11535ec9aed3d0b819a28a2af14c030b8ca38014"
+    },
+    {
+      "path": "public/imgs/share/bg/7.jpg",
+      "bytes": 17647,
+      "sha256": "1770a5221b782837f922940463a13f036ba49665206524a5df9159c3b97fb1c7"
+    },
+    {
+      "path": "public/imgs/share/bg/8.jpg",
+      "bytes": 14984,
+      "sha256": "bcc5b3bb1fa1c46054fd0c6ac38fb7becd0afabc71d71ea8e7c9166ba94f67af"
+    },
+    {
+      "path": "public/imgs/share/bg/9.jpg",
+      "bytes": 13238,
+      "sha256": "8c83c0bc20ef9d5c734ac45e91cb75950e125d4d512bf2555f63048b8760efb9"
+    },
+    {
+      "path": "public/imgs/share/qr.png",
+      "bytes": 547,
+      "sha256": "77ed4883e697f5480374b8555ed790fba8a5b3a57c4867a979744e1c27240161"
+    },
+    {
+      "path": "public/imgs/words.png",
+      "bytes": 262144,
+      "sha256": "69faceb43287fddd0d05e18574272de70040d6accad9a52a7937e16213712a62"
+    },
+    {
+      "path": "public/libs/51.js",
+      "bytes": 35843,
+      "sha256": "f4e5aaf10f941a4665c4b6ede5af05319de19d94e2594bdcb1cf63be65b3606c"
+    },
+    {
+      "path": "public/libs/axios.min.js",
+      "bytes": 54249,
+      "sha256": "cca98387e18456f3f13c5162dccce960ed7f66c2e0789d6c152cf6a12bc11ba6"
+    },
+    {
+      "path": "public/libs/idb-keyval.js",
+      "bytes": 4805,
+      "sha256": "f5985c43b11e4f99700e0c97a0d44ac129821f227f17c60afd7de8d421db5a58"
+    },
+    {
+      "path": "public/libs/jszip.min.js",
+      "bytes": 97630,
+      "sha256": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e"
+    },
+    {
+      "path": "public/libs/lafiveone.js",
+      "bytes": 36115,
+      "sha256": "e0018c04f78ca168cffe5e10dc4d1590dff3c484058d87cd740bdb10bdcb999c"
+    },
+    {
+      "path": "public/libs/s.js",
+      "bytes": 4595,
+      "sha256": "be444c289ac019af8486b50fe2bbf2fdb2890812fb945dc78940b6781a68ac52"
+    },
+    {
+      "path": "public/libs/Shepherd.14.5.1.mjs",
+      "bytes": 171046,
+      "sha256": "7356b542e0e68689706425bb9b5832b93cfa9eaf1f567d195bfcaa588c975b46"
+    },
+    {
+      "path": "public/libs/Shepherd.14.5.1.mjs.js",
+      "bytes": 171046,
+      "sha256": "7356b542e0e68689706425bb9b5832b93cfa9eaf1f567d195bfcaa588c975b46"
+    },
+    {
+      "path": "public/libs/snapdom.min.js",
+      "bytes": 99004,
+      "sha256": "f61ffd569cc42f5377901a0aedc62e93671fc855dd213ab31fb73825c0f50f7b"
+    },
+    {
+      "path": "public/libs/t.js",
+      "bytes": 1333,
+      "sha256": "e8636a1d22f6616fef3aedbfd8e426d850da85e2030a1fc16f7b714c17272cb4"
+    },
+    {
+      "path": "public/libs/vue-router.global.prod.min.js",
+      "bytes": 25801,
+      "sha256": "959389ff9e3a25d79da0f0ef6ea9cdec0d3daf66cd69f9c0fa09700cad7d0129"
+    },
+    {
+      "path": "public/libs/vue.global.prod.min.js",
+      "bytes": 159033,
+      "sha256": "99d2fe5eb3a5322e6b8a0c214879267c4595fa9d3cef4eecdf2edc9da9986807"
+    },
+    {
+      "path": "public/libs/xlsx.full.min.js",
+      "bytes": 881727,
+      "sha256": "c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99"
+    },
+    {
+      "path": "public/list/article.json",
+      "bytes": 724,
+      "sha256": "29820a5bb6c9a335ad98f3c98691a1098be9005ce3082a26110099cebd5823fd"
+    },
+    {
+      "path": "public/list/recommend_article.json",
+      "bytes": 724,
+      "sha256": "29820a5bb6c9a335ad98f3c98691a1098be9005ce3082a26110099cebd5823fd"
+    },
+    {
+      "path": "public/list/recommend_word.json",
+      "bytes": 574,
+      "sha256": "774721ee5d4ab3030e191b3162d35a094086b955c1aaa64d0cd9c53009af2079"
+    },
+    {
+      "path": "public/list/word.json",
+      "bytes": 574,
+      "sha256": "774721ee5d4ab3030e191b3162d35a094086b955c1aaa64d0cd9c53009af2079"
+    },
+    {
+      "path": "public/robots.txt",
+      "bytes": 26,
+      "sha256": "331ea9090db0c9f6f597bd9840fd5b171830f6e0b3ba1cb24dfa91f0c95aedc1"
+    },
+    {
+      "path": "public/sound/article/nce1/001&002－Excuse_Me.mp3",
+      "bytes": 819138,
+      "sha256": "670f88e3f64ed1ec205fd20596679f2d8cb955f8ef5b63c0a6f3962f4d1d34ea"
+    },
+    {
+      "path": "public/sound/article/nce1/003&004-Sorry,Sir.mp3",
+      "bytes": 1189435,
+      "sha256": "b1f3dc757cda97a19960bf52e1df661ad93645b9f3f35dbf7fca0e1551050e94"
+    },
+    {
+      "path": "public/sound/article/nce1/005&006-Nice-to-Meet-You.mp3",
+      "bytes": 1374185,
+      "sha256": "d7d3d6b926c74b9774a4baaf7c936851ba5c5b7286b7214c9ae81966b5b7c63f"
+    },
+    {
+      "path": "public/sound/article/nce1/007-008-Are You a Teacher.mp3",
+      "bytes": 1254494,
+      "sha256": "3fef964b413d7a0a0383330f8e079ba6b629cdb7034ca0983dfb565e060e4aae"
+    },
+    {
+      "path": "public/sound/article/nce1/009&010－How Are You Today.mp3",
+      "bytes": 1083107,
+      "sha256": "23199ab378e21cf2bc200a785ca90b01f5df87687d21bd52ae18bcd74db0d20b"
+    },
+    {
+      "path": "public/sound/beep.wav",
+      "bytes": 16256,
+      "sha256": "a2bff000ce467e881204cb5d13d4141af6980887e985745e0fca0baee088f1ab"
+    },
+    {
+      "path": "public/sound/correct.wav",
+      "bytes": 46884,
+      "sha256": "9ee1e85e96956b5161a15d7d80d9e1a7aab703a0407594456414610ddaf9762c"
+    },
+    {
+      "path": "public/sound/key-sounds/jixie/机械0.mp3",
+      "bytes": 9403,
+      "sha256": "642c765b5a8428c52c2898b1eec09d4387288ce393cdf198c8c4a8cac6a7760f"
+    },
+    {
+      "path": "public/sound/key-sounds/jixie/机械1.mp3",
+      "bytes": 10448,
+      "sha256": "252a6d275b43b73fa7edaf19623f64b98c7e0d394362955d58e2c6e1fa014b9b"
+    },
+    {
+      "path": "public/sound/key-sounds/jixie/机械2.mp3",
+      "bytes": 8358,
+      "sha256": "65967fa9b559c9cb46618e3f4d1ef397a4cf132a9bce0e29fc4e8187edf074bd"
+    },
+    {
+      "path": "public/sound/key-sounds/jixie/机械3.mp3",
+      "bytes": 9403,
+      "sha256": "7b2542e43d4562bd4875043879a4d538ce88de057a7e05601f76f9f6483450f3"
+    },
+    {
+      "path": "public/sound/key-sounds/机械键盘1.mp3",
+      "bytes": 4178,
+      "sha256": "ed458142b3bf540ab5a43d5b003071546582a1b5a4ce19ca71f4065a57525bca"
+    },
+    {
+      "path": "public/sound/key-sounds/机械键盘2.mp3",
+      "bytes": 7313,
+      "sha256": "c904d74ea34a2bc5ca21258d22f4da0a97f7b805a5817153a51e6cd8c553f573"
+    },
+    {
+      "path": "public/sound/key-sounds/笔记本键盘.mp3",
+      "bytes": 12537,
+      "sha256": "acdcc7f9b2ddf15cf179bc49eade7b23d0a171a851be0b06e069fb16db390d4a"
+    },
+    {
+      "path": "public/sound/key-sounds/老式机械键盘.mp3",
+      "bytes": 10448,
+      "sha256": "933625be5cf4a73e190087ffb47a61f4d630458e497d2359d6ffda36afae30e9"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4340,
+      "sha256": "503fcfd8cbab95f3465e85578045123883369c6f510f260e8738b28e880c8d47"
+    },
+    {
+      "path": "scripts/deploy-eo-pages.js",
+      "bytes": 1290,
+      "sha256": "94c5e4d9be75a0ec589e6f45b5739a0e5fa06ba5c7e751630538e2c4e2a8f7af"
+    },
+    {
+      "path": "scripts/deploy-oss.js",
+      "bytes": 4111,
+      "sha256": "9f95e63a08c91cd1133e56570398f504d5ab7285ecf024ff955e44353a7f87d1"
+    },
+    {
+      "path": "scripts/do.js",
+      "bytes": 1599,
+      "sha256": "45a2569aaf33402b1f4bf24c67c7b992405ab45d630bb81f12e3f92a5db02266"
+    },
+    {
+      "path": "scripts/prepareDevDist.js",
+      "bytes": 1196,
+      "sha256": "ca55c32b168b4fcb8f02dda09ac348baca9954c0cbbbb2bb71f940b751318c89"
+    },
+    {
+      "path": "scripts/push-sitemap.js",
+      "bytes": 1255,
+      "sha256": "e9d299971a69d91916326f4b804fcdde0f27e2747c7bb3c808827becf44c3ea8"
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 267,
+      "sha256": "858a48de1ff04a1c2948fb90a39ac1a6b9869fd8b97e3fd0dbde89454179e0c0"
+    },
+    {
+      "path": "uno.config.ts",
+      "bytes": 1831,
+      "sha256": "52a0f8a6f91d5eff8f7d81571a4bf6530b25bee669fbfe83f80cba2ad7b6ca46"
+    },
+    {
+      "path": "启动 TypeWords.cmd",
+      "bytes": 417,
+      "sha256": "bd3a5d8d7e4dfdcdaddb7126eb0213303a8dfb46af0980b1d60e32abf5953156"
+    }
+  ]
+}

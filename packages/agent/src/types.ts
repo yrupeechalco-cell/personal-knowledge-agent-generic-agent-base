@@ -28,6 +28,7 @@ export interface AgentAttachment {
 }
 
 export interface AgentContext {
+  proposeDiff?(diff: AgentDiff): void;
   currentPath: string;
   files: NoteFile[];
   index: VaultIndex;

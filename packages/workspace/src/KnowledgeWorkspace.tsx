@@ -4,6 +4,7 @@ import {
   NoteAgentKernel,
   parseExtractedTags,
   classifyRestore,
+  classifyEdit,
   type AgentDiff,
   type AgentAttachment,
   type AgentMessage,
@@ -55,6 +56,7 @@ import {
 import {
   ArrowUp,
   BookOpen,
+  BookA,
   Bot,
   Command,
   CheckCircle2,
@@ -96,6 +98,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSelectionOptions } from "./WorkspaceLauncher";
+import { TypeWordsPlugin } from "./plugins/TypeWordsPlugin";
 import { BasesView } from "./BasesView";
 import { SlidesView } from "./SlidesView";
 import { FormatConverterDialog } from "./FormatConverterDialog";
@@ -158,7 +161,7 @@ const EXPLORER_TAB_ID = "vault-explorer";
 const TRASH_TAB_ID = "vault-trash";
 const BASES_TAB_ID = "vault-bases";
 
-type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides";
+type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
 type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
@@ -746,7 +749,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       },
       {
         name: "app_replace_note",
-        description: "Replace an existing Markdown note. Desktop vaults save safe content edits automatically; deletions still require the normal confirmation flow.",
+        description: "Replace an existing Markdown note. Small edits save automatically; large or destructive edits return a proposal for user review and are not applied yet.",
         parameters: objectSchema(
           {
             path: stringSchema("Vault-relative Markdown path to update."),
@@ -754,15 +757,24 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           },
           ["path", "content"]
         ),
-        run(input) {
+        run(input, context) {
           if (sourceKindRef.current === "github-public") {
             return "The current GitHub public repository is read-only. Open a local vault before editing notes.";
           }
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
           if (!isVaultRelativeNotePath(notePath)) return `Blocked invalid note path: ${notePath || "(empty)"}`;
-          if (!filesRef.current.some((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase())) {
+          const existing = filesRef.current.find((file) => normalizePath(file.path).toLowerCase() === notePath.toLowerCase());
+          if (!existing) {
             return `Cannot update note because it does not exist: ${notePath}`;
+          }
+          const after = String(content ?? "");
+          const decision = classifyEdit(existing.content, after, existing.path);
+          if (decision.permission === "blocked") return `Blocked edit: ${decision.reason}`;
+          if (decision.permission === "confirm") {
+            if (!context.proposeDiff) return "Cannot stage this large edit for review. The note was not changed.";
+            context.proposeDiff({ path: existing.path, before: existing.content, after, summary: "审核 Agent 对笔记的改写", ...decision });
+            return `Proposed edit for ${existing.path}. The note has NOT been changed. The user must review and apply the diff.`;
           }
           const nextFiles = filesRef.current.map((file) =>
               normalizePath(file.path).toLowerCase() === notePath.toLowerCase()
@@ -994,6 +1006,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               ? `已只读载入 ${vault.sourceName}：${vault.files.length} 篇 Markdown。`
               : vault.unsupportedReason ?? "知识库已载入。";
           applyLoadedVault(vault, initialStatus);
+          if (new URLSearchParams(window.location.search).get("plugin") === "typewords") openTypeWordsTab();
         }
       })
       .catch((error) => {
@@ -2601,7 +2614,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus(`已阻止：${diff.path}，原因：${diff.reason}`);
       return;
     }
+    const current = filesRef.current.find((file) => file.path === diff.path);
+    if (!current || current.content !== diff.before) {
+      setStatus("笔记已发生变化，旧提案未应用。请根据最新内容重新生成提案。");
+      return;
+    }
     setFiles((current) => current.map((file) => (file.path === diff.path ? { ...file, content: diff.after } : file)));
+    setDiffs((current) => current.filter((proposal) => proposal !== diff));
     markDirty(diff.path);
     openNoteTab(diff.path);
     setStatus("Diff 已应用。连接本地 vault 时会自动保存；删除仍需确认。");
@@ -3035,6 +3054,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setAgentPanelMode(layout.agentVisible ? "docked" : "hidden");
     setGraphPerspective(layout.graphPerspective);
     switch (layout.centerMode) {
+      case "typewords":
+        openTypeWordsTab();
+        break;
       case "canvas":
         openCanvasTab();
         break;
@@ -3162,6 +3184,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     } else if (sourceKind === "structure") {
       setStatus("已打开只读画布；当前磁盘结构模式不会读取文件正文或写入源目录。");
     }
+  }
+
+  function openTypeWordsTab() {
+    setStorageOpen(false);
+    if (window.innerWidth < 900) setLeftVisible(false);
+    setWorkspaceTabs((current) => current.some((tab) => tab.id === "plugin:typewords") ? current : [...current, { id: "plugin:typewords", mode: "typewords" }]);
+    setActiveTabId("plugin:typewords");
+    setCenterMode("typewords");
+    setStatus("英语学习插件 · 学习记录由本机 TypeWords 保存。");
   }
 
   function openExplorerTab() {
@@ -3634,7 +3665,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 tabIndex={0}
                 title={tab.path ?? "Graph"}
               >
-                {tab.mode === "graph"
+                {tab.mode === "typewords" ? <BookA size={13} /> : tab.mode === "graph"
                   ? <GitBranch size={13} />
                   : tab.mode === "canvas"
                     ? <PanelsTopLeft size={13} />
@@ -3827,6 +3858,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         </IconButton>
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
+        </IconButton>
+        <IconButton active={centerMode === "typewords"} label="英语学习" onClick={openTypeWordsTab}>
+          <BookA />
         </IconButton>
         <IconButton active={centerMode === "bases"} label={t("属性数据库")} onClick={openBasesTab}>
           <TableProperties />
@@ -4081,12 +4115,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
-            <strong>{centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
+            <span>{centerMode === "typewords" ? "插件" : centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
+            <strong>{centerMode === "typewords" ? "英语学习" : centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
-        {centerMode === "canvas" ? (
+        {workspaceTabs.some((tab) => tab.mode === "typewords") && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin /></div>}
+        {centerMode === "typewords" ? null : centerMode === "canvas" ? (
           <KnowledgeCanvas
             document={canvasDocument}
             notes={index.notes.map((note) => ({
@@ -5205,6 +5240,7 @@ function tabIdForPath(path: string): string {
 }
 
 function tabTitle(tab: WorkspaceTab, index: ReturnType<typeof buildVaultIndex>): string {
+  if (tab.mode === "typewords") return "英语学习";
   if (tab.mode === "graph") return "关系图谱";
   if (tab.mode === "canvas") return "知识画布";
   if (tab.mode === "bases") return "属性数据库";
@@ -5597,7 +5633,7 @@ export function shouldShowWorkspaceEmptyState(
   centerMode: CenterMode,
   hasCurrentNote: boolean
 ): boolean {
-  return sourceKind === "empty" && centerMode !== "canvas" && !hasCurrentNote;
+  return sourceKind === "empty" && centerMode !== "canvas" && centerMode !== "typewords" && !hasCurrentNote;
 }
 
 function workspaceCommandItems(

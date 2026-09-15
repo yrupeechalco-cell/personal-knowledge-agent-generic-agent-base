@@ -18,12 +18,13 @@
     "build:desktop": "npm run build -w apps/desktop",
     "deploy:web": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-cloudflare-pages.ps1",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test:release-manifest && npm run test --workspaces --if-present",
+    "test": "npm run source:check && npm run test:release-manifest && npm run test --workspaces --if-present",
     "test:release-manifest": "node --test scripts/normalize-release-manifest.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "version:check": "node scripts/check-version-sync.mjs",
-    "content:check": "node scripts/check-no-bundled-notes.mjs"
+    "content:check": "node scripts/check-no-bundled-notes.mjs",
+    "source:check": "node scripts/check-typewords-source.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

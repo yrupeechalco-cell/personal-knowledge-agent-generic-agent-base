@@ -5215,6 +5215,35 @@ body.resizing-columns {
   padding-left: 14px;
 }
 
+.markdown-preview pre {
+  overflow-x: auto;
+  padding: 14px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+  white-space: pre;
+}
+
+.markdown-preview code { font-family: Consolas, monospace; }
+.markdown-preview img { max-width: 100%; height: auto; }
+.markdown-preview blockquote { margin-left: 0; padding-left: 16px; border-left: 3px solid #8b5cf6; }
+.markdown-table-scroll { max-width: 100%; overflow-x: auto; }
+.markdown-preview table { border-collapse: collapse; margin: 12px 0; }
+.markdown-preview th, .markdown-preview td { border: 1px solid rgba(127, 127, 127, 0.4); padding: 8px 12px; }
+.markdown-preview th { background: rgba(127, 127, 127, 0.1); text-align: left; }
+.markdown-preview .task-list-item { list-style: none; }
+.markdown-local-image { display: inline-block; color: inherit; opacity: 0.7; }
+
+.typewords-plugin-host { flex: 1; min-height: 0; overflow: hidden; }
+.typewords-plugin-host[hidden] { display: none; }
+.typewords-plugin { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.typewords-plugin-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid rgba(127,127,127,.25); flex-wrap: wrap; }
+.typewords-plugin-toolbar small { margin-left: 12px; opacity: .65; }
+.typewords-plugin-actions { display: flex; gap: 10px; align-items: center; }
+.typewords-plugin-actions button, .typewords-plugin-actions a { color: inherit; font: inherit; font-size: 12px; padding: 6px 10px; border: 1px solid rgba(127,127,127,.3); border-radius: 6px; background: transparent; text-decoration: none; cursor: pointer; }
+.typewords-plugin-actions :focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
+.typewords-plugin iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
+.typewords-plugin-empty { margin: auto; padding: 32px; max-width: 660px; line-height: 1.8; }
+
 .wikilink-with-preview {
   display: inline;
   position: relative;

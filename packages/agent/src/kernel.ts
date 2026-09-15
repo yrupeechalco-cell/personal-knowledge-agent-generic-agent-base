@@ -45,7 +45,7 @@ export class NoteAgentKernel {
       content = diff ? "已生成当前笔记整理提案。" : "当前笔记不存在，无法整理。";
       if (diff) diffs.push(diff);
     } else if (this.provider.generateTurn) {
-      content = await this.runToolLoop(normalized, context, toolCalls);
+      content = await this.runToolLoop(normalized, { ...context, proposeDiff: (diff) => diffs.push(diff) }, toolCalls);
     } else {
       content = await this.provider.generate({
         system: buildSystemPrompt(context),
