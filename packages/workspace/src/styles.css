@@ -169,7 +169,7 @@ body.resizing-columns {
   display: grid;
   gap: 10px;
   grid-area: chrome;
-  grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) minmax(160px, 360px);
+  grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) auto;
   height: 40px;
   min-width: 0;
   padding: 0 8px;
@@ -194,6 +194,7 @@ body.resizing-columns {
   gap: 10px;
   justify-content: flex-end;
   min-width: 0;
+  max-width: 360px;
 }
 
 .chrome-right span {
@@ -486,29 +487,6 @@ body.resizing-columns {
   background: #3a3a3a;
   color: #ffffff;
   transform: scale(1.08);
-}
-
-.tab-plus {
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: #b4b4b4;
-  cursor: pointer;
-  font-size: 17px;
-  height: 28px;
-  margin-left: 4px;
-  transition: background 180ms ease, color 180ms ease, transform 220ms cubic-bezier(0.18, 1.15, 0.28, 1);
-  width: 28px;
-}
-
-.tab-plus:hover {
-  background: #383838;
-  color: #ffffff;
-  transform: translateY(-1px) scale(1.06);
-}
-
-.tab-plus:active {
-  transform: translateY(0) scale(0.96);
 }
 
 .icon-button,
@@ -7071,7 +7049,11 @@ body.resizing-columns {
 
   .app-chrome {
     gap: 6px;
-    grid-template-columns: 120px minmax(0, 1fr) minmax(96px, 170px);
+    grid-template-columns: 120px minmax(0, 1fr) auto;
+  }
+
+  .chrome-right {
+    max-width: 170px;
   }
 
   .chrome-right span:nth-of-type(2) {
@@ -7555,13 +7537,11 @@ body[data-theme="light"].resizing-columns .column-resizer::after {
   box-shadow: inset 0 -2px #8561bb;
 }
 
-.obsidian-shell.theme-light .tab-close,
-.obsidian-shell.theme-light .tab-plus {
+.obsidian-shell.theme-light .tab-close {
   color: #7b7b84;
 }
 
-.obsidian-shell.theme-light .tab-close:hover,
-.obsidian-shell.theme-light .tab-plus:hover {
+.obsidian-shell.theme-light .tab-close:hover {
   background: #dddde2;
   color: #3e3e45;
 }

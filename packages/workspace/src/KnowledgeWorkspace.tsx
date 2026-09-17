@@ -3696,16 +3696,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               </div>
             ))}
           </div>
-          <button
-            aria-label="New note tab"
-            className="tab-plus"
-            disabled={isReadOnlyContent}
-            onClick={createSessionNote}
-            title={isReadOnlyContent ? t("只读来源不能新建笔记") : t("新建笔记")}
-            type="button"
-          >
-            +
-          </button>
         </div>
         <div className="chrome-right">
           {draftChanges.length > 0 || trashEntries.length > 0 || autoSaving ? (
@@ -3713,8 +3703,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               {autoSaving ? `${t("保存中")} · ` : ""}{t("改动")} {draftChanges.length} · {t("回收站")} {trashEntries.length}
             </button>
           ) : null}
-          <span>{t(sourceLabel)}</span>
-          {sourceKind === "empty" ? null : <span>{runtime(sourceName)}</span>}
+          {sourceKind === "empty" ? null : <><span>{t(sourceLabel)}</span><span>{runtime(sourceName)}</span></>}
           {adapter.windowControls ? (
             <div className="window-controls" aria-label={t("窗口控制")}>
               <button

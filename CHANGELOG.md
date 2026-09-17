@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9 - 2026-09-17
+
+- Remove the duplicate new-note plus button from the top tab bar; keep note creation in the sidebar and command palette.
+- Hide the ambiguous disconnected-vault label in the top bar when no vault is open. Connected source information, save status, and desktop window controls remain available.
+- Let the right side of the top bar fit its content instead of reserving a large empty column.
+
 ## 0.2.8 - 2026-09-17
 
 - Add an isolated TypeWords English-learning plugin tab with enable/disable, reconnect, standalone opening, preserved iframe state, and the BookA icon.
