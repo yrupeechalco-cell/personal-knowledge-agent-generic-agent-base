@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 - 2026-09-17
 
 - Add an isolated TypeWords English-learning plugin tab with enable/disable, reconnect, standalone opening, preserved iframe state, and the BookA icon.
 - Include the user-supplied TypeWords source snapshot under `third_party/typewords`, with original GPL-3.0 license, upstream attribution, and a SHA-256 source manifest.

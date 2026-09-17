@@ -246,6 +246,8 @@ App 和 Web 使用同一个 React 工作台、同一套图谱、文件树和 Age
 
 ## 开发与验证
 
+正式桌面交付以新版安装包及本机 App 更新为完成标准，见 [桌面交付说明](docs/DESKTOP_DELIVERY.md)。源码或 Web 预览更新不会直接改变已安装的 Windows App。
+
 ```bash
 npm install
 npm run dev:web

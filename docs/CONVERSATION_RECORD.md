@@ -124,6 +124,10 @@ The product continues toward a daily-use personal knowledge application with:
 
 This record should be updated when those durable decisions change.
 
+## 2026-09-17: Deliver Updates to the Installed Desktop App
+
+The user explicitly chose the formal installed Windows application instead of a live development shortcut. Future completed changes must be packaged as a new signed desktop release and applied to the local installation, with the installed version checked. Source pushes and browser previews alone are not desktop delivery. Version 0.2.8 carries the earlier foundation and TypeWords adapter changes into that release process; the independent TypeWords service remains a separate runtime dependency.
+
 ## 2026-09-16: Strengthen the Existing Daily Knowledge Workflow
 
 The immediate priority is the reliability and usability of existing note reading, writing, retrieval, and Agent-assisted organization. New short-drama production and ComfyUI features are deferred.
