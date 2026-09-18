@@ -67,6 +67,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  FolderSearch,
   GitBranch,
   HardDrive,
   Maximize2,
@@ -98,6 +99,8 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSelectionOptions } from "./WorkspaceLauncher";
+import { LibraryInbox } from "./LibraryInbox";
+import type { LibraryAdapter } from "./libraryModel";
 import { TypeWordsPlugin } from "./plugins/TypeWordsPlugin";
 import { BasesView } from "./BasesView";
 import { SlidesView } from "./SlidesView";
@@ -161,7 +164,7 @@ const EXPLORER_TAB_ID = "vault-explorer";
 const TRASH_TAB_ID = "vault-trash";
 const BASES_TAB_ID = "vault-bases";
 
-type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords";
+type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords" | "library";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
 type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
@@ -322,6 +325,7 @@ export interface CodexConnectionStatus {
 
 export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
+  library?: LibraryAdapter;
   windowControls?: {
     close(): Promise<void> | void;
     minimize(): Promise<void> | void;
@@ -1007,6 +1011,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               : vault.unsupportedReason ?? "知识库已载入。";
           applyLoadedVault(vault, initialStatus);
           if (new URLSearchParams(window.location.search).get("plugin") === "typewords") openTypeWordsTab();
+          if (new URLSearchParams(window.location.search).get("view") === "library") openLibraryTab();
         }
       })
       .catch((error) => {
@@ -3186,6 +3191,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     }
   }
 
+  function openLibraryTab() {
+    setStorageOpen(false);
+    setLeftVisible(false);
+    setWorkspaceTabs((current) => current.some((tab) => tab.id === "library:inbox") ? current : [...current, { id: "library:inbox", mode: "library" }]);
+    setActiveTabId("library:inbox");
+    setCenterMode("library");
+    setStatus("资料收件箱 · 选择文件夹后建立本地索引，原文件保持原位。");
+  }
+
   function openTypeWordsTab() {
     setStorageOpen(false);
     if (window.innerWidth < 900) setLeftVisible(false);
@@ -3665,7 +3679,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 tabIndex={0}
                 title={tab.path ?? "Graph"}
               >
-                {tab.mode === "typewords" ? <BookA size={13} /> : tab.mode === "graph"
+                {tab.mode === "library" ? <FolderSearch size={13} /> : tab.mode === "typewords" ? <BookA size={13} /> : tab.mode === "graph"
                   ? <GitBranch size={13} />
                   : tab.mode === "canvas"
                     ? <PanelsTopLeft size={13} />
@@ -3848,6 +3862,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
         </IconButton>
+        <IconButton label="资料收件箱" active={centerMode === "library"} onClick={openLibraryTab}><FolderSearch /></IconButton>
         <IconButton active={centerMode === "typewords"} label="英语学习" onClick={openTypeWordsTab}>
           <BookA />
         </IconButton>
@@ -4104,13 +4119,14 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             </IconButton>
           </div>
           <div className="breadcrumb">
-            <span>{centerMode === "typewords" ? "插件" : centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
-            <strong>{centerMode === "typewords" ? "英语学习" : centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
+            <span>{centerMode === "library" ? "本机资料" : centerMode === "typewords" ? "插件" : centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
+            <strong>{centerMode === "library" ? "资料收件箱" : centerMode === "typewords" ? "英语学习" : centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
         {workspaceTabs.some((tab) => tab.mode === "typewords") && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin /></div>}
-        {centerMode === "typewords" ? null : centerMode === "canvas" ? (
+        <LibraryInbox adapter={adapter.library} runModel={adapter.runModel} model={selectedAgentModel} modelReady={selectedModelConfigured && selectedAgentProvider !== "offline"} visible={centerMode === "library"} />
+        {centerMode === "library" || centerMode === "typewords" ? null : centerMode === "canvas" ? (
           <KnowledgeCanvas
             document={canvasDocument}
             notes={index.notes.map((note) => ({
@@ -5229,6 +5245,7 @@ function tabIdForPath(path: string): string {
 }
 
 function tabTitle(tab: WorkspaceTab, index: ReturnType<typeof buildVaultIndex>): string {
+  if (tab.mode === "library") return "资料收件箱";
   if (tab.mode === "typewords") return "英语学习";
   if (tab.mode === "graph") return "关系图谱";
   if (tab.mode === "canvas") return "知识画布";
@@ -5622,7 +5639,7 @@ export function shouldShowWorkspaceEmptyState(
   centerMode: CenterMode,
   hasCurrentNote: boolean
 ): boolean {
-  return sourceKind === "empty" && centerMode !== "canvas" && centerMode !== "typewords" && !hasCurrentNote;
+  return sourceKind === "empty" && centerMode !== "canvas" && centerMode !== "typewords" && centerMode !== "library" && !hasCurrentNote;
 }
 
 function workspaceCommandItems(

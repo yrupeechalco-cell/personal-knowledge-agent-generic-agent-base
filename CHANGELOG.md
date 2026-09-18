@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.10 - 2026-09-18
+
+- Add a desktop document inbox with multiple selected folders, periodic incremental scanning, local full-text search and persistent review cards.
+- Support UTF-8 text and DOCX body extraction, with visible unsupported-format, size-limit and offline-folder notices.
+- Generate editable summaries, categories and tags using the configured model; reject stale reviews and export cards without changing originals.
+- Add native index regression tests and a Chinese acceptance guide in `docs/DOCUMENT_LIBRARY.md`.
+
 ## 0.2.9 - 2026-09-17
 
 - Remove the duplicate new-note plus button from the top tab bar; keep note creation in the sidebar and command palette.

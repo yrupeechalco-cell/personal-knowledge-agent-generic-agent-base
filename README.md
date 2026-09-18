@@ -269,3 +269,7 @@ packages/core       Markdown、双链、标签、图谱与安全规则
 packages/agent      笔记 Agent、工具调用、模型 Provider 与权限
 packages/ui         文件树、编辑器、全库关系图和微缩图组件
 ```
+
+## 本机资料收件箱（Windows 0.2.10）
+
+监测选定的多个文件夹，搜索正文，保存摘要/分类/标签，调用当前模型生成整理建议，并导出 Markdown 卡片。源文件保留原位。支持格式、限制和逐步验收见 [资料收件箱使用指南](docs/DOCUMENT_LIBRARY.md)。

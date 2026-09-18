@@ -40,6 +40,14 @@ interface VaultChangedPayload {
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   return {
     canOpenVault: true,
+    library: {
+      load: () => invoke("library_load"),
+      addFolder: () => invoke("library_add_folder"),
+      scan: () => invoke("library_scan"),
+      updateRoot: (id, action) => invoke("library_update_root", { id, action }),
+      saveReview: (review) => invoke("library_save_review", { review }),
+      exportCard: (id, revision) => invoke("library_export", { id, revision })
+    },
     windowControls: {
       close: () => getCurrentWindow().close(),
       minimize: () => getCurrentWindow().minimize(),

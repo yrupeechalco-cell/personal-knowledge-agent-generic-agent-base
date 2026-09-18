@@ -1,4 +1,4 @@
-export type SavedCenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords";
+export type SavedCenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords" | "library";
 
 export interface WorkspaceLayoutSnapshot {
   id: string;
@@ -54,7 +54,7 @@ export function upsertWorkspaceLayout(
 }
 
 function normalizeCenterMode(value: unknown): SavedCenterMode {
-  return value === "typewords" || value === "canvas" || value === "edit" || value === "explorer" || value === "trash" || value === "bases" || value === "slides"
+  return value === "library" || value === "typewords" || value === "canvas" || value === "edit" || value === "explorer" || value === "trash" || value === "bases" || value === "slides"
     ? value
     : "graph";
 }

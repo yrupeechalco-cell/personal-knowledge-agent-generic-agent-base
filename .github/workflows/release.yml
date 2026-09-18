@@ -45,6 +45,12 @@ jobs:
       - name: Reject bundled demonstration notes
         run: npm run content:check -- --source
 
+      - name: Build desktop frontend for native tests
+        run: npm run build:desktop
+
+      - name: Test native document index
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
       - name: Build and publish signed installer
         uses: tauri-apps/tauri-action@v1
         env:
