@@ -81,6 +81,8 @@ export function WorkspaceLayoutsDialog({
 }
 
 function centerModeLabel(mode: WorkspaceLayoutSnapshot["centerMode"]): string {
+  if (mode === "library") return "资料收件箱";
+  if (mode === "typewords") return "英语学习";
   if (mode === "canvas") return "知识画布";
   if (mode === "bases") return "属性数据库";
   if (mode === "slides") return "幻灯片";

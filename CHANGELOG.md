@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.11 - 2026-09-18
+
+- Restore saved document-inbox layouts to the inbox and preserve the saved sidebar visibility.
+- Show accurate view names for document-inbox and English-learning layouts.
+
 ## 0.2.10 - 2026-09-18
 
 - Add a desktop document inbox with multiple selected folders, periodic incremental scanning, local full-text search and persistent review cards.

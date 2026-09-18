@@ -3059,6 +3059,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setAgentPanelMode(layout.agentVisible ? "docked" : "hidden");
     setGraphPerspective(layout.graphPerspective);
     switch (layout.centerMode) {
+      case "library":
+        openLibraryTab();
+        setLeftVisible(layout.leftVisible);
+        break;
       case "typewords":
         openTypeWordsTab();
         break;
