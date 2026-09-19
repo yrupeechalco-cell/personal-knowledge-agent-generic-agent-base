@@ -102,6 +102,8 @@ import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSe
 import { LibraryInbox } from "./LibraryInbox";
 import type { LibraryAdapter } from "./libraryModel";
 import { TypeWordsPlugin } from "./plugins/TypeWordsPlugin";
+import { TypeWordsStartup } from "./plugins/TypeWordsStartup";
+import type { TypeWordsAdapter } from "./plugins/typewords";
 import { BasesView } from "./BasesView";
 import { SlidesView } from "./SlidesView";
 import { FormatConverterDialog } from "./FormatConverterDialog";
@@ -326,6 +328,7 @@ export interface CodexConnectionStatus {
 export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
   library?: LibraryAdapter;
+  typewords?: TypeWordsAdapter;
   windowControls?: {
     close(): Promise<void> | void;
     minimize(): Promise<void> | void;
@@ -4128,7 +4131,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
-        {workspaceTabs.some((tab) => tab.mode === "typewords") && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin /></div>}
+        <TypeWordsStartup adapter={adapter.typewords} />
+        {workspaceTabs.some((tab) => tab.mode === "typewords") && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin adapter={adapter.typewords} /></div>}
         <LibraryInbox adapter={adapter.library} runModel={adapter.runModel} model={selectedAgentModel} modelReady={selectedModelConfigured && selectedAgentProvider !== "offline"} visible={centerMode === "library"} />
         {centerMode === "library" || centerMode === "typewords" ? null : centerMode === "canvas" ? (
           <KnowledgeCanvas

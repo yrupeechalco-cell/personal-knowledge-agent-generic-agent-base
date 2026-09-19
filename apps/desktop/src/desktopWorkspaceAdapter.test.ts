@@ -26,6 +26,20 @@ const invokeMock = vi.mocked(invoke);
 const getCurrentWindowMock = vi.mocked(getCurrentWindow);
 
 describe("desktop workspace startup", () => {
+  it("shares concurrent plugin startup and allows retry after failure", async () => {
+    let fail!: (reason: Error) => void;
+    invokeMock.mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    const plugin = createDesktopWorkspaceAdapter().typewords!;
+    const first = plugin.ensureStarted();
+    const second = plugin.ensureStarted();
+    expect(first).toBe(second);
+    fail(new Error("offline"));
+    await expect(first).rejects.toThrow("offline");
+    invokeMock.mockResolvedValueOnce(undefined);
+    await plugin.ensureStarted();
+    expect(invokeMock.mock.calls.filter(([name]) => name === "typewords_start")).toHaveLength(2);
+  });
+
   beforeEach(() => {
     invokeMock.mockReset();
     getCurrentWindowMock.mockClear();

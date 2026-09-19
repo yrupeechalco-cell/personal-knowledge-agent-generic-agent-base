@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.12
+
+- 正式 Windows App 启动时自动准备已启用的 TypeWords 插件，无需手动运行脚本。
+- 首次选择本机 TypeWords 生产构建后记住目录；支持启动等待、错误提示、选择目录和重试。
+- 复用已运行的 TypeWords；退出知识库时仅清理本次由知识库启动的插件进程。
+
+
 ## 0.2.11 - 2026-09-18
 
 - Restore saved document-inbox layouts to the inbox and preserve the saved sidebar visibility.

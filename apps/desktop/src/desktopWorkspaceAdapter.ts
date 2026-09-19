@@ -38,8 +38,16 @@ interface VaultChangedPayload {
 }
 
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
+  let startingTypeWords: Promise<void> | undefined;
   return {
     canOpenVault: true,
+    typewords: {
+      ensureStarted() {
+        startingTypeWords ??= invoke<void>("typewords_start").finally(() => { startingTypeWords = undefined; });
+        return startingTypeWords;
+      },
+      selectDirectory: () => invoke<boolean>("typewords_select_directory")
+    },
     library: {
       load: () => invoke("library_load"),
       addFolder: () => invoke("library_add_folder"),

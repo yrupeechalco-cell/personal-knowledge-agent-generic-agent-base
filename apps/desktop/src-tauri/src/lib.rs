@@ -1,4 +1,5 @@
 mod library;
+mod typewords;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -951,10 +952,12 @@ fn deepseek_chat_completion_blocking(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(typewords::TypeWordsProcess::default())
         .manage(VaultWatcherState {
             watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            typewords::typewords_start, typewords::typewords_select_directory,
             library::library_load, library::library_add_folder, library::library_scan,
             library::library_update_root, library::library_save_review, library::library_export,
             select_vault_dir,
@@ -994,8 +997,11 @@ pub fn run() {
             codex_chat_completion,
             codex_tool_completion
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running knowledge agent desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building knowledge agent desktop")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) { typewords::shutdown(app); }
+        });
 }
 
 fn collect_markdown_files(

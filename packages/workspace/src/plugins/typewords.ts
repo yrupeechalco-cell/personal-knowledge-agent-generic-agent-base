@@ -8,6 +8,15 @@ export const TYPEWORDS_PLUGIN = {
   storageKey: "knowledge-agent.plugins.typewords.enabled.v1"
 } as const;
 
+export interface TypeWordsAdapter {
+  ensureStarted(): Promise<void>;
+  selectDirectory(): Promise<boolean>;
+}
+
+export function isTypeWordsEnabled(): boolean {
+  try { return localStorage.getItem(TYPEWORDS_PLUGIN.storageKey) !== "false"; } catch { return true; }
+}
+
 export async function checkTypeWords(signal: AbortSignal): Promise<void> {
   // Cross-origin opaque responses are expected; the launcher separately verifies identity.
   await fetch(TYPEWORDS_PLUGIN.entryUrl, { mode: "no-cors", cache: "no-store", credentials: "omit", signal });
