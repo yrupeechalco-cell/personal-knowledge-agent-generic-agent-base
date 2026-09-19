@@ -29,6 +29,14 @@ fn validate_directory(directory: &Path) -> Result<PathBuf, String> {
 
 // No proxy, redirects or external URLs: an unrelated service must never be killed or embedded.
 fn probe(url: &str) -> Result<bool, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    let port = parsed.port().ok_or("缺少本机插件端口。")?;
+    // Windows can time out before classifying a refused TCP connection. An unused
+    // loopback port is directly observable without waiting for HTTP retries.
+    if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+        drop(listener);
+        return Ok(false);
+    }
     let client = reqwest::blocking::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(2)).build().map_err(|e| e.to_string())?;
     let response = match client.get(url).send() {
