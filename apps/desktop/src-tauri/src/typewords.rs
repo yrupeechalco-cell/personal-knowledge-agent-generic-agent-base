@@ -24,18 +24,30 @@ fn validate_directory(directory: &Path) -> Result<PathBuf, String> {
     if !directory.join(".output/server/index.mjs").is_file() {
         return Err("此 TypeWords 目录缺少生产构建 .output/server/index.mjs，请选择已构建的版本。".into());
     }
-    Ok(directory)
+    Ok(node_directory(&directory))
+}
+
+fn node_directory(directory: &Path) -> PathBuf {
+    // Node's CLI realpath handling cannot use Rust's Windows verbatim prefix.
+    #[cfg(windows)] {
+        let value = directory.to_string_lossy();
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") { return PathBuf::from(format!(r"\\{}", rest)); }
+        if let Some(rest) = value.strip_prefix(r"\\?\") { return PathBuf::from(rest); }
+    }
+    directory.to_path_buf()
 }
 
 // No proxy, redirects or external URLs: an unrelated service must never be killed or embedded.
 fn probe(url: &str) -> Result<bool, String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
     let port = parsed.port().ok_or("缺少本机插件端口。")?;
-    // Windows can time out before classifying a refused TCP connection. An unused
-    // loopback port is directly observable without waiting for HTTP retries.
-    if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", port)) {
-        drop(listener);
-        return Ok(false);
+    // Check the TCP listener separately: Windows may delay connection refusal
+    // longer than the HTTP timeout. Once connected, HTTP errors remain errors.
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    match std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500)) {
+        Ok(stream) => drop(stream),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => return Ok(false),
+        Err(error) => return Err(format!("无法检查 TypeWords 本机端口：{error}")),
     }
     let client = reqwest::blocking::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(2)).build().map_err(|e| e.to_string())?;
@@ -78,7 +90,7 @@ pub async fn typewords_start(app: tauri::AppHandle) -> Result<(), String> {
         let directory = validate_directory(&settings.directory)?;
         let log = fs::File::create(path.with_file_name("typewords.log")).map_err(|e| e.to_string())?;
         let mut command = Command::new("node");
-        command.arg(directory.join(".output/server/index.mjs")).current_dir(&directory)
+        command.arg(".output/server/index.mjs").current_dir(&directory)
             .env("NITRO_HOST", "127.0.0.1").env("HOST", "127.0.0.1")
             .env("NITRO_PORT", "5567").env("PORT", "5567")
             .stdin(Stdio::null()).stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
@@ -137,10 +149,13 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/words", listener.local_addr().unwrap());
         let thread = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0; 4096];
-            let _ = stream.read(&mut buffer);
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0; 4096];
+                if stream.read(&mut buffer).unwrap_or(0) == 0 { continue; }
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                break;
+            }
         });
         (url, thread)
     }
@@ -168,5 +183,12 @@ mod tests {
         fs::write(root.join(".output/server/index.mjs"), "").unwrap();
         assert!(validate_directory(&root).unwrap().is_absolute());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn converts_verbatim_paths_for_node_without_changing_chinese_or_spaces() {
+        assert_eq!(node_directory(Path::new(r"\\?\C:\中文 文件夹\TypeWords")), PathBuf::from(r"C:\中文 文件夹\TypeWords"));
+        assert_eq!(node_directory(Path::new(r"\\?\UNC\server\资料\TypeWords")), PathBuf::from(r"\\server\资料\TypeWords"));
     }
 }
