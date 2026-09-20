@@ -1,4 +1,5 @@
-//! Local, read-only document inbox. Originals are never written by this module.
+//! Folder-backed knowledge views. Metadata never moves or rewrites originals;
+//! source changes use separate, revision-checked commands with an undo backup.
 use serde::{Deserialize, Serialize};
 use std::{collections::{HashMap, HashSet}, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::Mutex, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::Manager;
@@ -14,7 +15,11 @@ pub struct Library {
     version: u32,
     roots: Vec<Root>,
     documents: Vec<Document>,
+    #[serde(default)] auto_analyze: bool,
+    #[serde(default = "idle")] queue_state: String,
+    #[serde(default)] store_revision: u64,
 }
+fn idle() -> String { "idle".into() }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +31,7 @@ pub struct Root {
     issue: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     id: String,
@@ -41,9 +46,18 @@ pub struct Document {
     summary: String,
     category: String,
     tags: Vec<String>,
+    #[serde(default)] categories: Vec<String>,
+    #[serde(default)] tips: Vec<Tip>,
+    #[serde(default)] analysis_revision: String,
+    #[serde(default)] classification_locked: bool,
+    #[serde(default)] metadata_version: u64,
+    #[serde(default)] ai_error: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Tip { id: String, content: String, quote: String }
+
+#[derive(Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Review {
     id: String,
@@ -52,7 +66,17 @@ pub struct Review {
     summary: String,
     category: String,
     tags: Vec<String>,
+    #[serde(default)] categories: Vec<String>,
+    #[serde(default)] tips: Vec<Tip>,
+    #[serde(default)] classification_locked: Option<bool>,
+    #[serde(default)] metadata_version: Option<u64>,
+    #[serde(default)] source: String,
+    #[serde(default)] analysis_revision: Option<String>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Config { auto_analyze: Option<bool>, queue_state: Option<String>, retry_failed: Option<bool> }
 
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64 }
 
@@ -63,13 +87,21 @@ fn store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn load(path: &Path) -> Result<Library, String> {
-    if !path.exists() { return Ok(Library { version: 1, ..Library::default() }); }
+    if !path.exists() { return Ok(Library { version: 2, queue_state: idle(), ..Library::default() }); }
     let file = fs::File::open(path).map_err(|e| format!("无法读取资料索引：{e}"))?;
     if file.metadata().map_err(|e| e.to_string())?.len() > 128 * 1024 * 1024 {
         return Err("资料索引超过读取限制，请先备份检查；原索引未被覆盖。".into());
     }
-    let data: Library = serde_json::from_reader(file).map_err(|e| format!("资料索引损坏，请先备份检查；原索引未被覆盖：{e}"))?;
-    if data.version != 1 { return Err("资料索引版本不兼容，请更新 App。".into()); }
+    let mut data: Library = serde_json::from_reader(file).map_err(|e| format!("资料索引损坏，请先备份检查；原索引未被覆盖：{e}"))?;
+    if ![1, 2].contains(&data.version) { return Err("资料索引版本不兼容，请更新 App。".into()); }
+    if data.version == 1 {
+        for doc in &mut data.documents {
+            doc.categories = normalize_categories(&[doc.category.clone()]);
+            doc.classification_locked = doc.status == "reviewed" || !doc.category.is_empty() || !doc.tags.is_empty();
+            if !doc.summary.is_empty() { doc.analysis_revision = doc.revision.clone(); }
+        }
+        data.version = 2;
+    }
     Ok(data)
 }
 
@@ -89,6 +121,7 @@ where F: FnOnce(&mut Library) -> Result<(), String> + Send + 'static {
         let path = store_path(&app)?;
         let mut data = load(&path)?;
         change(&mut data)?;
+        data.store_revision += 1;
         persist(&path, &data)?;
         Ok(data)
     }).await.map_err(|e| e.to_string())?
@@ -104,7 +137,7 @@ pub async fn library_load(app: tauri::AppHandle) -> Result<Library, String> {
 
 #[tauri::command]
 pub async fn library_add_folder(app: tauri::AppHandle) -> Result<Library, String> {
-    let picked = rfd::AsyncFileDialog::new().set_title("选择要监测的资料文件夹（仅读取）").pick_folder().await;
+    let picked = rfd::AsyncFileDialog::new().set_title("选择知识资料文件夹（分类保存在 App 中）").pick_folder().await;
     let Some(picked) = picked else { return library_load(app).await; };
     let path = picked.path().to_path_buf();
     transaction(app, move |data| {
@@ -128,6 +161,29 @@ fn add_root(data: &mut Library, path: &Path) -> Result<(), String> {
 #[tauri::command]
 pub async fn library_scan(app: tauri::AppHandle) -> Result<Library, String> {
     transaction(app, |data| { scan(data); Ok(()) }).await
+}
+
+#[tauri::command]
+pub async fn library_configure(app: tauri::AppHandle, config: Config) -> Result<Library, String> {
+    transaction(app, move |data| {
+        if let Some(state) = config.queue_state {
+            if !["idle", "running", "paused"].contains(&state.as_str()) { return Err("无效的整理任务状态。".into()); }
+            data.queue_state = state;
+        }
+        if let Some(enabled) = config.auto_analyze { data.auto_analyze = enabled; }
+        if config.retry_failed == Some(true) { for doc in &mut data.documents { doc.ai_error.clear(); } }
+        Ok(())
+    }).await
+}
+
+#[tauri::command]
+pub async fn library_record_error(app: tauri::AppHandle, id: String, revision: String, error: String) -> Result<Library, String> {
+    transaction(app, move |data| {
+        if let Some(doc) = data.documents.iter_mut().find(|d| d.id == id && d.revision == revision && d.status == "pending") {
+            doc.ai_error = error.chars().take(500).collect();
+        }
+        Ok(())
+    }).await
 }
 
 #[tauri::command]
@@ -223,6 +279,7 @@ fn scan(data: &mut Library) {
         let mut traversal = Traversal { files: Vec::new(), seen_entries: 0, issue: None, started: Instant::now() };
         walk(&root_path, &root_path, &mut traversal);
         let seen: HashSet<String> = traversal.files.iter().map(|(_, rel, _)| format!("{}\n{}", root.id, rel)).collect();
+        let mut removed = if traversal.issue.is_none() { docs.values().filter(|d| d.root_id == root.id && !seen.contains(&d.id)).cloned().collect::<Vec<_>>() } else { Vec::new() };
         if traversal.issue.is_none() {
             docs.retain(|id, d| {
                 let keep = d.root_id != root.id || seen.contains(id);
@@ -237,7 +294,7 @@ fn scan(data: &mut Library) {
             if !docs.contains_key(&id) && docs.len() >= MAX_FILES {
                 traversal.issue = Some("资料索引最多收录 1500 个文件；请移除不需要的监测目录。".into()); continue;
             }
-            let previous = docs.remove(&id);
+            let mut previous = docs.remove(&id);
             if let Some(old) = &previous { bytes = bytes.saturating_sub(old.text.len()); }
             let result = extract(&path, meta.len()).and_then(|text| {
                 let current = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -246,9 +303,23 @@ fn scan(data: &mut Library) {
                 Ok(text)
             });
             let (text, issue) = match result { Ok(text) => (text, None), Err(error) => (String::new(), Some(error)) };
-            let unchanged = previous.as_ref().is_some_and(|d| d.revision == rev && d.text == text && d.issue == issue);
+            // Preserve metadata on an unambiguous in-folder rename. Identical duplicates
+            // deliberately do not inherit each other's classification.
+            if previous.is_none() && issue.is_none() && !text.is_empty() {
+                let matches = removed.iter().enumerate().filter(|(_, old)| old.revision == rev && old.text == text).map(|(i, _)| i).collect::<Vec<_>>();
+                if matches.len() == 1 { previous = Some(removed.remove(matches[0])); }
+            }
+            let unchanged = previous.as_ref().is_some_and(|d| d.id == id && d.revision == rev && d.text == text && d.issue == issue);
             let document = if unchanged { previous.unwrap() } else {
-                Document { id: id.clone(), root_id: root.id.clone(), path: relative, revision: rev, size: meta.len(), updated_at: now(), text, issue, status: "pending".into(), summary: String::new(), category: String::new(), tags: Vec::new() }
+                let mut document = previous.unwrap_or_default();
+                document.id = id.clone(); document.root_id = root.id.clone(); document.path = relative;
+                document.revision = rev; document.size = meta.len(); document.updated_at = now();
+                document.text = text; document.issue = issue; document.ai_error.clear();
+                if document.status != "ignored" && document.analysis_revision != document.revision { document.status = "pending".into(); }
+                if document.status.is_empty() { document.status = "pending".into(); }
+                document.metadata_version += 1;
+                // Preserve confirmed classification and old tips; analysis_revision exposes staleness.
+                document
             };
             bytes += document.text.len();
             docs.insert(id, document);
@@ -264,7 +335,7 @@ fn check_document(data: &Library, id: &str, expected: &str) -> Result<usize, Str
     let index = data.documents.iter().position(|d| d.id == id).ok_or("资料已移除，请重新扫描。")?;
     let doc = &data.documents[index];
     let root = data.roots.iter().find(|r| r.id == doc.root_id).ok_or("资料目录已移除。")?;
-    let path = Path::new(&root.id).join(&doc.path);
+    let path = source_path(root, doc)?;
     let canonical = path.canonicalize().map_err(|_| "源文件暂时不可访问，请重新扫描。")?;
     let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
     if !canonical.starts_with(&root.id) || linked(&metadata) || doc.revision != expected || revision(&metadata) != expected {
@@ -273,23 +344,164 @@ fn check_document(data: &Library, id: &str, expected: &str) -> Result<usize, Str
     Ok(index)
 }
 
+fn source_path(root: &Root, doc: &Document) -> Result<PathBuf, String> {
+    let relative = Path::new(&doc.path);
+    if relative.is_absolute() || !relative.components().all(|c| matches!(c, std::path::Component::Normal(_))) || !super::is_allowed_path(&doc.path) {
+        return Err("资料路径不在已选择的文件夹内。".into());
+    }
+    let root_path = Path::new(&root.id);
+    let root_meta = fs::symlink_metadata(root_path).map_err(|e| e.to_string())?;
+    if linked(&root_meta) { return Err("资料根目录已变为链接，请重新选择目录。".into()); }
+    let mut path = root_path.to_path_buf();
+    for part in relative.components() {
+        path.push(part.as_os_str());
+        if linked(&fs::symlink_metadata(&path).map_err(|e| e.to_string())?) { return Err("资料路径含系统链接，已停止操作。".into()); }
+    }
+    let resolved = path.canonicalize().map_err(|e| e.to_string())?;
+    if !resolved.starts_with(root_path) { return Err("资料路径已离开所选文件夹。".into()); }
+    Ok(resolved)
+}
+
+fn normalize_categories(paths: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    for path in paths {
+        let value = path.split(['/', '>', '\\']).map(str::trim).filter(|s| !s.is_empty()).take(4).collect::<Vec<_>>().join("/");
+        if !value.is_empty() && !result.contains(&value) { result.push(value); }
+    }
+    result
+}
+
 fn save_review(data: &mut Library, review: Review) -> Result<(), String> {
     if !["pending", "reviewed", "ignored"].contains(&review.status.as_str()) { return Err("无效的整理状态。".into()); }
-    if review.summary.chars().count() > 6000 || review.category.chars().count() > 100 || review.tags.len() > 20 || review.tags.iter().any(|tag| tag.chars().count() > 60) {
+    if review.summary.chars().count() > 6000 || review.category.chars().count() > 120 || review.tags.len() > 20 || review.tags.iter().any(|tag| tag.chars().count() > 60) {
         return Err("摘要、分类或标签过长，请缩短后保存。".into());
     }
     let index = check_document(data, &review.id, &review.revision)?;
     let doc = &mut data.documents[index];
+    if review.metadata_version.is_some_and(|version| version != doc.metadata_version) { return Err("整理内容已在其他操作中更新，请重新读取后再保存。".into()); }
+    let categories = normalize_categories(if review.categories.is_empty() { std::slice::from_ref(&review.category) } else { &review.categories });
+    if categories.len() > 12 || categories.iter().any(|s| s.chars().count() > 120) || review.tips.len() > 16 { return Err("分类或知识 tip 超出数量限制。".into()); }
+    let analysis_revision = review.analysis_revision.as_deref().unwrap_or(&doc.revision).to_string();
+    let unchanged_stale = analysis_revision != doc.revision && analysis_revision == doc.analysis_revision && review.summary == doc.summary && review.tips == doc.tips;
+    if analysis_revision != doc.revision && !unchanged_stale { return Err("旧版整理内容已变化，请先重新核对当前原文。".into()); }
+    if !unchanged_stale && review.tips.iter().any(|tip| tip.content.trim().is_empty() || tip.content.chars().count() > 1000 || tip.quote.trim().chars().count() < 4 || tip.quote.chars().count() > 500 || !doc.text.contains(tip.quote.trim())) {
+        return Err("知识 tip 必须附带能在当前原文中找到的连续引用，请重新生成或修正引用。".into());
+    }
     doc.status = review.status;
+    if unchanged_stale && doc.status == "reviewed" { doc.status = "pending".into(); }
     doc.summary = review.summary;
-    doc.category = review.category;
-    doc.tags = review.tags;
+    if review.source != "ai" || !doc.classification_locked {
+        doc.categories = categories;
+        doc.category = doc.categories.first().cloned().unwrap_or_default();
+        doc.tags = review.tags.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        doc.tags.sort(); doc.tags.dedup();
+    }
+    if review.source != "ai" { doc.classification_locked = review.classification_locked.unwrap_or(true); }
+    doc.tips = review.tips.into_iter().enumerate().map(|(i, mut tip)| { tip.id = format!("tip-{}", i + 1); tip.quote = tip.quote.trim().into(); tip }).collect();
+    doc.analysis_revision = analysis_revision;
+    doc.ai_error.clear(); doc.metadata_version += 1;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn library_save_review(app: tauri::AppHandle, review: Review) -> Result<Library, String> {
     transaction(app, move |data| save_review(data, review)).await
+}
+
+fn editable(path: &Path) -> bool {
+    matches!(path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase().as_str(), "md" | "markdown" | "txt" | "csv" | "tsv" | "json" | "yaml" | "yml" | "xml" | "html" | "htm")
+}
+
+#[derive(Serialize, Deserialize)]
+struct SourceBackup { id: String, original: String, replacement: String }
+
+fn backup_path(directory: &Path, id: &str) -> PathBuf {
+    let hash = id.as_bytes().iter().fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ *byte as u64).wrapping_mul(0x100000001b3));
+    directory.join(format!("{hash:016x}.json"))
+}
+
+fn write_source(data: &mut Library, id: &str, expected: &str, content: &str, backups: &Path) -> Result<(), String> {
+    let index = check_document(data, id, expected)?;
+    let doc = &data.documents[index];
+    let root = data.roots.iter().find(|r| r.id == doc.root_id).ok_or("目录已移除。")?;
+    let path = source_path(root, doc)?;
+    if !editable(&path) || doc.issue.is_some() { return Err("App 内编辑支持已读取的 UTF-8 文本；Word 等格式请使用「打开原文件」。".into()); }
+    if content.len() > MAX_TEXT_BYTES as usize || content.contains('\0') { return Err("原文最多 1 MB，且不能包含二进制内容。".into()); }
+    let original = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    if original.len() > MAX_TEXT_BYTES as usize || original.trim_start_matches('\u{feff}') != doc.text { return Err("原文件内容已改变，请重新扫描再编辑。".into()); }
+    let mut replacement = content.trim_start_matches('\u{feff}').to_string();
+    if original.contains("\r\n") && !original.replace("\r\n", "").contains('\n') { replacement = replacement.replace("\r\n", "\n").replace('\n', "\r\n"); }
+    if original.starts_with('\u{feff}') { replacement.insert(0, '\u{feff}'); }
+    if replacement.len() > MAX_TEXT_BYTES as usize { return Err("转换换行后原文超过 1 MB。".into()); }
+    if replacement == original { return Ok(()); }
+    let indexed_bytes = data.documents.iter().map(|d| d.text.len()).sum::<usize>();
+    if indexed_bytes - doc.text.len() + replacement.len() > MAX_INDEX_BYTES { return Err("修改后超出正文索引总量限制，请先移除不需要的目录。".into()); }
+    fs::create_dir_all(backups).map_err(|e| e.to_string())?;
+    let backup = backup_path(backups, id);
+    let temp_backup = backup.with_extension("tmp");
+    let mut backup_file = fs::File::create(&temp_backup).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut backup_file, &SourceBackup { id: id.into(), original: original.clone(), replacement: replacement.clone() }).map_err(|e| e.to_string())?;
+    backup_file.sync_all().map_err(|e| e.to_string())?; drop(backup_file);
+    super::replace_file_atomic(&temp_backup, &backup)?;
+    let temporary = path.with_file_name(format!(".knowledge-write-{}-{}.tmp", std::process::id(), now()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(|e| e.to_string())?;
+        file.write_all(replacement.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?; drop(file);
+        check_document(data, id, expected)?;
+        if fs::read_to_string(&path).map_err(|e| e.to_string())? != original { return Err("保存前原文件已被其他程序修改，未覆盖。".into()); }
+        super::replace_file_atomic(&temporary, &path)?;
+        let document = &mut data.documents[index];
+        document.text = replacement.trim_start_matches('\u{feff}').into();
+        let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+        document.revision = revision(&metadata); document.size = metadata.len(); document.updated_at = now();
+        document.status = "pending".into(); document.ai_error.clear(); document.metadata_version += 1;
+        Ok(())
+    })();
+    if temporary.exists() { let _ = fs::remove_file(&temporary); }
+    result
+}
+
+fn restore_source(data: &mut Library, id: &str, expected: &str, backups: &Path) -> Result<(), String> {
+    let index = check_document(data, id, expected)?;
+    let backup: SourceBackup = serde_json::from_slice(&fs::read(backup_path(backups, id)).map_err(|_| "这份资料没有可撤销的 App 原文修改。")?).map_err(|e| e.to_string())?;
+    if backup.id != id || backup.replacement.trim_start_matches('\u{feff}') != data.documents[index].text { return Err("原文件已在其他操作中改变，不能直接撤销旧修改。".into()); }
+    write_source(data, id, expected, &backup.original, backups)
+}
+
+#[tauri::command]
+pub async fn library_save_source(app: tauri::AppHandle, id: String, revision: String, content: String) -> Result<Library, String> {
+    let backups = store_path(&app)?.parent().ok_or("索引目录不存在。")?.join("source-backups");
+    transaction(app, move |data| write_source(data, &id, &revision, &content, &backups)).await
+}
+
+#[tauri::command]
+pub async fn library_restore_source(app: tauri::AppHandle, id: String, revision: String) -> Result<Library, String> {
+    let backups = store_path(&app)?.parent().ok_or("索引目录不存在。")?.join("source-backups");
+    transaction(app, move |data| restore_source(data, &id, &revision, &backups)).await
+}
+
+#[tauri::command]
+pub async fn library_open_source(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = STORE_LOCK.lock().map_err(|e| e.to_string())?;
+        let data = load(&store_path(&app)?)?;
+        let doc = data.documents.iter().find(|d| d.id == id).ok_or("资料已移除。")?;
+        let root = data.roots.iter().find(|r| r.id == doc.root_id).ok_or("目录已移除。")?;
+        let path = source_path(root, doc)?;
+        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if !editable(&path) && !["docx", "doc", "pdf", "xlsx", "xls", "pptx", "ppt", "png", "jpg", "jpeg", "webp", "gif"].contains(&extension.as_str()) { return Err("此格式请从资源管理器自行打开。".into()); }
+        #[cfg(windows)] {
+            use std::os::windows::process::CommandExt;
+            let display = path.to_string_lossy();
+            let ordinary = if let Some(unc) = display.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{unc}") } else { display.trim_start_matches("\\\\?\\").to_string() };
+            std::process::Command::new("explorer.exe").arg(ordinary).creation_flags(0x08000000).spawn().map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(windows))] {
+            let command = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+            std::process::Command::new(command).arg(path).spawn().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -304,7 +516,9 @@ pub async fn library_export(app: tauri::AppHandle, id: String, revision: String)
         let root = data.roots.iter().find(|r| r.id == doc.root_id).ok_or("目录不存在。")?;
         let path = picked.path();
         if path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()) != Some("md".into()) { return Err("请选择 .md 文件名。".into()); }
-        let content = format!("---\nsummary: {}\ncategory: {}\ntags: {}\n---\n\n# {}\n\n来源：{} / {}\n\n## 摘要\n\n{}\n\n> 这是整理卡片，原文件保留原位。\n", serde_json::to_string(&doc.summary).map_err(|e| e.to_string())?, serde_json::to_string(&doc.category).map_err(|e| e.to_string())?, serde_json::to_string(&doc.tags).map_err(|e| e.to_string())?, doc.path, root.path, doc.path, doc.summary);
+        let tips = doc.tips.iter().map(|tip| format!("- {}\n\n  > {}\n", tip.content, tip.quote.replace('\n', "\n  > "))).collect::<Vec<_>>().join("\n");
+        let stale = !doc.analysis_revision.is_empty() && doc.analysis_revision != doc.revision;
+        let content = format!("---\nsummary: {}\ncategories: {}\ntags: {}\n---\n\n# {}\n\n来源：{} / {}\n\n{}\n\n## 摘要\n\n{}\n\n## 知识 tip 与原文引用\n\n{}\n\n> 这是整理卡片，原文件保留原位。\n", serde_json::to_string(&doc.summary).map_err(|e| e.to_string())?, serde_json::to_string(&doc.categories).map_err(|e| e.to_string())?, serde_json::to_string(&doc.tags).map_err(|e| e.to_string())?, doc.path, root.path, doc.path, if stale { "> 原文件已更新，以下整理内容与引用来自旧版本，待重新核对。" } else { "" }, doc.summary, tips);
         let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| format!("无法新建卡片（同名文件不会覆盖）：{e}"))?;
         file.write_all(content.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
         Ok(Some(path.to_string_lossy().into_owned()))
@@ -329,11 +543,11 @@ mod tests {
         fs::write(&path, "正文独有的关键词").unwrap(); let mut data = fixture.library(); scan(&mut data);
         assert_eq!(data.documents[0].text, "正文独有的关键词");
         let doc = data.documents[0].clone();
-        save_review(&mut data, Review { id: doc.id.clone(), revision: doc.revision.clone(), status: "reviewed".into(), summary: "摘要".into(), category: "学习".into(), tags: vec!["英语".into()] }).unwrap();
+        save_review(&mut data, Review { id: doc.id.clone(), revision: doc.revision.clone(), status: "reviewed".into(), summary: "摘要".into(), category: "学习".into(), tags: vec!["英语".into()], ..Review::default() }).unwrap();
         scan(&mut data); assert_eq!(data.documents[0].status, "reviewed");
         assert_eq!(fs::read_to_string(&path).unwrap(), "正文独有的关键词");
         fs::write(&path, "文件变更后必须重新整理").unwrap(); scan(&mut data);
-        assert_eq!(data.documents[0].status, "pending"); assert!(data.documents[0].summary.is_empty());
+        assert_eq!(data.documents[0].status, "pending"); assert_eq!(data.documents[0].summary, "摘要"); assert_eq!(data.documents[0].tags, vec!["英语"]); assert_ne!(data.documents[0].analysis_revision, data.documents[0].revision);
         fs::remove_file(path).unwrap(); scan(&mut data); assert!(data.documents.is_empty());
     }
     #[test]
@@ -341,7 +555,7 @@ mod tests {
         let fixture = Fixture::new(); let path = fixture.0.join("note.md"); fs::write(&path, "old").unwrap();
         let mut data = fixture.library(); scan(&mut data); let doc = data.documents[0].clone(); data.roots[0].paused = true;
         fs::write(&path, "new content").unwrap(); scan(&mut data); assert_eq!(data.documents[0].text, "old");
-        assert!(save_review(&mut data, Review { id: doc.id, revision: doc.revision, status: "reviewed".into(), summary: "old result".into(), category: String::new(), tags: vec![] }).is_err());
+        assert!(save_review(&mut data, Review { id: doc.id, revision: doc.revision, status: "reviewed".into(), summary: "old result".into(), category: String::new(), tags: vec![], ..Review::default() }).is_err());
         data.roots[0].paused = false;
         let moved = fixture.0.with_extension("offline"); fs::rename(&fixture.0, &moved).unwrap(); scan(&mut data);
         assert_eq!(data.documents.len(), 1); assert!(data.roots[0].issue.is_some()); fs::rename(moved, &fixture.0).unwrap();
@@ -384,5 +598,84 @@ mod tests {
         assert_eq!(data.documents.len(), 2); assert_ne!(data.documents[0].id, data.documents[1].id);
         fs::remove_file(a.0.join("same.txt")).unwrap(); scan(&mut data);
         assert_eq!(data.documents.len(), 1); assert_eq!(data.documents[0].text, "目录乙");
+    }
+
+    fn review_for(doc: &Document) -> Review {
+        Review { id: doc.id.clone(), revision: doc.revision.clone(), metadata_version: Some(doc.metadata_version), status: "reviewed".into(), summary: "人物需要有清楚的动机".into(), category: "创作/人物".into(), categories: vec!["创作/人物".into(), "学习/叙事".into()], tags: vec!["人物动机".into()], tips: vec![Tip { id: "1".into(), content: "先写人物动机，再写行动".into(), quote: "人物动机决定行动".into() }], ..Review::default() }
+    }
+
+    #[test]
+    fn virtual_classification_quotes_and_optimistic_metadata_writes() {
+        let fixture = Fixture::new(); let path = fixture.0.join("创作.txt");
+        fs::write(&path, "人物动机决定行动，行动推动情节。").unwrap();
+        let mut data = fixture.library(); scan(&mut data); let first = data.documents[0].clone();
+        let request = review_for(&first); save_review(&mut data, request.clone()).unwrap();
+        assert_eq!(data.documents[0].categories.len(), 2);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "人物动机决定行动，行动推动情节。");
+        assert!(save_review(&mut data, request).is_err(), "stale metadata must not overwrite newer human changes");
+        let mut invalid = review_for(&data.documents[0]); invalid.tips[0].quote = "这句话原文不存在".into();
+        assert!(save_review(&mut data, invalid).is_err());
+        let mut ai = review_for(&data.documents[0]); ai.source = "ai".into(); ai.categories = vec!["AI不同分类".into()]; ai.tags = vec!["AI标签".into()];
+        save_review(&mut data, ai).unwrap();
+        assert_eq!(data.documents[0].categories, vec!["创作/人物", "学习/叙事"]);
+        assert_eq!(data.documents[0].tags, vec!["人物动机"]);
+    }
+
+    #[test]
+    fn changes_preserve_human_labels_and_mark_old_knowledge_as_stale() {
+        let fixture = Fixture::new(); let path = fixture.0.join("创作.txt");
+        fs::write(&path, "人物动机决定行动，行动推动情节。").unwrap();
+        let mut data = fixture.library(); scan(&mut data);
+        let request = review_for(&data.documents[0]); save_review(&mut data, request).unwrap();
+        fs::write(&path, "更新后的正文有另一个观点，需要重新整理。").unwrap(); scan(&mut data);
+        let doc = data.documents[0].clone(); assert_eq!(doc.status, "pending"); assert_eq!(doc.tags, vec!["人物动机"]); assert_eq!(doc.tips.len(), 1); assert_ne!(doc.analysis_revision, doc.revision);
+        let mut metadata_only = review_for(&doc); metadata_only.analysis_revision = Some(doc.analysis_revision.clone()); metadata_only.tips = doc.tips.clone(); metadata_only.categories = vec!["我的新分类".into()];
+        save_review(&mut data, metadata_only).unwrap();
+        assert_eq!(data.documents[0].status, "pending"); assert_eq!(data.documents[0].categories, vec!["我的新分类"]);
+    }
+
+    #[test]
+    fn version_one_index_migrates_without_losing_confirmed_labels() {
+        let fixture = Fixture::new(); fs::write(fixture.0.join("创作.txt"), "人物动机决定行动").unwrap();
+        let mut data = fixture.library(); scan(&mut data); data.documents[0].category = "以前的分类".into(); data.documents[0].summary = "旧摘要".into(); data.documents[0].status = "reviewed".into();
+        let mut json = serde_json::to_value(&data).unwrap();
+        for key in ["categories", "tips", "analysisRevision", "metadataVersion", "classificationLocked", "aiError"] { json["documents"][0].as_object_mut().unwrap().remove(key); }
+        let path = fixture.0.join("old-index.json"); fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        let migrated = load(&path).unwrap(); assert_eq!(migrated.version, 2); assert_eq!(migrated.documents[0].categories, vec!["以前的分类"]); assert!(migrated.documents[0].classification_locked);
+        assert_eq!(migrated.documents[0].analysis_revision, migrated.documents[0].revision);
+    }
+
+    #[test]
+    fn source_edit_and_undo_preserve_path_encoding_and_classification() {
+        let fixture = Fixture::new(); let backup = Fixture::new(); let path = fixture.0.join("创作.txt");
+        let original = "\u{feff}人物动机决定行动\r\n下一行\r\n";
+        fs::write(&path, original).unwrap(); let mut data = fixture.library(); scan(&mut data);
+        let request = review_for(&data.documents[0]); save_review(&mut data, request).unwrap();
+        let doc = data.documents[0].clone(); write_source(&mut data, &doc.id, &doc.revision, "新的正文\n下一行\n", &backup.0).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "\u{feff}新的正文\r\n下一行\r\n"); assert_eq!(data.documents[0].tags, vec!["人物动机"]);
+        assert!(write_source(&mut data, &doc.id, &doc.revision, "旧版覆盖", &backup.0).is_err());
+        let updated = data.documents[0].clone(); restore_source(&mut data, &updated.id, &updated.revision, &backup.0).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn source_writes_reject_path_escape_and_external_edits() {
+        let fixture = Fixture::new(); let backup = Fixture::new(); let path = fixture.0.join("note.txt");
+        fs::write(&path, "最初的正文").unwrap(); let mut data = fixture.library(); scan(&mut data);
+        let doc = data.documents[0].clone(); data.documents[0].path = "../outside.txt".into();
+        assert!(write_source(&mut data, &doc.id, &doc.revision, "越界内容", &backup.0).is_err());
+        data.documents[0] = doc.clone(); fs::write(&path, "外部编辑器更新过的正文").unwrap();
+        assert!(write_source(&mut data, &doc.id, &doc.revision, "覆盖外部编辑", &backup.0).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "外部编辑器更新过的正文");
+    }
+
+    #[test]
+    fn unambiguous_rename_preserves_virtual_knowledge() {
+        let fixture = Fixture::new(); let path = fixture.0.join("before.txt");
+        fs::write(&path, "人物动机决定行动").unwrap(); let mut data = fixture.library(); scan(&mut data);
+        let request = review_for(&data.documents[0]); save_review(&mut data, request).unwrap();
+        fs::rename(path, fixture.0.join("after.txt")).unwrap(); scan(&mut data);
+        assert_eq!(data.documents.len(), 1); assert_eq!(data.documents[0].path, "after.txt"); assert_eq!(data.documents[0].status, "reviewed"); assert_eq!(data.documents[0].tips.len(), 1);
     }
 }

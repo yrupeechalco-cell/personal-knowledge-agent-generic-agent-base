@@ -100,6 +100,8 @@ import {
 } from "react";
 import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSelectionOptions } from "./WorkspaceLauncher";
 import { LibraryInbox } from "./LibraryInbox";
+import { createLibraryAgentTools } from "./libraryAgentTools";
+import { LIBRARY_CHANGED } from "./useLibraryController";
 import type { LibraryAdapter } from "./libraryModel";
 import { TypeWordsPlugin } from "./plugins/TypeWordsPlugin";
 import { TypeWordsStartup } from "./plugins/TypeWordsStartup";
@@ -979,7 +981,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
               }
             }
           : {}),
-        tools: appAgentTools
+        tools: [...appAgentTools, ...createLibraryAgentTools(adapter.library, () => window.dispatchEvent(new Event(LIBRARY_CHANGED)))]
       }),
     [adapter, appAgentTools, selectedAgentMode, selectedAgentModel]
   );
@@ -3204,7 +3206,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setWorkspaceTabs((current) => current.some((tab) => tab.id === "library:inbox") ? current : [...current, { id: "library:inbox", mode: "library" }]);
     setActiveTabId("library:inbox");
     setCenterMode("library");
-    setStatus("资料收件箱 · 选择文件夹后建立本地索引，原文件保持原位。");
+    setStatus("文件知识库 · 按主题、标签和知识 tip 浏览资料，原文件保持原位。");
   }
 
   function openTypeWordsTab() {
@@ -3869,7 +3871,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
         </IconButton>
-        <IconButton label="资料收件箱" active={centerMode === "library"} onClick={openLibraryTab}><FolderSearch /></IconButton>
+        <IconButton label="文件知识库" active={centerMode === "library"} onClick={openLibraryTab}><FolderSearch /></IconButton>
         <IconButton active={centerMode === "typewords"} label="英语学习" onClick={openTypeWordsTab}>
           <BookA />
         </IconButton>
@@ -4127,7 +4129,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </div>
           <div className="breadcrumb">
             <span>{centerMode === "library" ? "本机资料" : centerMode === "typewords" ? "插件" : centerMode === "canvas" ? runtime(sourceName) : (centerMode === "edit" || centerMode === "slides") && currentNote ? currentPath.split("/").slice(0, -1).join(" / ") || t("笔记") : sourceKind === "empty" ? t("开始") : centerMode === "explorer" || centerMode === "trash" || centerMode === "bases" ? runtime(sourceName) : t("关系图谱")}</span>
-            <strong>{centerMode === "library" ? "资料收件箱" : centerMode === "typewords" ? "英语学习" : centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
+            <strong>{centerMode === "library" ? "文件知识库" : centerMode === "typewords" ? "英语学习" : centerMode === "canvas" ? t("知识画布") : centerMode === "edit" && currentNote ? leafName(currentPath) : centerMode === "slides" && currentNote ? t("幻灯片") : sourceKind === "empty" ? t("未连接知识库") : centerMode === "graph" ? (graphPerspective === "knowledge" ? t("标签知识图谱") : t("文件关系图谱")) : centerMode === "explorer" ? (isReadOnlyStructure ? t("只读文件浏览") : t("资源查询")) : centerMode === "bases" ? t("属性数据库") : centerMode === "trash" ? t("回收站") : leafName(currentPath)}</strong>
           </div>
         </header>
         <div className="status-line">{runtime(status)}</div>
@@ -5253,7 +5255,7 @@ function tabIdForPath(path: string): string {
 }
 
 function tabTitle(tab: WorkspaceTab, index: ReturnType<typeof buildVaultIndex>): string {
-  if (tab.mode === "library") return "资料收件箱";
+  if (tab.mode === "library") return "文件知识库";
   if (tab.mode === "typewords") return "英语学习";
   if (tab.mode === "graph") return "关系图谱";
   if (tab.mode === "canvas") return "知识画布";

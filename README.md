@@ -2,6 +2,16 @@
 
 **文档语言：** [简体中文](README.md) | [English](README_EN.md)
 
+## 文件知识库（0.3.0）
+
+选择电脑里的资料文件夹，让 AI 分段提取摘要、关键词和带原文引用的知识 tip，在 App 内按多层主题和多个分类浏览。原文件保留原来的位置，分类信息单独保存在本机索引中。
+
+- 批量整理、暂停/继续、失败重试，以及可选的新增文件自动整理。
+- 手动确认的分类与标签可锁定；源文件变化后保留旧知识并提示重新核对。
+- UTF-8 文本可在 App 内编辑原文并撤销上次修改；Word 等资料可在默认程序中打开。
+- [使用说明与验收清单](docs/DOCUMENT_LIBRARY.md)
+- [Windows 安装包与已发布版本](https://github.com/yrupeechalco-cell/personal-knowledge-agent-generic-agent-base/releases)
+
 ## 本地英语学习插件与源码来源
 
 本轮增加 TypeWords 本地插件试用版，以及 Markdown 阅读和 Agent 改写审核修复。
@@ -10,7 +20,7 @@
 - [第三方来源、作者与许可证](THIRD_PARTY_NOTICES.md)
 - [TypeWords 源码快照](third_party/typewords)（来自用户提供的本地目录，保留原项目许可证）
 
-此版本源码尚未代表新的 Windows 安装包发布。
+Windows 安装包以 Releases 页面中已发布的版本为准。
 
 ## 中文介绍
 

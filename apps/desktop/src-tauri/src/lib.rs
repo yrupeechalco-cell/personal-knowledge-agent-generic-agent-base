@@ -960,6 +960,8 @@ pub fn run() {
             typewords::typewords_start, typewords::typewords_select_directory,
             library::library_load, library::library_add_folder, library::library_scan,
             library::library_update_root, library::library_save_review, library::library_export,
+            library::library_configure, library::library_record_error, library::library_open_source,
+            library::library_save_source, library::library_restore_source,
             select_vault_dir,
             select_read_only_structure_dir,
             list_storage_roots,

@@ -9220,3 +9220,65 @@ body[data-theme="light"].resizing-columns .column-resizer::after {
     grid-template-columns: 48px minmax(120px, 1fr) 110px 26px 26px;
   }
 }
+/* Folder-backed knowledge library */
+.library-stats { display: flex; flex-wrap: wrap; gap: 12px 30px; margin: 18px 0; padding: 16px 18px; border: 1px solid var(--lib-line); border-radius: 10px; background: var(--lib-surface); color: var(--lib-muted); font-size: 12px; }
+.library-stats strong { font-size: 21px; color: var(--lib-accent); margin-right: 4px; }
+.library-queue { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 10px; border: 1px solid var(--lib-line); border-radius: 9px; background: var(--lib-surface); padding: 14px; margin-bottom: 16px; font-size: 12px; }
+.library-queue strong { display: flex; align-items: center; gap: 6px; color: var(--lib-accent); }
+.library-queue p { margin: 8px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+.library-queue > small { grid-column: 1 / -1; color: var(--lib-muted); line-height: 1.7; }
+.library-host .library-check { display: flex; align-items: center; gap: 7px; line-height: 1.7; margin: 0; font-size: 12px; }
+.library-host .library-check input { margin: 0; flex: 0 0 auto; }
+.library-workbench { display: grid; grid-template-columns: 185px minmax(0, 1fr); gap: 18px; }
+.library-taxonomy { align-self: start; background: var(--lib-surface); border: 1px solid var(--lib-line); border-radius: 8px; padding: 12px 8px; position: sticky; top: 0; max-height: 78vh; overflow: auto; }
+.library-taxonomy h3 { color: var(--lib-muted); font-size: 12px; margin: 8px 8px 12px; }
+.library-taxonomy > button { display: flex; width: 100%; justify-content: space-between; border-color: transparent; text-align: left; margin-bottom: 3px; }
+.library-taxonomy > button span { overflow-wrap: anywhere; min-width: 0; }
+.library-taxonomy > button small { color: var(--lib-muted); flex-shrink: 0; }
+.library-taxonomy p { font-size: 11px; color: var(--lib-muted); line-height: 1.7; padding: 0 8px; }
+.library-host :is(.library-taxonomy, .library-tag-cloud, .library-view-controls) button.active { color: var(--lib-accent); background: color-mix(in srgb, var(--lib-accent) 12%, var(--lib-surface)); border-color: color-mix(in srgb, var(--lib-accent) 30%, var(--lib-line)); }
+.library-tag-cloud { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 3px; }
+.library-tag-cloud button { padding: 5px 7px; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+.library-tag-cloud small { color: var(--lib-muted); }
+.library-taxonomy h3:not(:first-child) { margin-top: 24px; }
+.library-main { min-width: 0; }
+.library-main .library-columns { grid-template-columns: minmax(170px, .7fr) minmax(300px, 1.3fr); }
+.library-main .library-list { max-height: 74vh; }
+.library-view-controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.library-view-controls > div { display: flex; gap: 5px; }
+.library-view-controls select { max-width: 230px; min-width: 120px; border: 1px solid var(--lib-line); background: var(--lib-surface); color: inherit; padding: 7px; border-radius: 6px; font-size: 12px; }
+.library-breadcrumb { color: var(--lib-accent); font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.library-breadcrumb button { border: 0; padding: 3px 6px; font-size: 11px; }
+.library-item-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.library-item-tags span { font-size: 10px; padding: 3px 5px; border-radius: 4px; color: var(--lib-accent); background: color-mix(in srgb, var(--lib-accent) 10%, var(--lib-surface)); overflow-wrap: anywhere; }
+.library-source-actions { margin: 12px 0; }
+.library-edit-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.library-edit-fields small { display: block; margin-top: 5px; color: var(--lib-muted); font-size: 11px; line-height: 1.7; }
+.library-detail .library-category-input { min-height: 76px; }
+.library-tip-heading { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: 22px 0 12px; }
+.library-tip-heading h4 { margin: 0; font-size: 13px; }
+.library-tip-heading h4 span { color: var(--lib-muted); font-weight: normal; font-size: 11px; }
+.library-tip-editor { border: 1px solid var(--lib-line); border-radius: 7px; padding: 12px; margin-bottom: 12px; }
+.library-tip-editor textarea { min-height: 65px; }
+.library-tip-editor .library-actions button { padding: 5px 8px; font-size: 11px; }
+.library-tip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; align-items: start; }
+.library-tip-card { padding: 18px; background: var(--lib-surface); border: 1px solid var(--lib-line); border-radius: 9px; min-width: 0; }
+.library-tip-card p { font-size: 13px; line-height: 1.8; margin: 0 0 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.library-tip-card blockquote { font-size: 12px; line-height: 1.8; color: var(--lib-muted); border-left: 3px solid var(--lib-accent); padding-left: 10px; margin: 0 0 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.library-tip-card small { display: block; color: var(--lib-muted); font-size: 11px; margin-bottom: 10px; }
+.library-tip-card button { font-size: 11px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.library-content mark { background: #f4d97a; color: #2e291c; border-radius: 2px; }
+.library-source-editor { border: 1px solid var(--lib-accent); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.library-source-editor h4 { margin: 0; font-size: 13px; }
+.library-source-editor p { font-size: 11px; line-height: 1.7; color: var(--lib-muted); }
+.library-source-editor textarea { min-height: 280px; font-family: ui-monospace, Consolas, monospace; margin-bottom: 12px; }
+@media (max-width: 1200px) {
+  .library-workbench { grid-template-columns: 150px minmax(0, 1fr); gap: 12px; }
+  .library-main .library-columns { grid-template-columns: minmax(0, 1fr); }
+  .library-main .library-list { max-height: 30vh; }
+}
+@media (max-width: 700px) {
+  .library-workbench { grid-template-columns: minmax(0, 1fr); }
+  .library-taxonomy { position: static; max-height: 230px; }
+  .library-queue { grid-template-columns: minmax(0, 1fr); }
+}

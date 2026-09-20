@@ -54,7 +54,12 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       scan: () => invoke("library_scan"),
       updateRoot: (id, action) => invoke("library_update_root", { id, action }),
       saveReview: (review) => invoke("library_save_review", { review }),
-      exportCard: (id, revision) => invoke("library_export", { id, revision })
+      exportCard: (id, revision) => invoke("library_export", { id, revision }),
+      configure: (config) => invoke("library_configure", { config }),
+      recordError: (id, revision, error) => invoke("library_record_error", { id, revision, error }),
+      openSource: (id) => invoke("library_open_source", { id }),
+      saveSource: (id, revision, content) => invoke("library_save_source", { id, revision, content }),
+      restoreSource: (id, revision) => invoke("library_restore_source", { id, revision })
     },
     windowControls: {
       close: () => getCurrentWindow().close(),
