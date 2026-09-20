@@ -528,6 +528,9 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [editorMode, setEditorMode] = useState<EditorMode>("preview");
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([{ id: GRAPH_TAB_ID, mode: "graph" }]);
   const [activeTabId, setActiveTabId] = useState(GRAPH_TAB_ID);
+  // The graph is a fallback view, while only documents occupy the title bar.
+  const documentTabs = workspaceTabs.filter((tab) => Boolean(tab.path));
+  const [typeWordsOpened, setTypeWordsOpened] = useState(false);
   const [agentSessions, setAgentSessions] = useState<AgentConversationSession[]>(() => [createAgentConversationSession("1")]);
   const [activeAgentSessionId, setActiveAgentSessionId] = useState<string | null>(null);
   const [agentSessionHistory, setAgentSessionHistory] = useState<AgentSessionSnapshot[]>([]);
@@ -3179,18 +3182,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus("当前是只读硬盘浏览模式；关系图谱只用于已打开的 Markdown 知识库。");
       return;
     }
-    setWorkspaceTabs((current) => (current.some((tab) => tab.id === GRAPH_TAB_ID) ? current : [{ id: GRAPH_TAB_ID, mode: "graph" }, ...current]));
     setActiveTabId(GRAPH_TAB_ID);
     setCenterMode("graph");
   }
 
   function openCanvasTab() {
     setStorageOpen(false);
-    setWorkspaceTabs((current) => (
-      current.some((tab) => tab.id === CANVAS_TAB_ID)
-        ? current
-        : [...current, { id: CANVAS_TAB_ID, mode: "canvas" }]
-    ));
     setActiveTabId(CANVAS_TAB_ID);
     setCenterMode("canvas");
     if (sourceKind === "empty") {
@@ -3203,7 +3200,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   function openLibraryTab() {
     setStorageOpen(false);
     setLeftVisible(false);
-    setWorkspaceTabs((current) => current.some((tab) => tab.id === "library:inbox") ? current : [...current, { id: "library:inbox", mode: "library" }]);
     setActiveTabId("library:inbox");
     setCenterMode("library");
     setStatus("文件知识库 · 按主题、标签和知识 tip 浏览资料，原文件保持原位。");
@@ -3212,16 +3208,13 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   function openTypeWordsTab() {
     setStorageOpen(false);
     if (window.innerWidth < 900) setLeftVisible(false);
-    setWorkspaceTabs((current) => current.some((tab) => tab.id === "plugin:typewords") ? current : [...current, { id: "plugin:typewords", mode: "typewords" }]);
+    setTypeWordsOpened(true);
     setActiveTabId("plugin:typewords");
     setCenterMode("typewords");
     setStatus("英语学习插件 · 学习记录由本机 TypeWords 保存。");
   }
 
   function openExplorerTab() {
-    setWorkspaceTabs((current) =>
-      current.some((tab) => tab.id === EXPLORER_TAB_ID) ? current : [...current, { id: EXPLORER_TAB_ID, mode: "explorer" }]
-    );
     setActiveTabId(EXPLORER_TAB_ID);
     setCenterMode("explorer");
   }
@@ -3232,9 +3225,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus("只读硬盘结构没有读取正文与属性，无法生成属性数据库。");
       return;
     }
-    setWorkspaceTabs((current) =>
-      current.some((tab) => tab.id === BASES_TAB_ID) ? current : [...current, { id: BASES_TAB_ID, mode: "bases" }]
-    );
     setActiveTabId(BASES_TAB_ID);
     setCenterMode("bases");
   }
@@ -3259,9 +3249,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setStatus("回收站只属于当前打开的本地桌面知识库。");
       return;
     }
-    setWorkspaceTabs((current) =>
-      current.some((tab) => tab.id === TRASH_TAB_ID) ? current : [...current, { id: TRASH_TAB_ID, mode: "trash" }]
-    );
     setActiveTabId(TRASH_TAB_ID);
     setCenterMode("trash");
   }
@@ -3295,7 +3282,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function navigateWorkspaceTabs(direction: -1 | 1) {
-    const target = adjacentWorkspaceTab(workspaceTabs, activeTabId, direction);
+    const target = adjacentWorkspaceTab(documentTabs, activeTabId, direction);
     if (target) activateTab(target);
   }
 
@@ -3677,8 +3664,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </IconButton>
         </div>
         <div className="tab-strip">
-          <div className="tabs-scroll" role="tablist" aria-label="Open workspace tabs">
-            {workspaceTabs.map((tab) => (
+          {documentTabs.length > 0 && <div className="tabs-scroll" role="tablist" aria-label="Open document tabs">
+            {documentTabs.map((tab) => (
               <div
                 aria-selected={tab.id === activeTabId}
                 className={tab.id === activeTabId ? "tab active" : "tab"}
@@ -3686,39 +3673,25 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
                 onClick={() => activateTab(tab)}
                 role="tab"
                 tabIndex={0}
-                title={tab.path ?? "Graph"}
+                title={tab.path}
               >
-                {tab.mode === "library" ? <FolderSearch size={13} /> : tab.mode === "typewords" ? <BookA size={13} /> : tab.mode === "graph"
-                  ? <GitBranch size={13} />
-                  : tab.mode === "canvas"
-                    ? <PanelsTopLeft size={13} />
-                    : tab.mode === "explorer"
-                      ? <HardDrive size={13} />
-                      : tab.mode === "bases"
-                        ? <TableProperties size={13} />
-                        : tab.mode === "slides"
-                          ? <Presentation size={13} />
-                      : tab.mode === "trash"
-                        ? <Trash2 size={13} />
-                      : <BookOpen size={13} />}
+                {tab.mode === "slides" ? <Presentation size={13} /> : <BookOpen size={13} />}
                 <span>{t(tabTitle(tab, index))}</span>
                 {tab.path && dirtyPaths.includes(tab.path) ? <b className="tab-dirty" aria-label="Unsaved changes" /> : null}
-                {tab.id !== GRAPH_TAB_ID && !(sourceKind === "structure" && tab.id === EXPLORER_TAB_ID) ? (
-                  <button
-                    aria-label={`Close ${tabTitle(tab, index)}`}
-                    className="tab-close"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeTab(tab.id);
-                    }}
-                    type="button"
-                  >
-                    <X size={12} />
-                  </button>
-                ) : null}
+                <button
+                  aria-label={`Close ${tabTitle(tab, index)}`}
+                  className="tab-close"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  type="button"
+                >
+                  <X size={12} />
+                </button>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
         <div className="chrome-right">
           {draftChanges.length > 0 || trashEntries.length > 0 || autoSaving ? (
@@ -4134,7 +4107,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         </header>
         <div className="status-line">{runtime(status)}</div>
         <TypeWordsStartup adapter={adapter.typewords} />
-        {workspaceTabs.some((tab) => tab.mode === "typewords") && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin adapter={adapter.typewords} /></div>}
+        {typeWordsOpened && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin adapter={adapter.typewords} /></div>}
         <LibraryInbox adapter={adapter.library} runModel={adapter.runModel} model={selectedAgentModel} modelReady={selectedModelConfigured && selectedAgentProvider !== "offline"} visible={centerMode === "library"} />
         {centerMode === "library" || centerMode === "typewords" ? null : centerMode === "canvas" ? (
           <KnowledgeCanvas

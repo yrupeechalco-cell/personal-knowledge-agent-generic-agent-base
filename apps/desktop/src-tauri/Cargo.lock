@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "knowledge-agent-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "notify",
  "quick-xml 0.38.4",

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSafetyManifest } from "@knowledge-agent/core";
 import { createEmptyVault, KnowledgeWorkspace, type KnowledgeWorkspaceAdapter } from "./KnowledgeWorkspace";
@@ -45,7 +45,7 @@ function createLoadedAdapter(): KnowledgeWorkspaceAdapter {
 }
 
 describe("KnowledgeWorkspace navigation", () => {
-  it("opens the English plugin without a vault and retains its iframe across tabs", async () => {
+  it("switches sidebar features without title-bar tabs and retains the English iframe", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({}));
     const adapter = createEmptyAdapter();
     render(<KnowledgeWorkspace adapter={adapter} />);
@@ -53,11 +53,36 @@ describe("KnowledgeWorkspace navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "英语学习" }));
     const frame = await screen.findByTitle("TypeWords 英语学习");
     expect(adapter.openVault).not.toHaveBeenCalled();
+    expect(screen.queryByRole("tablist")).toBeNull();
+    for (const name of ["知识画布", "属性数据库", "资源查询", "文件知识库", "关系图谱"]) {
+      const button = screen.getByRole("button", { name });
+      fireEvent.click(button);
+      expect(button.classList.contains("active")).toBe(true);
+      expect(screen.queryByRole("tab")).toBeNull();
+    }
     fireEvent.click(screen.getByRole("button", { name: "关系图谱" }));
     expect(frame.closest(".typewords-plugin-host")?.hasAttribute("hidden")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "英语学习" }));
     expect(screen.getByTitle("TypeWords 英语学习")).toBe(frame);
     expect(frame.closest(".typewords-plugin-host")?.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("preserves document tabs while switching features and navigates only between documents", async () => {
+    render(<KnowledgeWorkspace adapter={createLoadedAdapter()} />);
+    fireEvent.click(await screen.findByTitle("A.md"));
+    fireEvent.click(screen.getByTitle("B.md"));
+    const tabs = within(screen.getByRole("tablist", { name: "Open document tabs" }));
+    expect(tabs.getAllByRole("tab").map((tab) => tab.getAttribute("title"))).toEqual(["A.md", "B.md"]);
+    for (const name of ["知识画布", "属性数据库", "资源查询", "回收站", "文件知识库", "关系图谱"]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      expect(tabs.getAllByRole("tab")).toHaveLength(2);
+      expect(tabs.queryByRole("tab", { selected: true })).toBeNull();
+    }
+    fireEvent.click(tabs.getByRole("tab", { name: /B/ }));
+    fireEvent.click(screen.getByRole("button", { name: "后退" }));
+    expect(tabs.getByRole("tab", { selected: true }).getAttribute("title")).toBe("A.md");
+    fireEvent.click(screen.getByRole("button", { name: "前进" }));
+    expect(tabs.getByRole("tab", { selected: true }).getAttribute("title")).toBe("B.md");
   });
 
   it.each([false, true])("stages destructive Agent edits and guards stale proposals (stale=%s)", async (stale) => {

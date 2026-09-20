@@ -1,7 +1,7 @@
 {
   "name": "personal-knowledge-agent-generic-agent-base",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "GitHub-native Obsidian-like personal knowledge base Agent.",
   "type": "module",
   "workspaces": [
