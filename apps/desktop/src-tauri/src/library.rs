@@ -114,11 +114,21 @@ fn persist(path: &Path, library: &Library) -> Result<(), String> {
     super::replace_file_atomic(&temp, path)
 }
 
+// Keep concurrent Windows App instances from overwriting the same index/temp file.
+// Windows releases the exclusive handle after a crash; the empty lock file may stay.
+fn acquire_store(path: &Path) -> Result<fs::File, String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(windows)] { use std::os::windows::fs::OpenOptionsExt; options.share_mode(0); }
+    options.open(path.with_extension("lock")).map_err(|_| "另一个 App 窗口正在保存资料，请稍后重试。".into())
+}
+
 async fn transaction<F>(app: tauri::AppHandle, change: F) -> Result<Library, String>
 where F: FnOnce(&mut Library) -> Result<(), String> + Send + 'static {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = STORE_LOCK.lock().map_err(|_| "资料索引正处于错误状态，请重启 App。".to_string())?;
         let path = store_path(&app)?;
+        let _file_guard = acquire_store(&path)?;
         let mut data = load(&path)?;
         change(&mut data)?;
         data.store_revision += 1;
@@ -677,5 +687,13 @@ mod tests {
         let request = review_for(&data.documents[0]); save_review(&mut data, request).unwrap();
         fs::rename(path, fixture.0.join("after.txt")).unwrap(); scan(&mut data);
         assert_eq!(data.documents.len(), 1); assert_eq!(data.documents[0].path, "after.txt"); assert_eq!(data.documents[0].status, "reviewed"); assert_eq!(data.documents[0].tips.len(), 1);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn separate_app_instances_cannot_write_the_index_concurrently() {
+        let fixture = Fixture::new(); let path = fixture.0.join("index.json");
+        let first = acquire_store(&path).unwrap(); assert!(acquire_store(&path).is_err());
+        drop(first); assert!(acquire_store(&path).is_ok());
     }
 }

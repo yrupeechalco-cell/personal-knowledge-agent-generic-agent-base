@@ -76,7 +76,13 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
         failures.current.add(`${doc.id}:${doc.revision}`);
         consecutiveFailures.current++;
         if (alive.current) setNotice(`「${doc.path}」整理失败，已保留原结果；可点击「重试失败项」。`);
-        let next = adapter.recordError ? await adapter.recordError(doc.id, doc.revision, String(reason)) : latest.current;
+        let next: LibrarySnapshot;
+        try { next = adapter.recordError ? await adapter.recordError(doc.id, doc.revision, String(reason)) : latest.current; }
+        catch (saveError) {
+          // A disk/lock error must not spin on the same failed file indefinitely.
+          await adapter.configure!({ queueState: "paused" }).then(apply).catch(() => {});
+          throw saveError;
+        }
         if (consecutiveFailures.current >= 3) {
           next = await adapter.configure!({ queueState: "paused" });
           if (alive.current) setError("连续 3 份资料整理失败，已暂停。请检查模型连接后重试失败项。");
@@ -84,6 +90,6 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
         return next;
       } finally { if (alive.current) setProgress(""); }
     });
-  }, [adapter, runModel, model, modelReady, editing, busy, data, configure, operate]);
+  }, [adapter, runModel, model, modelReady, editing, busy, data, configure, operate, apply]);
   return { data, busy, error, notice, progress, autoScan, setAutoScan, operate, configure, setNotice };
 }
