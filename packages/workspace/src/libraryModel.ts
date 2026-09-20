@@ -120,14 +120,11 @@ export async function analyzeLibraryDocument(doc: LibraryDocument, model: string
     return [...counts].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([value]) => value);
   };
   const categories = mostFrequent(results.flatMap((result) => result.categories), 12);
-  const tips: LibraryTip[] = [];
-  for (let rank = 0; rank < 16 && tips.length < 16; rank++) {
-    for (const result of results) {
-      const tip = result.tips[rank];
-      if (tip && tips.length < 16 && !tips.some((saved) => saved.quote === tip.quote)) tips.push({ ...tip, id: `tip-${tips.length + 1}` });
-    }
-  }
-  const allowance = Math.max(20, Math.floor(5700 / results.length));
+  const uniqueTips = [...new Map(results.flatMap((result) => result.tips).map((tip) => [tip.quote, tip])).values()];
+  const selectedTips = uniqueTips.length <= 16 ? uniqueTips : Array.from({ length: 16 }, (_, i) => uniqueTips[Math.round(i * (uniqueTips.length - 1) / 15)]);
+  const tips = selectedTips.map((tip, i) => ({ ...tip, id: `tip-${i + 1}` }));
+  // Reserve space for every part heading so the final part survives the size limit.
+  const allowance = Math.max(20, Math.floor((6000 - results.length * 20) / results.length));
   const summary = results.length === 1 ? results[0].summary : results.map((result, i) => `第 ${i + 1} 段：${result.summary.slice(0, allowance)}${result.summary.length > allowance ? "…" : ""}`).join("\n\n");
   return { summary: summary.slice(0, 6000), category: categories[0] ?? "", categories, tags: mostFrequent(results.flatMap((result) => result.tags), 20), tips };
 }

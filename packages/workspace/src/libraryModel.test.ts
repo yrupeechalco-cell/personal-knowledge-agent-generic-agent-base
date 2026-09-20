@@ -48,4 +48,12 @@ describe("document library", () => {
     const review = aiReview(locked, { summary: "新摘要", categories: ["AI分类"], category: "AI分类", tags: ["AI标签"], tips: [] });
     expect(review.categories).toEqual(locked.categories); expect(review.tags).toEqual(locked.tags); expect(review.metadataVersion).toBe(3); expect(review.analysisRevision).toBe(doc.revision);
   });
+  it("keeps the final part summary even for documents with many chunks", async () => {
+    const long = { ...doc, text: "a".repeat(360000) + "尾部独有的要点" };
+    const result = await analyzeLibraryDocument(long, "test", async (request) => {
+      const payload = JSON.parse(request.messages[0].content);
+      return JSON.stringify({ summary: (payload.excerpt.includes("尾部独有的要点") ? "尾部要点" : "前文要点") + "长摘要".repeat(300), categories: [], tags: [], tips: [] });
+    }, []);
+    expect(result.summary.length).toBeLessThanOrEqual(6000); expect(result.summary).toContain("尾部要点");
+  });
 });
