@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -55,6 +55,7 @@ await writeFile(path.join(destination, 'THIRD_PARTY_LICENSES/index.json'), JSON.
 const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
 const tagUrl = `https://github.com/yrupeechalco-cell/personal-knowledge-agent-generic-agent-base/tree/app-v${version}`;
 await writeFile(path.join(destination, 'SOURCE.md'), `# TypeWords\n\nBy zyronon and TypeWords contributors. Upstream: https://github.com/zyronon/TypeWords\n\nBuilt from the user-provided TypeWords-3.0.7 source snapshot (not a verified upstream tag).\nCorresponding source: ${tagUrl}/third_party/typewords\nSource archive: https://github.com/yrupeechalco-cell/personal-knowledge-agent-generic-agent-base/archive/refs/tags/app-v${version}.zip\nBuild instructions: ${tagUrl}/docs/TYPEWORDS_PLUGIN.md\nBuild scripts and pnpm lockfile are included in that source archive.\nGPL-3.0 license: LICENSE. Dependency license notices are retained in the production output.\n\nBundled Node.js 24.14.0: https://nodejs.org/dist/v24.14.0/\nNode.js and bundled library license notices: runtime/LICENSE.\nThis integration does not include or synchronize personal learning records.\n`);
+await appendFile(path.join(destination, 'SOURCE.md'), '\n## Desktop integration modifications (2026-09-24)\n\nThe isolated build copy changes app/core/config/env.ts to remove the duplicate slash in local library URLs, and app/core/hooks/sound.ts to handle rejected audio play promises while keeping the existing speech-synthesis fallback. These are Knowledge Agent integration changes, not upstream changes. Both patches are reproduced by scripts/copy-typewords-build-source.mjs in the corresponding source archive. The original snapshot remains unchanged. Additional original dependency notices are in THIRD_PARTY_LICENSES/.\n');
 const files = [];
 async function record(directory, prefix = '') {
   for (const entry of await readdir(directory, { withFileTypes: true })) {

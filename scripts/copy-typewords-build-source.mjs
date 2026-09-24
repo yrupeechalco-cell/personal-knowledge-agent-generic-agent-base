@@ -14,3 +14,10 @@ const envSource = await readFile(envFile, 'utf8');
 const original = "LIBS_URL: '/libs/',";
 if (!envSource.includes(original)) throw new Error('Review the TypeWords local library URL patch for this source snapshot.');
 await writeFile(envFile, envSource.replace(original, "LIBS_URL: '/libs',"));
+// The existing audio error handler already falls back to speech synthesis. Also
+// consume play()'s rejected promise when online audio is unavailable or interrupted.
+const soundFile = path.join(root, '.artifacts/typewords-build/source/app/core/hooks/sound.ts');
+const soundSource = await readFile(soundFile, 'utf8');
+const originalPlay = 'void wordAudio.play()';
+if (!soundSource.includes(originalPlay)) throw new Error('Review the TypeWords audio rejection patch for this source snapshot.');
+await writeFile(soundFile, soundSource.replace(originalPlay, 'void wordAudio.play().catch(() => {})'));

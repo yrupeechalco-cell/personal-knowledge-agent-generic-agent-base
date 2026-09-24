@@ -20,7 +20,7 @@
 
 从知识库 0.3.2 起，Windows 安装包包含该快照生成的 TypeWords 生产输出，连同原 GPL-3.0 LICENSE、指向同版本完整源码及构建方法的 SOURCE.md 一起分发。源码快照仍保持未修改；隔离构建目录、打包与完整性检查脚本属于本项目的集成代码。Release 自动提供的源码 ZIP 包含快照、依赖锁文件及这些构建脚本。
 
-隔离构建副本应用一处明确的适配修复：`app/core/config/env.ts` 的 `LIBS_URL` 从 `/libs/` 改为 `/libs`，避免上游拼接出 `/libs//Shepherd…` 导致本机生产服务返回 404。改动由 `scripts/copy-typewords-build-source.mjs` 重现，原始快照及 SHA-256 清单不变；该修复不归为上游原有功能。
+隔离构建副本应用两处适配修复（2026-09-24）：`app/core/config/env.ts` 的 `LIBS_URL` 从 `/libs/` 改为 `/libs`，避免拼接出 `/libs//Shepherd…` 导致本机服务返回 404；`app/core/hooks/sound.ts` 捕获音频 `play()` 被拒绝的 Promise，保留原有语音合成回退，避免外部发音不可用时产生未处理异常。改动由 `scripts/copy-typewords-build-source.mjs` 重现，原始快照及 SHA-256 清单不变；这些修复不归为上游原有功能。安装目录 SOURCE.md 也注明了修改文件、日期和来源。
 
 ### 内置 Node.js
 
