@@ -45,9 +45,13 @@ npm run tauri:build
 
 `prepare-typewords.ps1` 从 Node 官方地址取得固定 24.14.0 ZIP，校验固定 SHA-256；使用其中的 Node 与固定 pnpm 11.24.0，根据快照锁文件安装依赖并执行 Nuxt 的 `node-server` 构建。源码按 326 文件清单复制到隔离的构建目录，Nuxt 生成文件不会改写第三方原始快照。
 
+构建副本由 `copy-typewords-build-source.mjs` 修正 `LIBS_URL` 的末尾斜杠，避免新手引导等脚本的 `/libs//…` 路径在本机服务返回 404；补丁与原始快照均可从同版本源码获取。
+
 `stage-typewords.mjs` 将生产输出、Node 可执行文件及许可说明放入 Tauri 资源目录，并生成逐文件 SHA-256 清单。正式构建前强制检查资源完整性和应用版本；缺少资源时构建失败，防止再次发布只有入口的安装包。安装包内 `SOURCE.md` 指向同版本 GitHub 源码标签、完整源码 ZIP、锁文件和构建说明。
 
 `typewords:smoke` 将资源复制到含中文和空格的新目录，清空子进程 PATH 并使用全新用户环境，验证 `/words`、入口脚本、全部公共资源和 CET-4 词库。它不使用机器已安装的 Node 或已有 TypeWords 设置。原生测试覆盖无设置、损坏设置、旧目录消失、自定义目录有效及绝对运行时路径。
+
+发布流程另外在全新 Chromium 测试配置中加载具有同样 sandbox 权限的跨来源 iframe，验证首页实际渲染、打开 CET-4 并显示词条，同时检查未处理的脚本错误；测试中阻止外部网络请求。截图保存在工作流的 `typewords-browser-evidence` 附件，便于复核白屏问题。这项测试使用独立测试数据，不访问用户浏览器配置或学习记录。
 
 ## 网页预览
 

@@ -14,7 +14,7 @@
 
 ## 本地英语学习插件与源码来源
 
-本轮增加 TypeWords 本地插件试用版，以及 Markdown 阅读和 Agent 改写审核修复。
+从 0.3.2 起，正式 Windows 安装包自带 TypeWords 英语学习程序、词库和独立运行环境。换电脑安装后可直接从左侧“英语学习”进入，无需另装 Node 或下载 TypeWords 文件夹。旧目录失效会自动使用内置版本，也可在插件页点击“使用内置版本”恢复。
 
 - [插件构建与启动说明](docs/TYPEWORDS_PLUGIN.md)
 - [第三方来源、作者与许可证](THIRD_PARTY_NOTICES.md)
