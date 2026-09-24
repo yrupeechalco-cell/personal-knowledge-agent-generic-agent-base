@@ -27,9 +27,11 @@
     "source:check": "node scripts/check-typewords-source.mjs",
     "typewords:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-typewords.ps1",
     "typewords:check": "node scripts/check-typewords-bundle.mjs",
-    "typewords:smoke": "node scripts/smoke-typewords-bundle.mjs"
+    "typewords:smoke": "node scripts/smoke-typewords-bundle.mjs",
+    "typewords:browser": "playwright test --config scripts/typewords-browser.config.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.10.2",

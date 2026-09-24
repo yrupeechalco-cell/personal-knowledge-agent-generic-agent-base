@@ -53,6 +53,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run typewords:smoke
 
+      - name: Test TypeWords rendering in a fresh browser profile
+        run: |
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typewords:browser
+
+      - name: Save TypeWords browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typewords-browser-evidence
+          path: .artifacts/typewords-browser-results
+          if-no-files-found: ignore
+
       - name: Build desktop frontend for native tests
         run: npm run build:desktop
 
