@@ -16,9 +16,9 @@
 
 ## TypeWords 运行边界
 
-0.2.8 安装包包含英语学习入口、书本 A 图标和插件适配界面。TypeWords 本身仍是独立本机服务（127.0.0.1:5567），需启动已有 TypeWords，随后在 App 中打开“英语学习”。第三方源码保存在仓库，不随知识库安装包自动部署 Node.js 服务。原有学习记录不自动迁移到桌面 WebView。
+从 0.3.2 起，安装包包含 TypeWords 生产构建和固定版本 Node 运行环境；新电脑不需要额外安装依赖。正式 App 自动启动本机服务（127.0.0.1:5567），旧外部路径无效时回退到内置版本。构建前必须运行 `npm run typewords:prepare`，资源完整性和模拟新电脑启动测试纳入发布工作流。原有学习记录不自动跨浏览器或跨电脑迁移。详见 [TypeWords 说明](TYPEWORDS_PLUGIN.md)。
 
-本机一键入口使用 `start-installed-with-english.cmd`：复用或后台启动 TypeWords，然后打开已安装的正式 App。它优先使用仓库内构建，其次查找与仓库同级的 `TypeWords-3.0.7`；也可向 `scripts/start-installed-desktop.ps1` 传入 `-TypeWordsPath`。需要已有 Node.js 和 TypeWords 构建。原来的 `start-knowledge-with-english.cmd` 仅供 Web 预览验证。
+旧版本曾使用 `start-installed-with-english.cmd` 联合启动；0.3.2 之后直接打开正式 App 即可。`start-knowledge-with-english.cmd` 保留用于源码 / Web 预览验证。
 
 ## 0.2.8 本机验收（2026-09-17）
 

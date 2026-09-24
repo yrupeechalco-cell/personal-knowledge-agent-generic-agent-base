@@ -27,11 +27,27 @@ describe("TypeWords local plugin", () => {
     vi.stubGlobal("fetch", request);
     render(<TypeWordsPlugin adapter={adapter} />);
     await screen.findByText("Error: 请选择已构建目录");
-    fireEvent.click(screen.getByRole("button", { name: "选择 TypeWords 文件夹" }));
+    fireEvent.click(screen.getByRole("button", { name: "自定义目录" }));
     await screen.findByTitle("TypeWords 英语学习");
     expect(adapter.selectDirectory).toHaveBeenCalledOnce();
     expect(adapter.ensureStarted).toHaveBeenCalledTimes(2);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("restores the bundled version after failure without clearing learning data", async () => {
+    localStorage.setItem("typing-word-setting", "existing learning data");
+    const adapter = {
+      ensureStarted: vi.fn().mockRejectedValueOnce(new Error("custom build failed")).mockResolvedValue(undefined),
+      selectDirectory: vi.fn(),
+      useBundled: vi.fn().mockResolvedValue(undefined)
+    };
+    render(<TypeWordsPlugin adapter={adapter} />);
+    await screen.findByText("Error: custom build failed");
+    fireEvent.click(screen.getByRole("button", { name: "使用内置版本" }));
+    await screen.findByTitle("TypeWords 英语学习");
+    expect(adapter.useBundled).toHaveBeenCalledOnce();
+    expect(adapter.ensureStarted).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem("typing-word-setting")).toBe("existing learning data");
   });
 
   it("waits for native readiness before loading the page", async () => {

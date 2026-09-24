@@ -23,6 +23,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Version fields are not synchronized." }
 
   if (-not $SkipBuild) {
+    npm run typewords:prepare
+    if ($LASTEXITCODE -ne 0) { throw "TypeWords bundle preparation failed." }
+    npm run typewords:smoke
+    if ($LASTEXITCODE -ne 0) { throw "TypeWords portable runtime verification failed." }
     if (-not (Test-Path $privateKey) -or -not (Test-Path $privatePassword)) {
       throw "Updater signing secrets are missing from .private/updater."
     }

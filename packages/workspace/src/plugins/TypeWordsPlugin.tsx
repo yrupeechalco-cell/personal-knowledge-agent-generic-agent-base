@@ -31,6 +31,16 @@ export function TypeWordsPlugin({ adapter }: { adapter?: TypeWordsAdapter }) {
     finally { setSelecting(false); }
   }
 
+  async function useBundled() {
+    if (!adapter?.useBundled) return;
+    setSelecting(true);
+    try {
+      await adapter.useBundled();
+      setAttempt((value) => value + 1);
+    } catch (error) { setStartupError(String(error)); setStatus("offline"); }
+    finally { setSelecting(false); }
+  }
+
   function toggleEnabled() {
     const next = !enabled;
     setEnabled(next);
@@ -43,7 +53,8 @@ export function TypeWordsPlugin({ adapter }: { adapter?: TypeWordsAdapter }) {
       <div><strong>英语学习</strong><small>TypeWords · 本地插件</small></div>
       <div className="typewords-plugin-actions">
         {enabled && <button type="button" disabled={selecting || status === "checking"} onClick={() => setAttempt((value) => value + 1)}>重新连接</button>}
-        {adapter && <button type="button" disabled={selecting || (enabled && status === "checking")} onClick={() => void selectDirectory()}>{selecting ? "正在选择…" : "选择 TypeWords 文件夹"}</button>}
+        {adapter?.useBundled && <button type="button" disabled={selecting || (enabled && status === "checking")} onClick={() => void useBundled()}>使用内置版本</button>}
+        {adapter && <button type="button" disabled={selecting || (enabled && status === "checking")} onClick={() => void selectDirectory()} title="可选：使用自己构建的 TypeWords">自定义目录</button>}
         <a href={TYPEWORDS_PLUGIN.entryUrl} target="_blank" rel="noopener noreferrer">独立打开</a>
         <button type="button" onClick={toggleEnabled}>{enabled ? "停用插件" : "启用插件"}</button>
       </div>
@@ -51,7 +62,7 @@ export function TypeWordsPlugin({ adapter }: { adapter?: TypeWordsAdapter }) {
     {preferenceError && <p role="status">本次设置已生效，但未能保存到下次启动。</p>}
     {!enabled ? <div className="typewords-plugin-empty"><h2>英语学习插件已停用</h2><p>启用后即可练习单词和文章。停用不会删除学习记录。</p></div>
       : status === "checking" ? <div className="typewords-plugin-empty" role="status">{adapter ? "正在启动并连接本机 TypeWords…" : "正在连接本机 TypeWords…"}</div>
-      : status === "offline" ? <div className="typewords-plugin-empty" role="status"><h2>尚未连接 TypeWords</h2>{adapter ? <><p>{startupError}</p><p>选择一次已构建的 TypeWords 文件夹后，启用的插件会随知识库自动启动。修复后点击“重新连接”。</p></> : <><p>请运行“启动知识库与英语学习.cmd”，或先运行 TypeWords 文件夹里的“启动 TypeWords.cmd”。</p><p>启动后点击“重新连接”。若浏览器限制内嵌页面，可使用“独立打开”。</p></>}<code>{TYPEWORDS_PLUGIN.entryUrl}</code></div>
-      : <iframe key={attempt} src={TYPEWORDS_PLUGIN.entryUrl} title="TypeWords 英语学习" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals" allow="autoplay; fullscreen" referrerPolicy="no-referrer" />}
+      : status === "offline" ? <div className="typewords-plugin-empty" role="status"><h2>尚未连接 TypeWords</h2>{adapter ? <><p>{startupError}</p><p>正式安装版已包含英语学习程序和运行环境，无需另外下载。可点击“使用内置版本”恢复，再试“重新连接”；学习记录会保留。</p></> : <><p>请运行“启动知识库与英语学习.cmd”，或先运行 TypeWords 文件夹里的“启动 TypeWords.cmd”。</p><p>启动后点击“重新连接”。若浏览器限制内嵌页面，可使用“独立打开”。</p></>}<code>{TYPEWORDS_PLUGIN.entryUrl}</code></div>
+      : <iframe key={attempt} src={TYPEWORDS_PLUGIN.entryUrl} title="TypeWords 英语学习" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals" allow="autoplay; fullscreen" referrerPolicy="no-referrer" onError={() => { setStatus("offline"); setStartupError("英语学习页面加载失败，请重新连接或使用内置版本。"); }} />}
   </section>;
 }

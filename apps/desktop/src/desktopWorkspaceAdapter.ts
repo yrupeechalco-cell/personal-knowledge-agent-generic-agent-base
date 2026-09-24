@@ -46,7 +46,8 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
         startingTypeWords ??= invoke<void>("typewords_start").finally(() => { startingTypeWords = undefined; });
         return startingTypeWords;
       },
-      selectDirectory: () => invoke<boolean>("typewords_select_directory")
+      selectDirectory: () => invoke<boolean>("typewords_select_directory"),
+      useBundled: () => invoke<void>("typewords_use_bundled")
     },
     library: {
       load: () => invoke("library_load"),

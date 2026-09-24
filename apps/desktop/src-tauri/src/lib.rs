@@ -957,7 +957,7 @@ pub fn run() {
             watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
-            typewords::typewords_start, typewords::typewords_select_directory,
+            typewords::typewords_start, typewords::typewords_select_directory, typewords::typewords_use_bundled,
             library::library_load, library::library_add_folder, library::library_scan,
             library::library_update_root, library::library_save_review, library::library_export,
             library::library_configure, library::library_record_error, library::library_open_source,

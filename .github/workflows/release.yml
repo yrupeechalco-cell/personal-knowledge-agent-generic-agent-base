@@ -45,6 +45,14 @@ jobs:
       - name: Reject bundled demonstration notes
         run: npm run content:check -- --source
 
+      - name: Build and verify bundled TypeWords and Node runtime
+        run: |
+          npm run typewords:prepare
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typewords:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typewords:smoke
+
       - name: Build desktop frontend for native tests
         run: npm run build:desktop
 

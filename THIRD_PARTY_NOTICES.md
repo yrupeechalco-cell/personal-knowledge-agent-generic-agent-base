@@ -18,11 +18,23 @@
 
 ## 本项目新增的适配代码
 
+从知识库 0.3.2 起，Windows 安装包包含该快照生成的 TypeWords 生产输出，连同原 GPL-3.0 LICENSE、指向同版本完整源码及构建方法的 SOURCE.md 一起分发。源码快照仍保持未修改；隔离构建目录、打包与完整性检查脚本属于本项目的集成代码。Release 自动提供的源码 ZIP 包含快照、依赖锁文件及这些构建脚本。
+
+### 内置 Node.js
+
+- 固定版本：Node.js 24.14.0，Windows x64，来自 [Node.js 官方发行目录](https://nodejs.org/dist/v24.14.0/)。
+- 官方 ZIP SHA-256：`313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66`。
+- 可执行文件 SHA-256：`63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088`。
+- Node.js 的 MIT 及内含组件的完整许可说明随安装包保存在 `plugins/typewords/runtime/LICENSE`；TypeWords 生产依赖输出保留各自许可证。
+
+### 适配文件
+
 以下部分由本次知识库集成任务编写，使用 Codex 协助实现，不归为 TypeWords 上游原有功能：
 
 - `packages/workspace/src/plugins/`：本地插件元数据、英语学习嵌入页、启停/重试及组件测试。
 - `KnowledgeWorkspace.tsx` 中的英语学习按钮、标签页、页面保留逻辑。
 - `scripts/start-local-plugins.ps1` 和 `start-knowledge-with-english.cmd`：知识库与已有 TypeWords 构建的联合启动。
+- `scripts/prepare-typewords.ps1`、`copy-typewords-build-source.mjs`、`stage-typewords.mjs`、`check-typewords-bundle.mjs`、`smoke-typewords-bundle.mjs`：便携生产构建、来源与运行环境校验。
 - 知识库 Markdown 阅读改进、Agent 大幅改写提案及旧提案检查。
 
 集成通过独立本机服务和 iframe 完成；目前没有把学习记录同步成知识库笔记，也没有向 TypeWords 开放笔记文件或 Agent 工具。

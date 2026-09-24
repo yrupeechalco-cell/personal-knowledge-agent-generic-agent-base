@@ -42,6 +42,7 @@ private-vaults/
 .omx/
 .local-plugin-logs/
 typewords-*.log
+apps/desktop/src-tauri/resources/typewords/
 third_party/typewords/.nuxt/
 third_party/typewords/.output/
 third_party/typewords/.nitro/

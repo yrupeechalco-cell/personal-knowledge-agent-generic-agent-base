@@ -11,6 +11,7 @@ export const TYPEWORDS_PLUGIN = {
 export interface TypeWordsAdapter {
   ensureStarted(): Promise<void>;
   selectDirectory(): Promise<boolean>;
+  useBundled?(): Promise<void>;
 }
 
 export function isTypeWordsEnabled(): boolean {

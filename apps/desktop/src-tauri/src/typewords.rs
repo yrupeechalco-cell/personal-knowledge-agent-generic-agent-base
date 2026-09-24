@@ -1,4 +1,4 @@
-//! Launch only the user's registered TypeWords production build, on loopback.
+//! Launch the bundled TypeWords build (or an explicitly selected custom build), on loopback.
 use serde::{Deserialize, Serialize};
 use std::{fs, io::{Read, Write}, path::{Path, PathBuf}, process::{Child, Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
 use tauri::Manager;
@@ -35,6 +35,41 @@ fn node_directory(directory: &Path) -> PathBuf {
         if let Some(rest) = value.strip_prefix(r"\\?\") { return PathBuf::from(rest); }
     }
     directory.to_path_buf()
+}
+
+// Old machines may retain an external folder that does not exist on this computer.
+// Missing/corrupt settings and unavailable folders must not block the built-in version.
+fn resolve_directory(config: &Path, bundled: &Path) -> Result<PathBuf, String> {
+    if let Ok(bytes) = fs::read(config) {
+        if let Ok(settings) = serde_json::from_slice::<Settings>(&bytes) {
+            if let Ok(directory) = validate_directory(&settings.directory) { return Ok(directory); }
+        }
+    }
+    validate_directory(bundled).map_err(|_| "安装包中的 TypeWords 文件缺失或损坏，请重新安装最新版知识库。".into())
+}
+
+fn bundled_paths(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let directory = app.path().resource_dir().map_err(|e| e.to_string())?.join("plugins/typewords");
+    let runtime = directory.join("runtime/node.exe");
+    if !runtime.is_file() { return Err("安装包中的英语学习运行环境缺失，请重新安装最新版知识库，无需另外安装 Node.js。".into()); }
+    Ok((directory, node_directory(&runtime)))
+}
+
+fn server_command(runtime: &Path, directory: &Path) -> Command {
+    let mut command = Command::new(runtime);
+    command.arg(directory.join(".output/server/index.mjs")).current_dir(directory)
+        .env("NITRO_HOST", "127.0.0.1").env("HOST", "127.0.0.1")
+        .env("NITRO_PORT", "5567").env("PORT", "5567")
+        .env("NODE_ENV", "production")
+        // A machine-wide Node setting must not inject code or change plugin behavior.
+        .env_remove("NODE_OPTIONS").env_remove("NODE_PATH")
+        .env_remove("NUXT_APP_BASE_URL").env_remove("NITRO_SSL_CERT").env_remove("NITRO_SSL_KEY")
+        .stdin(Stdio::null());
+    #[cfg(windows)] {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
 }
 
 // No proxy, redirects or external URLs: an unrelated service must never be killed or embedded.
@@ -86,19 +121,12 @@ pub async fn typewords_start(app: tauri::AppHandle) -> Result<(), String> {
         if probe("http://127.0.0.1:5567/words")? { return Ok(()); }
         stop_child(&mut child);
         let path = config_path(&app)?;
-        let settings: Settings = serde_json::from_slice(&fs::read(&path).map_err(|_| "首次使用请点击“选择 TypeWords 文件夹”；选择一次后会随知识库自动启动。".to_string())?).map_err(|_| "TypeWords 配置无法读取，请重新选择文件夹。".to_string())?;
-        let directory = validate_directory(&settings.directory)?;
+        let (bundled, runtime) = bundled_paths(&app)?;
+        let directory = resolve_directory(&path, &bundled)?;
         let log = fs::File::create(path.with_file_name("typewords.log")).map_err(|e| e.to_string())?;
-        let mut command = Command::new("node");
-        command.arg(".output/server/index.mjs").current_dir(&directory)
-            .env("NITRO_HOST", "127.0.0.1").env("HOST", "127.0.0.1")
-            .env("NITRO_PORT", "5567").env("PORT", "5567")
-            .stdin(Stdio::null()).stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
-        #[cfg(windows)] {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
-        *child = Some(command.spawn().map_err(|e| format!("无法启动 TypeWords，请确认已安装 Node.js 22 并重启知识库：{e}"))?);
+        let mut command = server_command(&runtime, &directory);
+        command.stdout(log.try_clone().map_err(|e| e.to_string())?).stderr(log);
+        *child = Some(command.spawn().map_err(|e| format!("无法启动内置英语学习运行环境，请重试或重新安装最新版：{e}"))?);
         let deadline = Instant::now() + Duration::from_secs(20);
         let result = loop {
             if let Some(process) = child.as_mut() {
@@ -118,6 +146,27 @@ pub async fn typewords_start(app: tauri::AppHandle) -> Result<(), String> {
         };
         if result.is_err() { stop_child(&mut child); }
         result
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn typewords_use_bundled(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (bundled, _) = bundled_paths(&app)?;
+        validate_directory(&bundled)?;
+        let state = app.state::<TypeWordsProcess>();
+        let mut child = state.0.lock().map_err(|_| "插件状态异常，请重启知识库。".to_string())?;
+        if child.is_none() && probe("http://127.0.0.1:5567/words")? {
+            return Err("另一个 TypeWords 正在独立运行，请先关闭它，再使用内置版本。".into());
+        }
+        match fs::remove_file(config_path(&app)?) {
+            Ok(()) => {},
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.to_string()),
+        }
+        stop_child(&mut child);
+        // Never delete or migrate WebView/TypeWords learning storage.
+        Ok(())
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -183,6 +232,40 @@ mod tests {
         fs::write(root.join(".output/server/index.mjs"), "").unwrap();
         assert!(validate_directory(&root).unwrap().is_absolute());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clean_install_and_unavailable_custom_folder_use_bundled_build() {
+        let root = std::env::temp_dir().join(format!("typewords-fallback-{}", std::process::id()));
+        let bundled = root.join("内置 英语学习");
+        fs::create_dir_all(bundled.join(".output/server")).unwrap();
+        fs::write(bundled.join("package.json"), r#"{"name":"typewords"}"#).unwrap();
+        fs::write(bundled.join(".output/server/index.mjs"), "").unwrap();
+        let config = root.join("typewords.json");
+        let expected = validate_directory(&bundled).unwrap();
+        assert_eq!(resolve_directory(&config, &bundled).unwrap(), expected);
+        fs::write(&config, b"broken config").unwrap();
+        assert_eq!(resolve_directory(&config, &bundled).unwrap(), expected);
+        fs::write(&config, serde_json::to_vec(&Settings { directory: root.join("old-computer") }).unwrap()).unwrap();
+        assert_eq!(resolve_directory(&config, &bundled).unwrap(), expected);
+        let custom = root.join("custom");
+        fs::create_dir_all(custom.join(".output/server")).unwrap();
+        fs::write(custom.join("package.json"), r#"{"name":"typewords"}"#).unwrap();
+        fs::write(custom.join(".output/server/index.mjs"), "").unwrap();
+        fs::write(&config, serde_json::to_vec(&Settings { directory: custom.clone() }).unwrap()).unwrap();
+        assert_eq!(resolve_directory(&config, &bundled).unwrap(), validate_directory(&custom).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn launches_absolute_runtime_without_path_or_inherited_node_options() {
+        let runtime = std::env::temp_dir().join("内置运行环境/node.exe");
+        let directory = std::env::temp_dir().join("英语 学习");
+        let command = server_command(&runtime, &directory);
+        assert_eq!(command.get_program(), runtime.as_os_str());
+        assert_eq!(command.get_args().next().unwrap(), directory.join(".output/server/index.mjs").as_os_str());
+        assert!(command.get_envs().any(|(key, value)| key == "NODE_OPTIONS" && value.is_none()));
+        assert!(command.get_envs().any(|(key, value)| key == "NITRO_HOST" && value == Some(std::ffi::OsStr::new("127.0.0.1"))));
     }
 
     #[cfg(windows)]
