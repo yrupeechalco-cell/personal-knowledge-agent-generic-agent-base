@@ -1,6 +1,6 @@
 .knowledge-card-navigation { margin: 16px 0; }
-.knowledge-cards-intro { padding: 20px; border: 1px solid var(--lib-line); border-radius: 10px; background: var(--lib-surface); }
-.knowledge-cards-intro p { max-width: 850px; line-height: 1.7; color: var(--lib-muted); }
+.knowledge-cards-intro { padding: 16px; border: 1px solid var(--lib-line); border-radius: 10px; background: var(--lib-surface); }
+.knowledge-cards-intro p { margin: 8px 0 12px; line-height: 1.5; color: var(--lib-muted); }
 .knowledge-cards-intro small { display: block; margin-top: 12px; color: var(--lib-muted); line-height: 1.6; }
 .knowledge-card-filters { display: flex; gap: 12px; margin: 18px 0; }
 .knowledge-card-filters input { flex: 1; min-width: 0; }

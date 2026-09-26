@@ -35,7 +35,7 @@ export function KnowledgeCards({ records, adapter, busy, operate, onDirty }: Pro
     } catch (e) { setMessage(String(e)); } finally { setExporting(false); }
   }
   return <section className="knowledge-cards" aria-label="知识卡片工作区">
-    <div className="knowledge-cards-intro"><strong>原件留在本机，标注组成知识卡片</strong><p>卡片可按多个主题整理；原件暂不可用时仍能修改标注。全部卡片默认「仅本机」，设为「可共享」后才进入导出范围。账户同步尚未接入。</p>
+    <div className="knowledge-cards-intro"><strong>原件留在本机，标注组成知识卡片</strong><p>按不同分类查看资料，原件离线时仍可整理标注。全部默认仅本机，可共享卡片允许导出；账户同步尚未接入。</p>
       <div className="library-actions"><span>{records.length} 张卡片 · {eligible} 张可共享</span><button disabled={busy || dirty || exporting || !adapter.previewKnowledgeCards} onClick={() => void share("preview")}>预览可共享内容</button><button disabled={busy || dirty || exporting || !eligible || !adapter.exportKnowledgeCards} onClick={() => void share("export")}>导出可共享卡片</button></div>
       <small>导出包含名称、摘要、标签、要点和来源设备；正文、引用原文、附件及本机路径保留在电脑。请先核对摘要和要点是否适合共享。</small>
     </div>
