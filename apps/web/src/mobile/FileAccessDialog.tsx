@@ -15,7 +15,7 @@ export function FileAccessDialog({ onCancel, onAllow }: { onCancel(): void; onAl
     <h2 id="ml-file-access-title">允许读取你选择的文件？</h2>
     <p id="ml-file-access-purpose">用于搜索正文、添加分类和关键词。</p>
     <ul>
-      <li><strong>仅访问所选文件</strong><span>支持文档、图片、音频和视频。图片单个最大 50 MB，音视频单个最大 1 GB，每次导入由你选择。</span></li>
+      <li><strong>仅访问所选文件</strong><span>支持文档、图片、音频和视频。附件不设固定大小上限，保存取决于设备可用存储空间。</span></li>
       <li><strong>保存在知识库中</strong><span>保存副本，手机原文件保持不变。</span></li>
       <li><strong>配对后同步到电脑</strong><span>未配对时保存在本机；配对后参与自动同步。</span></li>
     </ul>

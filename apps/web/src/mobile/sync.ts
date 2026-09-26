@@ -1,6 +1,6 @@
 import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspace';
 import { attachStagedFile, mergeSnapshot, readAttachment, readAttachmentRange, readMobileState, stageAttachment, updateMobileState, type LocalDocument } from './libraryStore';
-import { MAX_MEDIA_BYTES, MEDIA_CHUNK_BYTES, mediaType } from './media';
+import { checkMediaStorage, MEDIA_CHUNK_BYTES, mediaType } from './media';
 
 let running: Promise<void> | undefined;
 async function request(path: string, token: string, body?: unknown, attachment?: Blob) {
@@ -100,7 +100,7 @@ async function loadMediaOnce(entry: LocalDocument, onProgress?: (message: string
     if (blob) return blob;
   }
   if (!entry.base || !state.token) throw new Error('附件尚未下载。请连接已配对的电脑后重试。');
-  if (entry.doc.size > MAX_MEDIA_BYTES) throw new Error('此附件超过 1 GB，请在电脑上打开。');
+  await checkMediaStorage(entry.doc.size);
   const format = mediaType(entry.doc.path)!;
   const key = await stageAttachment(entry.doc.path, entry.doc.size, format.mime, async offset => {
     const controller = new AbortController(); const timer = window.setTimeout(() => controller.abort(), 60000);

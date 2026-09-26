@@ -2,7 +2,6 @@
 use std::{fs, io::{Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
-pub const MAX_BYTES: usize = 1024 * 1024 * 1024;
 pub const CHUNK_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_METADATA: usize = 2 * 1024 * 1024;
 pub const MAX_REQUEST: usize = 50 * 1024 * 1024 + MAX_METADATA + 4;
@@ -16,7 +15,7 @@ pub fn mime(name: &str) -> Option<&'static str> {
     }
 }
 pub fn validate(name: &str, bytes: &[u8]) -> Result<(), String> {
-    if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err("附件不能为空，音视频单个最大 1 GB。".into()); }
+    if bytes.is_empty() { return Err("附件不能为空。".into()); }
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     let matches = |start: usize, signature: &[u8]| bytes.get(start..start + signature.len()) == Some(signature);
     let valid = match ext.as_str() {
@@ -48,12 +47,23 @@ pub fn staged_path(directory: &Path, operation: &str) -> Result<PathBuf, String>
     if !super::library::valid_mobile_id(operation) { return Err("无效的附件操作编号。".into()); }
     Ok(directory.join(format!("{operation}.part")))
 }
+pub fn check_disk_space(directory: &Path, needed: u64) -> Result<(), String> {
+    #[cfg(windows)] {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDiskFreeSpaceExW};
+        let path: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut free = 0;
+        unsafe { GetDiskFreeSpaceExW(PCWSTR(path.as_ptr()), Some(&mut free), None, None) }.map_err(|e| format!("无法检查电脑可用空间：{e}"))?;
+        if needed > free { return Err(format!("电脑磁盘空间不足：需要约 {:.2} GB，可用 {:.2} GB，请释放空间后重试。", needed as f64 / 1073741824.0, free as f64 / 1073741824.0)); }
+    }
+    #[cfg(not(windows))] let _ = (directory, needed);
+    Ok(())
+}
 pub fn receive(directory: &Path, upload: &Upload, bytes: &[u8]) -> Result<u64, String> {
     let path = staged_path(directory, &upload.operation_id)?;
-    let mime = mime(&upload.name).ok_or("附件格式不支持。")?;
-    let limit = if mime.starts_with("image/") { 50 * 1024 * 1024 } else { MAX_BYTES };
-    if upload.name.len() > 1024 || upload.total == 0 || upload.total > limit as u64 || upload.offset >= upload.total || upload.offset % CHUNK_BYTES as u64 != 0 || bytes.len() != CHUNK_BYTES.min((upload.total - upload.offset) as usize) {
-        return Err("附件分块范围无效；图片最大 50 MB，音视频最大 1 GB。".into());
+    mime(&upload.name).ok_or("附件格式不支持。")?;
+    if upload.name.len() > 1024 || upload.total == 0 || upload.offset >= upload.total || upload.offset % CHUNK_BYTES as u64 != 0 || bytes.len() as u64 != (CHUNK_BYTES as u64).min(upload.total - upload.offset) {
+        return Err("附件分块范围无效。".into());
     }
     if upload.offset == 0 { validate(&upload.name, bytes)?; }
     let manifest = path.with_extension("json");
@@ -70,10 +80,7 @@ pub fn receive(directory: &Path, upload: &Upload, bytes: &[u8]) -> Result<u64, S
                 if recent.and_then(|date| date.elapsed().ok()).is_some_and(|age| age.as_secs() > 86400) { let _ = fs::remove_file(item.path()); let _ = fs::remove_file(part); }
             }
         }
-        let occupied: u64 = fs::read_dir(directory).map_err(|e| e.to_string())?.flatten()
-            .filter(|item| item.path().extension().is_some_and(|ext| ext == "json"))
-            .filter_map(|item| fs::read(item.path()).ok()).filter_map(|bytes| serde_json::from_slice::<Upload>(&bytes).ok()).map(|item| item.total).sum();
-        if occupied.saturating_add(upload.total) > 2 * MAX_BYTES as u64 { return Err("电脑临时上传空间已达 2 GB，请完成已有上传后重试。".into()); }
+        check_disk_space(directory, upload.total)?;
         fs::write(&manifest, serde_json::to_vec(upload).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
     let mut file = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&path).map_err(|e| e.to_string())?;
@@ -86,7 +93,8 @@ pub fn receive(directory: &Path, upload: &Upload, bytes: &[u8]) -> Result<u64, S
         if existing != bytes { return Err("已上传附件分块与本机内容不符，未覆盖。".into()); }
         return Ok(current);
     }
-    file.seek(SeekFrom::Start(current)).and_then(|_| file.write_all(bytes)).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+    check_disk_space(directory, upload.total - current)?;
+    file.seek(SeekFrom::Start(current)).and_then(|_| file.write_all(bytes)).and_then(|_| file.sync_all()).map_err(|e| format!("附件写入中断（可能磁盘已满），已传部分保留：{e}"))?;
     Ok(current + bytes.len() as u64)
 }
 pub fn cleanup(directory: &Path, operation: &str) {

@@ -1,4 +1,3 @@
-export const MAX_MEDIA_BYTES = 1024 * 1024 * 1024;
 export const MEDIA_CHUNK_BYTES = 4 * 1024 * 1024;
 const formats: Record<string, [string, 'image' | 'audio' | 'video']> = {
   jpg: ['image/jpeg', 'image'], jpeg: ['image/jpeg', 'image'], png: ['image/png', 'image'],
@@ -11,7 +10,17 @@ export function mediaType(name: string) {
   return format ? { mime: format[0], kind: format[1], label: { image: '图片', audio: '音频', video: '视频' }[format[1]] } : null;
 }
 export const mobileFileAccept = ['.md', '.markdown', '.txt', ...Object.keys(formats).map(ext => `.${ext}`)].join(',');
-export const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+export const formatBytes = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+export async function checkMediaStorage(bytes: number) {
+  // LAN HTTP browsers may not expose estimates. In that case attempt bounded
+  // writes, and handle the real database quota error without publishing a record.
+  const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+  if (estimate?.quota !== undefined && estimate.usage !== undefined) {
+    const available = Math.max(0, estimate.quota - estimate.usage);
+    if (bytes > available) throw new Error(`浏览器可用存储空间不足：本次需要 ${formatBytes(bytes)}，预计剩余 ${formatBytes(available)}。原文件未改动，请释放空间后重试。`);
+  }
+}
 
 // Prevent mislabeled text/executable files being accepted as media. Playback still
 // depends on the device's codec support; signatures alone do not validate codecs.
@@ -19,8 +28,7 @@ export async function validateMedia(file: Blob, name: string) {
   const format = mediaType(name);
   if (!format) throw new Error(`${name}：暂不支持这种附件格式。`);
   if (!file.size) throw new Error(`${name}：手机返回了 0 字节，未读取到文件内容。若文件保存在 iCloud 或其他网盘，请先在“文件”App 下载完成，再重新选择。`);
-  const limit = format.kind === 'image' ? 50 * 1024 * 1024 : MAX_MEDIA_BYTES;
-  if (file.size > limit) throw new Error(`${name}：文件大小 ${formatBytes(file.size)}，超过${format.kind === 'image' ? '图片 50 MB' : '音视频 1 GB'}的上限，本次未导入。`);
+  if (!Number.isSafeInteger(file.size) || file.size < 0) throw new Error(`${name}：无法读取文件大小，请重新选择。`);
   const bytes = new Uint8Array(await file.slice(0, 32).arrayBuffer());
   const ascii = (start: number, text: string) => [...text].every((c, i) => bytes[start + i] === c.charCodeAt(0));
   const ext = name.split('.').pop()!.toLowerCase();

@@ -1,5 +1,5 @@
 import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspace';
-import { MEDIA_CHUNK_BYTES, mediaType, validateMedia } from './media';
+import { checkMediaStorage, MEDIA_CHUNK_BYTES, mediaType, validateMedia } from './media';
 import { readImportedVault } from '../importedVault';
 
 export interface LocalDocument {
@@ -140,7 +140,7 @@ export async function stageAttachment(name: string, size: number, mime: string, 
       onProgress?.(`${name} · ${Math.round(Math.min(size, offset + part.size) / size * 100)}%`);
     }
     return key;
-  } catch (e) { await discardAttachment(key); throw e; }
+  } catch (e) { await discardAttachment(key); if (e instanceof DOMException && e.name === 'QuotaExceededError') throw new Error('浏览器存储空间不足，未导入。原文件仍保留，请释放空间后重试。'); throw e; }
 }
 export async function discardAttachment(key: string) {
   const db = await openMobileDatabase();
@@ -157,7 +157,7 @@ export async function attachStagedFile(id: string, revision: string, key: string
 }
 export async function importMobileFiles(files: File[], onProgress?: (message: string) => void) {
   if (!files.length) return;
-  if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 2 * 1024 * 1024 * 1024) throw new Error('一次最多导入 50 个文件、合计 2 GB。');
+  await checkMediaStorage(files.reduce((sum, file) => sum + file.size, 0));
   const entries: LocalDocument[] = []; const staged: string[] = [];
   try {
   for (const file of files) {

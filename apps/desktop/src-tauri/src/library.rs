@@ -115,8 +115,7 @@ impl AttachmentSource<'_> {
     fn reader(&self) -> Result<Box<dyn Read + '_>, String> { match self { Self::Bytes(bytes) => Ok(Box::new(std::io::Cursor::new(bytes))), Self::File(path) => Ok(Box::new(fs::File::open(path).map_err(|e| e.to_string())?)) } }
     fn validate(&self, name: &str) -> Result<(), String> {
         let size = self.size()?;
-        let limit = if super::mobile_media::mime(name).is_some_and(|mime| mime.starts_with("image/")) { 50 * 1024 * 1024 } else { super::mobile_media::MAX_BYTES };
-        if size == 0 || size > limit as u64 { return Err("附件大小超过限制。".into()); }
+        if size == 0 { return Err("附件不能为空。".into()); }
         let mut header = Vec::new(); self.reader()?.take(32).read_to_end(&mut header).map_err(|e| e.to_string())?;
         super::mobile_media::validate(name, &header)
     }
@@ -177,6 +176,7 @@ fn mobile_apply_source(data: &mut Library, change: MobileChange, inbox: &Path, b
             let metadata = fs::symlink_metadata(&destination).map_err(|e| e.to_string())?;
             if linked(&metadata) || metadata.len() != content.size()? || !content.equals(&destination)? { return Err("同名资料已存在且内容不同，未覆盖。".into()); }
         } else {
+            super::mobile_media::check_disk_space(inbox, content.size()?)?;
             let mut reader = content.reader()?;
             let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&destination).map_err(|e| format!("新资料未写入：{e}"))?;
             if let Err(error) = std::io::copy(&mut reader, &mut file).and_then(|count| if count != incoming.size && is_media { Err(std::io::Error::other("附件复制不完整")) } else { file.sync_all() }) {
@@ -226,7 +226,7 @@ fn attachment_range(data: &Library, id: &str, expected: &str, offset: Option<u64
     let doc = &data.documents[index];
     let root = data.roots.iter().find(|root| root.id == doc.root_id && !root.paused).ok_or("资料目录已暂停或移除。")?;
     let mime = super::mobile_media::mime(&doc.path).ok_or("暂不提供此格式的附件。")?;
-    if doc.size > super::mobile_media::MAX_BYTES as u64 || offset.is_none() && doc.size > 50 * 1024 * 1024 { return Err("大附件需要分块下载，请更新手机版。".into()); }
+    if offset.is_none() && doc.size > 50 * 1024 * 1024 { return Err("大附件需要分块下载，请更新手机版。".into()); }
     let path = source_path(root, doc)?;
     let start = offset.unwrap_or(0);
     if start >= doc.size { return Err("附件下载范围无效。".into()); }

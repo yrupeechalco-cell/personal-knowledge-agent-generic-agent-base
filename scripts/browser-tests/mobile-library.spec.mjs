@@ -253,6 +253,25 @@ test('invalid mixed imports remain atomic and do not leave partial media', async
   await page.reload(); await expect(page.locator('.ml-document')).toHaveCount(0);
 });
 
+test('real storage quota failure rolls back a partly saved attachment', async ({ page }) => {
+  await page.goto('/?mobile=1');
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, key) {
+      if (this.name === 'attachments' && String(key).endsWith(':1')) throw new DOMException('Disk quota exhausted', 'QuotaExceededError');
+      return put.call(this, value, key);
+    };
+  });
+  const bytes = Buffer.alloc(9 * 1024 * 1024); (await readFile(fixture('sample.mp4'))).copy(bytes);
+  await importFiles(page, [{name:'quota-test.mp4',mimeType:'video/mp4',buffer:bytes}]);
+  await expect(page.getByRole('alert')).toContainText('存储空间不足');
+  await expect(page.locator('.ml-document')).toHaveCount(0);
+  expect(await page.evaluate(() => new Promise((resolve, reject) => {
+    const request=indexedDB.open('knowledge-agent-mobile',2);request.onerror=()=>reject(request.error);
+    request.onsuccess=()=>{const db=request.result;const tx=db.transaction('attachments');const count=tx.objectStore('attachments').count();count.onsuccess=()=>resolve(count.result);tx.oncomplete=()=>db.close();};
+  }))).toBe(0);
+});
+
 test('60 MB video persists, resumes interrupted upload and downloads in bounded chunks', async ({ page }, info) => {
   test.setTimeout(180000);
   const original = Buffer.alloc(60 * 1024 * 1024 + 17, 42);
