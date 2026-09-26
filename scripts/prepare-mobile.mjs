@@ -8,4 +8,6 @@ if (!target.startsWith(expected)) throw new Error('Unexpected mobile resources p
 await mkdir(target, { recursive: true });
 for (const entry of await readdir(target)) await rm(path.join(target, entry), { recursive: true, force: true });
 await cp(path.join(repo, 'apps/web/dist'), target, { recursive: true });
+await cp(path.join(repo, 'docs/licenses'), path.join(target, 'licenses'), { recursive: true });
+await cp(path.join(repo, 'THIRD_PARTY_NOTICES.md'), path.join(target, 'THIRD_PARTY_NOTICES.md'));
 console.log('Bundled mobile web app for the installed desktop sync server.');

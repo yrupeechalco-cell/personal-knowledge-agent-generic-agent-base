@@ -50,5 +50,15 @@
 | react-markdown | <https://github.com/remarkjs/react-markdown> | Markdown 阅读 | MIT |
 | remark-gfm | <https://github.com/remarkjs/remark-gfm> | 表格、任务列表等 GFM 语法 | MIT |
 | lucide-react | <https://github.com/lucide-icons/lucide> | 工具栏图标，含 BookA | ISC |
+| qrcode.react 4.2.0 | <https://github.com/zpao/qrcode.react> | 电脑端手机配对二维码 | ISC；内含 Project Nayuki 的 MIT QR Code Generator |
+| fake-indexeddb 6.2.5 | <https://github.com/dumbmatter/fakeIndexedDB> | 手机本机保存的自动测试，仅开发依赖 | Apache-2.0 |
+
+## 手机同步实现来源
+
+`apps/web/src/mobile/`、`apps/desktop/src/MobileSyncPanel.tsx` 与原生 `mobile_sync.rs` 为本知识库项目使用 Codex 协助编写的集成代码。手机同步不来自 TypeWords，也不包含 TypeWords 学习记录同步。
+
+原生 HTTP 服务使用 [tiny_http 0.12.0](https://github.com/tiny-http/tiny-http)；配对随机密钥使用 [getrandom 0.3](https://github.com/rust-random/getrandom)。精确版本及依赖来源记录在 Cargo.lock。
+
+新增运行时组件的原始许可证保存在 `docs/licenses/`，构建时同时复制到安装目录的 `mobile-web/licenses/`。qrcodegen 许可证来自 qrcode.react v4.2.0 的上游第三方目录；Rust 许可证来自与 Cargo.lock SHA-256 一致的 crates.io 源码包。
 
 本文件是来源记录，不替换第三方许可证，也不把整个知识库项目重新授权为第三方的许可证。

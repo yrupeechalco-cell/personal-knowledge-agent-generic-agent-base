@@ -9,7 +9,9 @@ test('new learning profile renders in the plugin iframe and opens the bundled di
   await context.route('**/*', (route) => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('http://127.0.0.1:18568');
   const frame = page.frameLocator('iframe');
-  await expect(frame.getByText('今日任务', { exact: true })).toBeVisible();
+  // A fresh Windows CI browser can finish hydration just after the default 5s.
+  // Keep the content assertion; allow the bundled app's cold start to complete.
+  await expect(frame.getByText('今日任务', { exact: true })).toBeVisible({ timeout: 20000 });
   await expect(frame.getByText('请选择一本词典开始学习', { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('typewords-home.png'), fullPage: true });
   await frame.getByText('选择词典', { exact: true }).click();
@@ -31,7 +33,7 @@ test('first launch can load the local onboarding script', async ({ page, context
   await context.route('**/*', (route) => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   await page.goto('http://127.0.0.1:18568');
   const frame = page.frameLocator('iframe');
-  await expect(frame.getByText('点击这里选择一本词典开始学习', { exact: true })).toBeVisible();
+  await expect(frame.getByText('点击这里选择一本词典开始学习', { exact: true })).toBeVisible({ timeout: 20000 });
   await frame.getByText('下一步（1/4）', { exact: true }).click();
   await expect(frame.getByText('CET-4', { exact: true })).toBeVisible();
   expect(runtimeErrors).toEqual([]);
