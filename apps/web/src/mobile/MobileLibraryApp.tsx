@@ -4,6 +4,7 @@ import { canEditSource, categoriesOf, normalizeCategories, searchLibrary, type L
 import { chooseKnowledgeFiles, readImportedVault } from '../importedVault';
 import { emptyState, newDocument, readMobileState, resolveConflict, saveMobileDocument, updateMobileState, type LocalDocument, type MobileState } from './libraryStore';
 import { pairMobile, syncMobile } from './sync';
+import { FileAccessDialog } from './FileAccessDialog';
 import './mobile-library.css';
 
 export function MobileLibraryApp() {
@@ -17,6 +18,7 @@ export function MobileLibraryApp() {
   const [syncError, setSyncError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pairCode, setPairCode] = useState('');
+  const [fileAccessOpen, setFileAccessOpen] = useState(false);
   const pairing = useRef(false);
   useEffect(() => {
     let alive = true;
@@ -47,6 +49,7 @@ export function MobileLibraryApp() {
     try { await action(); } catch (e) { setError(String(e)); }
   }
   async function importFiles() {
+    setFileAccessOpen(false);
     // Open the native picker before the first await to preserve Safari's user gesture.
     const picked = chooseKnowledgeFiles();
     await act(async () => {
@@ -69,7 +72,7 @@ export function MobileLibraryApp() {
       {page === 'library' && <>
         <button className="ml-sync-strip" onClick={() => setPage('sync')}><span className={syncError ? 'ml-dot offline' : 'ml-dot'} />{conflicts.length ? `${conflicts.length} 份资料需要合并` : pending ? `${pending} 份改动已保存本机，等待同步` : state.token ? '本机资料已保存 · 已配对电脑' : '本机资料已保存 · 可配对电脑'}<span>查看</span></button>
         <div className="ml-search"><Search size={19}/><input aria-label="搜索知识库" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜正文、标签、知识 tip" /></div>
-        <div className="ml-list-heading"><strong>{category || '全部资料'} <small>{docs.length}</small></strong>{category ? <button onClick={() => setCategory('')}>清除分类</button> : <button disabled={!ready} onClick={() => void importFiles()}><FileUp size={16}/>导入</button>}</div>
+        <div className="ml-list-heading"><strong>{category || '全部资料'} <small>{docs.length}</small></strong>{category ? <button onClick={() => setCategory('')}>清除分类</button> : <button disabled={!ready} onClick={() => setFileAccessOpen(true)}><FileUp size={16}/>导入</button>}</div>
         {ready && !docs.length && <section className="ml-empty"><BookOpen size={38}/><h2>{query || category ? '没有找到资料' : '从一篇笔记开始'}</h2><p>{query || category ? '换个关键词，或清除分类筛选。' : '记下想法，或导入文档。正文与分类会保存在这台设备上。'}</p>{!query && !category && <><button className="ml-primary" onClick={() => setSelected({ doc: newDocument(), base: null, pending: true, editId: '' })}>写第一篇笔记</button><button onClick={() => setPage('sync')}>连接电脑知识库</button></>}</section>}
         <div className="ml-documents">{docs.map(doc => { const entry = state.documents.find(item => item.doc.id === doc.id)!; return <button key={doc.id} className="ml-document" onClick={() => setSelected(structuredClone(entry))}><div><strong>{doc.path.split(/[\\/]/).pop()}</strong><small>{entry.conflict !== undefined ? '需要合并' : entry.pending ? '待同步' : '已保存'}</small></div><p>{doc.summary || doc.text.slice(0, 110) || doc.issue || '暂无正文'}</p><div className="ml-tags">{[...categoriesOf(doc), ...doc.tags.map(tag => `#${tag}`)].slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}</div></button>; })}</div>
       </>}
@@ -81,6 +84,7 @@ export function MobileLibraryApp() {
       </>}
     </main>
     <nav className="ml-nav" aria-label="手机主导航">{([['library', BookOpen, '资料'], ['categories', FolderTree, '分类'], ['sync', RefreshCw, '同步']] as const).map(([value, Icon, label]) => <button key={value} aria-current={page === value ? 'page' : undefined} onClick={() => setPage(value)}><Icon size={21}/><span>{label}</span>{value === 'sync' && pending > 0 && <i>{pending}</i>}</button>)}</nav>
+    {fileAccessOpen && <FileAccessDialog onCancel={() => setFileAccessOpen(false)} onAllow={() => void importFiles()}/>}
   </div>;
 }
 

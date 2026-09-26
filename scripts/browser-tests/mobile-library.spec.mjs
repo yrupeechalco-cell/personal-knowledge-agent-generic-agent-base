@@ -90,11 +90,36 @@ test('paired phone synchronizes both ways and keeps concurrent versions', async 
   await fits(page);
 });
 
-test('phone imports a persistent copy and exports a backup without pairing secrets', async ({ page }) => {
+test('phone requests file access before importing and exports a backup without pairing secrets', async ({ page }, info) => {
   await page.goto('/?mobile=1');
-  const chooser = page.waitForEvent('filechooser');
+  let chooserCount = 0;
+  page.on('filechooser', () => { chooserCount++; });
+  const access = page.getByRole('dialog', { name: '允许读取你选择的文件？' });
   await page.getByRole('button', { name: '导入', exact: true }).click();
+  await expect(access).toBeVisible();
+  expect(chooserCount).toBe(0);
+  await expect(access).toContainText('配对后参与自动同步');
+  await page.screenshot({ path: info.outputPath('phone-file-access.png') });
+  await page.getByRole('button', { name: '暂不允许', exact: true }).click();
+  await expect(access).toHaveCount(0);
+  await expect(page.locator('.ml-document')).toHaveCount(0);
+  expect(chooserCount).toBe(0);
+  // Refusing file access must not block the rest of the app.
+  await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+  await expect(page.getByLabel('资料正文')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: '返回资料' }).click();
+  await page.getByRole('button', { name: '导入', exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect(access).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: '允许并选择文件', exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button', { name: '允许并选择文件', exact: true })).toBeInViewport();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '允许并选择文件', exact: true }).click();
   await (await chooser).setFiles({ name: '导入.txt', mimeType: 'text/plain', buffer: Buffer.from('导入文件原文') });
+  expect(chooserCount).toBe(1);
+  await expect(access).toHaveCount(0);
   await expect(page.locator('.ml-document')).toContainText('导入文件原文');
   await page.reload(); await expect(page.locator('.ml-document')).toContainText('导入文件原文');
   await page.getByRole('navigation').getByRole('button', { name: /同步/ }).click();
@@ -103,4 +128,21 @@ test('phone imports a persistent copy and exports a backup without pairing secre
   const result = await download;
   const stream = await result.createReadStream(); let data = ''; for await (const chunk of stream) data += chunk;
   const backup = JSON.parse(data); expect(backup.token).toBe(''); expect(backup.documents[0].doc.text).toBe('导入文件原文');
+});
+
+test('cancelling the system file selection imports nothing and does not grant future access', async ({ page }) => {
+  await page.goto('/?mobile=1');
+  await page.getByRole('button', { name: '导入', exact: true }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '允许并选择文件', exact: true }).click();
+  await chooser;
+  // Browser automation has no OS Cancel button; deliver the input's native cancel event.
+  await page.locator('input[type=file]').dispatchEvent('cancel');
+  await expect(page.locator('input[type=file]')).toHaveCount(0);
+  await expect(page.locator('.ml-document')).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: '导入', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '允许读取你选择的文件？' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });
