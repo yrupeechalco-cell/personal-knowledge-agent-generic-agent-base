@@ -51,7 +51,7 @@ export function MobileLibraryApp() {
   }
   async function act(action: () => Promise<unknown>) {
     setError('');
-    try { await action(); } catch (e) { setError(String(e)); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
   async function importFiles() {
     setFileAccessOpen(false);
