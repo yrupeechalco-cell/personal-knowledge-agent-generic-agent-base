@@ -1,4 +1,6 @@
 import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspace';
+import { mediaType, validateMedia } from './media';
+import { readImportedVault } from '../importedVault';
 
 export interface LocalDocument {
   doc: LibraryDocument;
@@ -7,6 +9,7 @@ export interface LocalDocument {
   pending: boolean;
   editId: string;
   conflict?: LibraryDocument | null;
+  attachment?: { key: string; revision: string };
 }
 export interface MobileState {
   version: 1;
@@ -20,8 +23,11 @@ export const emptyState = (): MobileState => ({ version: 1, documents: [], roots
 let database: Promise<IDBDatabase> | undefined;
 export function openMobileDatabase() {
   database ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('knowledge-agent-mobile', 1);
-    request.onupgradeneeded = () => request.result.createObjectStore('library');
+    const request = indexedDB.open('knowledge-agent-mobile', 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('library')) request.result.createObjectStore('library');
+      if (!request.result.objectStoreNames.contains('attachments')) request.result.createObjectStore('attachments');
+    };
     request.onerror = () => { database = undefined; reject(new Error('无法打开本机知识库，请退出无痕浏览并允许网站保存数据。')); };
     request.onsuccess = () => { request.result.onversionchange = () => { request.result.close(); database = undefined; }; resolve(request.result); };
   });
@@ -30,10 +36,13 @@ export function openMobileDatabase() {
 
 // Read/modify/write happens in a single IndexedDB transaction, including across tabs.
 // UI state is never acknowledged as saved until the transaction commits.
-export async function updateMobileState(change: (state: MobileState) => void): Promise<MobileState> {
+export async function updateMobileState(change: (state: MobileState) => void, attachments: { key: string; blob: Blob }[] = []): Promise<MobileState> {
+  // WebKit may fail to persist file-backed Blob objects. Store portable binary
+  // buffers, preparing them before starting the atomic IndexedDB transaction.
+  const binaries = await Promise.all(attachments.map(async ({ key, blob }) => ({ key, value: { bytes: await blob.arrayBuffer(), mime: blob.type } })));
   const db = await openMobileDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction('library', 'readwrite');
+    const transaction = db.transaction(['library', 'attachments'], 'readwrite');
     const store = transaction.objectStore('library');
     const request = store.get('state');
     let state: MobileState;
@@ -42,7 +51,11 @@ export async function updateMobileState(change: (state: MobileState) => void): P
       try {
         state = request.result ?? emptyState();
         if (state.version !== 1) throw new Error('本机资料版本不兼容，请先导出备份。');
+        const previousKeys = new Set(state.documents.flatMap(entry => entry.attachment ? [entry.attachment.key] : []));
         change(state);
+        const retainedKeys = new Set(state.documents.flatMap(entry => entry.attachment ? [entry.attachment.key] : []));
+        for (const key of previousKeys) if (!retainedKeys.has(key)) transaction.objectStore('attachments').delete(key);
+        for (const binary of binaries) transaction.objectStore('attachments').put(binary.value, binary.key);
         store.put(state, 'state');
       } catch (error) { failure = error; transaction.abort(); }
     };
@@ -58,6 +71,51 @@ export async function readMobileState(): Promise<MobileState> {
     request.onerror = () => reject(request.error);
   });
 }
+export async function readAttachment(key: string): Promise<Blob | undefined> {
+  const db = await openMobileDatabase();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('attachments').objectStore('attachments').get(key);
+    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : request.result ? new Blob([request.result.bytes], { type: request.result.mime }) : undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
+export async function importMobileFiles(files: File[]) {
+  if (!files.length) return;
+  if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 200 * 1024 * 1024) throw new Error('一次最多导入 50 个文件、合计 200 MB。');
+  const entries: LocalDocument[] = []; const attachments: { key: string; blob: Blob }[] = [];
+  for (const file of files) {
+    if (/[\\/]/.test(file.name)) throw new Error('文件名不能包含路径分隔符。');
+    const media = mediaType(file.name);
+    if (media) {
+      await validateMedia(file, file.name);
+      const doc = { ...newDocument(file.name), size: file.size };
+      const key = crypto.randomUUID();
+      attachments.push({ key, blob: file.slice(0, file.size, media.mime) });
+      entries.push({ doc, attachment: { key, revision: '' }, localId: doc.id, base: null, pending: true, editId: crypto.randomUUID() });
+    } else {
+      const vault = await readImportedVault([file]);
+      for (const note of vault?.files ?? []) {
+        if (new TextEncoder().encode(note.content).length > 1024 * 1024) throw new Error(`${file.name}：文字正文最多 1 MB。`);
+        const doc = newDocument(note.path, note.content);
+        entries.push({ doc, localId: doc.id, base: null, pending: true, editId: crypto.randomUUID() });
+      }
+    }
+  }
+  // All entries and binaries commit together: failures never leave a partial import.
+  await updateMobileState(state => {
+    if (state.documents.length + entries.length > 1500) throw new Error('最多保存 1500 份资料。');
+    state.documents.unshift(...entries);
+  }, attachments);
+}
+export async function cacheAttachment(id: string, revision: string, blob: Blob) {
+  const key = crypto.randomUUID();
+  await updateMobileState(state => {
+    const entry = state.documents.find(item => item.doc.id === id);
+    if (!entry || entry.doc.revision !== revision) throw new Error('附件已更新，请重新打开。');
+    entry.attachment = { key, revision };
+  }, [{ key, blob }]);
+  return blob;
+}
 export function newDocument(name = '未命名笔记.md', text = ''): LibraryDocument {
   return { id: `mobile:${crypto.randomUUID()}`, rootId: 'mobile', path: name,
     revision: '', size: new TextEncoder().encode(text).length, updatedAt: Date.now(), text,
@@ -71,6 +129,7 @@ export async function saveMobileDocument(doc: LibraryDocument, expectedEditId?: 
     if (existing && expectedEditId !== existing.editId) throw new Error('这篇资料已在另一个页面或同步中更新。你的输入仍在，请复制后返回重新打开。');
     const savedDoc = existing?.base && existing.doc.id !== doc.id
       ? { ...doc, id: existing.doc.id, rootId: existing.doc.rootId, path: existing.doc.path, revision: existing.doc.revision } : doc;
+    if (existing && mediaType(existing.doc.path) && (savedDoc.path !== existing.doc.path || savedDoc.text !== existing.doc.text)) throw new Error('附件原文件不可在正文编辑器中修改。');
     const entry: LocalDocument = { ...existing, localId: existing?.localId ?? doc.id, doc: { ...savedDoc, updatedAt: Date.now() }, base: existing?.base ?? null,
       pending: true, editId: crypto.randomUUID() };
     if (existing) state.documents[state.documents.indexOf(existing)] = entry;
@@ -113,8 +172,11 @@ export async function resolveConflict(id: string, choice: 'remote' | 'both') {
     const entry = state.documents.find(item => item.doc.id === id);
     if (!entry || entry.conflict === undefined) return;
     if (choice === 'both') {
-      const copy = newDocument(`${entry.doc.path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '')}（手机保留版）.md`, entry.doc.text);
-      state.documents.unshift({ doc: { ...entry.doc, ...copy, summary: entry.doc.summary, tags: entry.doc.tags, categories: entry.doc.categories, category: entry.doc.category, tips: entry.doc.tips }, base: null, pending: true, editId: crypto.randomUUID() });
+      const media = mediaType(entry.doc.path);
+      if (media && (!entry.attachment || entry.attachment.revision !== entry.doc.revision)) throw new Error('此附件原版尚未保存在手机，无法创建手机副本。请先导出分类信息或使用电脑版本。');
+      const ext = media ? entry.doc.path.split('.').pop() : 'md';
+      const copy = newDocument(`${entry.doc.path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '')}（手机保留版）.${ext}`, entry.doc.text);
+      state.documents.unshift({ doc: { ...entry.doc, ...copy, size: media ? entry.doc.size : copy.size, summary: entry.doc.summary, tags: entry.doc.tags, categories: entry.doc.categories, category: entry.doc.category, tips: entry.doc.tips }, attachment: media ? { key: entry.attachment!.key, revision: '' } : undefined, base: null, pending: true, editId: crypto.randomUUID() });
     }
     if (entry.conflict) {
       entry.doc = entry.conflict; entry.base = entry.conflict; entry.pending = false; entry.editId = crypto.randomUUID(); delete entry.conflict;

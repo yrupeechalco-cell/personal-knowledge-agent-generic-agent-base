@@ -1,5 +1,6 @@
 mod library;
 mod mobile_sync;
+mod mobile_media;
 mod typewords;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};

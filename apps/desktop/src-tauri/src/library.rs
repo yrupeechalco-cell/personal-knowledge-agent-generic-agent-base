@@ -104,6 +104,9 @@ fn valid_mobile_id(id: &str) -> bool {
 // Reuse the desktop's revision checks, metadata validation, lock and source backup.
 // No client-supplied absolute path is ever used as a write destination.
 fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path) -> Result<String, String> {
+    mobile_apply_content(data, change, inbox, backups, None)
+}
+fn mobile_apply_content(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path, attachment: Option<&[u8]>) -> Result<String, String> {
     if !valid_mobile_id(&change.operation_id) { return Err("无效的同步操作编号。".into()); }
     scan(data);
     if let Some(receipt) = data.mobile_receipts.get(&change.operation_id) {
@@ -114,6 +117,10 @@ fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups:
     // Never silently evict idempotency receipts while an offline device might retry.
     if data.mobile_receipts.len() >= 100000 { return Err("同步历史已达容量上限，请导出备份后维护同步记录。".into()); }
     let incoming = change.doc;
+    if let Some(bytes) = attachment {
+        if change.base.is_some() || !incoming.text.is_empty() || incoming.size != bytes.len() as u64 { return Err("附件请求格式无效。".into()); }
+        super::mobile_media::validate(&incoming.path, bytes)?;
+    }
     if incoming.text.len() > MAX_TEXT_BYTES as usize || incoming.text.contains('\0') { return Err("原文最多 1 MB，且不能包含二进制内容。".into()); }
     let id = if let Some(base) = change.base {
         let current = data.documents.iter().find(|doc| doc.id == incoming.id).ok_or("conflict:电脑已移除此资料。")?.clone();
@@ -130,17 +137,31 @@ fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups:
         save_review(data, mobile_review(&incoming, &updated))?;
         current.id
     } else {
+        let is_media = super::mobile_media::mime(&incoming.path).is_some();
+        if is_media != attachment.is_some() { return Err("附件原文件未传输，请更新电脑 App 后重试。".into()); }
         let uuid = incoming.id.strip_prefix("mobile:").filter(|id| valid_mobile_id(id)).ok_or("新资料编号无效。")?;
         let root = data.roots.iter().find(|root| Path::new(&root.id) == inbox && !root.paused).ok_or("手机收件文件夹已移除或暂停，请在电脑上重新开启同步。")?.clone();
         let safe_name: String = incoming.path.split(['/', '\\']).next_back().unwrap_or("笔记").chars().filter(|ch| ch.is_alphanumeric() || ['-', '_', '（', '）', ' '].contains(ch)).take(45).collect();
-        let relative = format!("手机-{}-{uuid}.md", if safe_name.is_empty() { "笔记" } else { &safe_name });
+        let extension = if is_media { incoming.path.rsplit('.').next().unwrap_or("").to_ascii_lowercase() } else { "md".into() };
+        let relative = format!("手机-{}-{uuid}.{extension}", if safe_name.is_empty() { "笔记" } else { &safe_name });
         let destination = inbox.join(&relative);
         if linked(&fs::symlink_metadata(inbox).map_err(|e| e.to_string())?) || inbox.canonicalize().map_err(|e| e.to_string())? != inbox { return Err("收件目录已改变，请重新选择。".into()); }
         if !super::is_allowed_path(&relative) || data.documents.len() >= MAX_FILES || data.documents.iter().map(|doc| doc.text.len()).sum::<usize>() + incoming.text.len() > MAX_INDEX_BYTES { return Err("文件名受限或资料容量已达上限。".into()); }
         // Metadata constraints are checked before a new file can be created.
         if incoming.summary.chars().count() > 6000 || incoming.tags.len() > 20 || incoming.tags.iter().any(|tag| tag.chars().count() > 60) || incoming.categories.len() > 12 || incoming.categories.iter().any(|s| s.chars().count() > 120) || incoming.category.chars().count() > 120 || incoming.tips.len() > 16 || !["pending", "reviewed", "ignored"].contains(&incoming.status.as_str()) || incoming.tips.iter().any(|tip| tip.content.trim().is_empty() || tip.content.chars().count() > 1000 || tip.quote.trim().chars().count() < 4 || tip.quote.chars().count() > 500 || !incoming.text.contains(tip.quote.trim())) { return Err("摘要、分类、标签或知识 tip 不符合保存要求。".into()); }
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&destination).map_err(|e| format!("新笔记未写入（同名文件不会覆盖）：{e}"))?;
-        file.write_all(incoming.text.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?; drop(file);
+        let content = attachment.unwrap_or(incoming.text.as_bytes());
+        // An interrupted index save may leave a complete file. Retry adopts only
+        // byte-identical content at this generated id, never overwriting a source.
+        if destination.exists() {
+            let metadata = fs::symlink_metadata(&destination).map_err(|e| e.to_string())?;
+            if linked(&metadata) || metadata.len() != content.len() as u64 || fs::read(&destination).map_err(|e| e.to_string())? != content { return Err("同名资料已存在且内容不同，未覆盖。".into()); }
+        } else {
+            let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&destination).map_err(|e| format!("新资料未写入：{e}"))?;
+            if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+                drop(file); let _ = fs::remove_file(&destination); return Err(format!("附件写入失败：{error}"));
+            }
+            drop(file);
+        }
         scan(data);
         let id = format!("{}\n{}", root.id, relative);
         let current = data.documents.iter().find(|doc| doc.id == id).ok_or("新文件已保存，但尚未收录，请在电脑上重新扫描。")?.clone();
@@ -153,11 +174,32 @@ fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups:
 }
 
 pub async fn mobile_save(app: tauri::AppHandle, change: MobileChange, inbox: PathBuf) -> Result<Document, String> {
+    mobile_save_content(app, change, inbox, None).await
+}
+pub async fn mobile_save_content(app: tauri::AppHandle, change: MobileChange, inbox: PathBuf, attachment: Option<Vec<u8>>) -> Result<Document, String> {
     let backups = store_path(&app)?.parent().ok_or("索引目录不存在。")?.join("source-backups");
     let operation = change.operation_id.clone();
-    let data = transaction(app, move |data| { mobile_apply(data, change, &inbox, &backups)?; Ok(()) }).await?;
+    let data = transaction(app, move |data| { mobile_apply_content(data, change, &inbox, &backups, attachment.as_deref())?; Ok(()) }).await?;
     let receipt = data.mobile_receipts.get(&operation).ok_or("同步记录未保存。")?;
     mobile_find(&data, &receipt.id).ok_or("资料已移除。".into())
+}
+
+pub async fn mobile_attachment(app: tauri::AppHandle, id: String, expected: String) -> Result<(Vec<u8>, &'static str), String> {
+    let data = library_load(app).await?;
+    attachment_bytes(&data, &id, &expected)
+}
+fn attachment_bytes(data: &Library, id: &str, expected: &str) -> Result<(Vec<u8>, &'static str), String> {
+    let index = check_document(data, id, expected)?;
+    let doc = &data.documents[index];
+    let root = data.roots.iter().find(|root| root.id == doc.root_id && !root.paused).ok_or("资料目录已暂停或移除。")?;
+    let mime = super::mobile_media::mime(&doc.path).ok_or("暂不提供此格式的附件。")?;
+    if doc.size > super::mobile_media::MAX_BYTES as u64 { return Err("附件超过 50 MB，请在电脑上打开。".into()); }
+    let path = source_path(root, doc)?;
+    let mut bytes = Vec::new();
+    fs::File::open(&path).map_err(|e| e.to_string())?.take(super::mobile_media::MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    check_document(data, id, expected)?;
+    super::mobile_media::validate(&doc.path, &bytes)?;
+    Ok((bytes, mime))
 }
 
 #[derive(Clone, Deserialize, Default)]
@@ -330,6 +372,7 @@ fn revision(metadata: &fs::Metadata) -> String {
 }
 
 fn extract(path: &Path, size: u64) -> Result<String, String> {
+    if super::mobile_media::mime(&path.to_string_lossy()).is_some() { return Ok(String::new()); }
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
     if ext == "docx" {
         if size > 20 * MAX_TEXT_BYTES { return Err("Word 文件超过 20 MB；未读取正文。".into()); }
@@ -602,7 +645,7 @@ pub async fn library_open_source(app: tauri::AppHandle, id: String) -> Result<()
         let root = data.roots.iter().find(|r| r.id == doc.root_id).ok_or("目录已移除。")?;
         let path = source_path(root, doc)?;
         let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-        if !editable(&path) && !["docx", "doc", "pdf", "xlsx", "xls", "pptx", "ppt", "png", "jpg", "jpeg", "webp", "gif"].contains(&extension.as_str()) { return Err("此格式请从资源管理器自行打开。".into()); }
+        if !editable(&path) && super::mobile_media::mime(&doc.path).is_none() && !["docx", "doc", "pdf", "xlsx", "xls", "pptx", "ppt"].contains(&extension.as_str()) { return Err("此格式请从资源管理器自行打开。".into()); }
         #[cfg(windows)] {
             use std::os::windows::process::CommandExt;
             let display = path.to_string_lossy();
@@ -844,6 +887,38 @@ mod tests {
         data.documents[0] = doc.clone(); fs::write(&path, "外部编辑器更新过的正文").unwrap();
         assert!(write_source(&mut data, &doc.id, &doc.revision, "覆盖外部编辑", &backup.0).is_err());
         assert_eq!(fs::read_to_string(path).unwrap(), "外部编辑器更新过的正文");
+    }
+
+    #[test]
+    fn mobile_media_roundtrip_metadata_retry_and_scope() {
+        let fixture = Fixture::new(); let backups = Fixture::new();
+        let inbox = fixture.0.canonicalize().unwrap(); let mut data = fixture.library();
+        let bytes = b"\x89PNG\r\n\x1a\nfixture";
+        let incoming = Document { id: "mobile:12345678-1234-4234-8234-123456789abc".into(), path: "photo.png".into(), size: bytes.len() as u64,
+            status: "pending".into(), tags: vec!["照片".into()], ..Default::default() };
+        let make = || MobileChange { operation_id: "12345678-1234-4234-8234-123456789abd".into(), doc: incoming.clone(), base: None };
+        let id = mobile_apply_content(&mut data, make(), &inbox, &backups.0, Some(bytes)).unwrap();
+        mobile_apply_content(&mut data, make(), &inbox, &backups.0, Some(bytes)).unwrap();
+        assert_eq!(data.documents.len(), 1);
+        let doc = mobile_find(&data, &id).unwrap(); assert!(doc.path.ends_with(".png")); assert!(doc.text.is_empty());
+        assert_eq!(attachment_bytes(&data, &id, &doc.revision).unwrap().0, bytes);
+        assert!(attachment_bytes(&data, "../../outside.png", &doc.revision).is_err());
+        assert!(attachment_bytes(&data, &id, "old-revision").is_err());
+        let mut review = mobile_change(&doc, "12345678-1234-4234-8234-123456789abe"); review.doc.summary = "仅改摘要".into();
+        mobile_apply(&mut data, review, &inbox, &backups.0).unwrap();
+        assert_eq!(fs::read(inbox.join(&doc.path)).unwrap(), bytes);
+        data.roots[0].paused = true;
+        assert!(attachment_bytes(&data, &id, &doc.revision).is_err());
+    }
+
+    #[test]
+    fn invalid_media_never_creates_a_file() {
+        let fixture = Fixture::new(); let backups = Fixture::new();
+        let inbox = fixture.0.canonicalize().unwrap(); let mut data = fixture.library();
+        let doc = Document { id: "mobile:12345678-1234-4234-8234-123456789abc".into(), path: "photo.png".into(), size: 3, status: "pending".into(), ..Default::default() };
+        let change = MobileChange { operation_id: "12345678-1234-4234-8234-123456789abd".into(), doc, base: None };
+        assert!(mobile_apply_content(&mut data, change, &inbox, &backups.0, Some(b"bad")).is_err());
+        assert_eq!(fs::read_dir(inbox).unwrap().count(), 0);
     }
 
     #[test]

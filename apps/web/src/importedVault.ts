@@ -7,12 +7,12 @@ const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
 // A standard file input also works in iOS Safari and on LAN HTTP origins.
 // Keep it in the document until change/cancel; focus can fire before iOS returns files.
-export function chooseKnowledgeFiles(): Promise<File[]> {
+export function chooseKnowledgeFiles(accept = ".md,.markdown,.txt,text/plain,text/markdown"): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
-    input.accept = ".md,.markdown,.txt,text/plain,text/markdown";
+    input.accept = accept;
     input.hidden = true;
     const finish = () => {
       const files = Array.from(input.files ?? []);

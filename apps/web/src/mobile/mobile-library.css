@@ -57,6 +57,23 @@
 .ml-editor .ml-section small { display:block; margin-top:8px; color:var(--ml-muted); }
 .ml-editor blockquote { margin-inline:0; padding-left:12px; border-left:3px solid var(--ml-line); line-height:1.7; font-size:14px; }
 .ml-editor-actions { display:flex; gap:10px; }
+.ml-kind-filters { display:flex; gap:6px; margin-top:12px; overflow-x:auto; }
+.ml-kind-filters button { flex:1; padding:8px; white-space:nowrap; font-size:13px; }
+.ml-kind-filters button[aria-pressed=true] { background:#eee7f7; color:var(--ml-accent); border-color:#d1bfeb; }
+.ml-media-badge { display:block; font-size:12px; margin-top:10px; color:var(--ml-accent); }
+.ml-thumbnail { float:left; width:56px; height:56px; margin:0 12px 8px 0; border-radius:10px; overflow:hidden; background:#f0eaf8; color:var(--ml-accent); display:flex; align-items:center; justify-content:center; }
+.ml-thumbnail img { width:100%; height:100%; object-fit:cover; }
+.ml-document::after { content:''; display:block; clear:both; }
+.ml-media-preview { padding:16px; background:#fff; border:1px solid var(--ml-line); border-radius:14px; margin:18px 0; }
+.ml-media-heading { display:flex; justify-content:space-between; margin-bottom:14px; }
+.ml-media-heading span,.ml-media-preview small { color:var(--ml-muted); font-size:12px; }
+.ml-media-preview small { display:block; margin-top:12px; }
+.ml-media-preview video,.ml-media-preview audio { display:block; width:100%; max-height:55dvh; border-radius:10px; }
+.ml-media-preview video { background:#17151c; }
+.mobile-library-app .ml-image { display:block; width:100%; padding:0; max-height:45dvh; overflow:auto; background:#f5f3f8; }
+.ml-image img { display:block; width:100%; height:auto; object-fit:contain; max-height:45dvh; }
+.ml-image.enlarged img { width:200%; max-width:none; max-height:none; }
+.ml-download { display:inline-flex; align-items:center; min-height:44px; color:var(--ml-accent); margin-top:12px; }
 .ml-file-access { width:calc(100% - 32px); max-width:420px; max-height:calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); margin:auto; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--ml-line); border-radius:22px; padding:24px; color:var(--ml-text); background:#fff; box-shadow:0 18px 60px #241a3830; }
 .ml-file-access::backdrop { background:#21152e70; }
 .ml-access-brand { display:flex; align-items:center; gap:7px; color:var(--ml-accent); font-size:12px; }
