@@ -54,9 +54,9 @@ fn addresses() -> Vec<String> {
 pub fn mobile_sync_status(app: tauri::AppHandle) -> Result<Status, String> {
     let config = load_config(&app)?;
     let running = app.state::<MobileSyncState>().0.lock().map_err(|e| e.to_string())?.is_some();
-    Ok(Status { enabled: config.enabled, running,
+    Ok(Status { enabled: config.enabled && running, running,
         urls: if running { addresses().iter().map(|ip| format!("http://{ip}:{PORT}/?mobile=1#pair={}", config.token)).collect() } else { vec![] },
-        inbox: config.inbox, error: if config.enabled && !running { Some("同步服务未启动，请重新开启；检查 5177 端口是否被占用。".into()) } else { None } })
+        inbox: config.inbox, error: None })
 }
 
 #[tauri::command]
@@ -93,8 +93,9 @@ pub fn mobile_sync_disable(app: tauri::AppHandle) -> Result<Status, String> {
     persist_config(&app, &config)?; shutdown(&app); mobile_sync_status(app)
 }
 
-pub fn restore(app: &tauri::AppHandle) {
-    if let Ok(config) = load_config(app) { if config.enabled { let _ = start(app, config); } }
+pub fn restore(_app: &tauri::AppHandle) {
+    // Desktop-first card trial: never resume the previous file-transfer service.
+    // Keep its configuration untouched so installing 0.3.4 can still roll back.
 }
 pub fn shutdown(app: &tauri::AppHandle) {
     if let Ok(mut guard) = app.state::<MobileSyncState>().0.lock() {
@@ -127,6 +128,7 @@ fn local_ip(ip: IpAddr) -> bool { match ip { IpAddr::V4(ip) => ip.is_private() |
 fn allowed_host(host: &str) -> bool {
     host.strip_suffix(&format!(":{PORT}")).and_then(|ip| ip.parse::<IpAddr>().ok()).is_some_and(local_ip)
 }
+fn legacy_file_route_allowed(url: &str) -> bool { !url.starts_with("/api/mobile/") }
 fn authorized(value: &str, token: &str) -> bool {
     let expected = format!("Bearer {token}");
     !token.is_empty() && value.len() == expected.len() && value.bytes().zip(expected.bytes()).fold(0u8, |sum, (a,b)| sum | (a ^ b)) == 0
@@ -157,6 +159,15 @@ fn handle(mut request: Request, app: &tauri::AppHandle, config: &Config, assets:
     let url = request.url().split('?').next().unwrap_or("").to_owned();
     if url.starts_with("/api/") {
         if !authorized(&header(&request, "Authorization"), &config.token) { return json_reply(request, 401, json!({"error":"需要设备配对。"})); }
+        if url == "/api/cards/snapshot" && request.method() == &Method::Get {
+            return match tauri::async_runtime::block_on(super::library::library_load(app.clone())) {
+                Ok(data) => json_reply(request, 200, serde_json::to_value(super::library::cards::public_snapshot(&data)).unwrap()),
+                Err(error) => json_reply(request, 503, json!({"error":error})),
+            };
+        }
+        if !legacy_file_route_allowed(&url) {
+            return json_reply(request, 409, json!({"error":"电脑端已改为知识卡片试用。旧版正文和附件同步已暂停，手机现有资料仍保存在本机；请先在电脑端使用知识卡片。"}));
+        }
         if url == "/api/mobile/snapshot" && request.method() == &Method::Get {
             return match tauri::async_runtime::block_on(super::library::library_scan(app.clone())) {
                 Ok(snapshot) => json_reply(request, 200, json!({"serverId":config.server_id,"capabilities":{"media":true,"mediaChunks":true},"snapshot":super::library::mobile_public_snapshot(&snapshot)})),
@@ -251,6 +262,13 @@ fn handle(mut request: Request, app: &tauri::AppHandle, config: &Config, assets:
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn card_trial_blocks_every_legacy_content_and_binary_route() {
+        for route in ["snapshot", "change", "attachment", "media-start", "media-chunk", "media-finish"] {
+            assert!(!legacy_file_route_allowed(&format!("/api/mobile/{route}")));
+        }
+        assert!(legacy_file_route_allowed("/api/cards/snapshot"));
+    }
     #[test]
     fn authentication_and_dns_rebinding_are_rejected() {
         assert!(authorized("Bearer abc", "abc")); assert!(!authorized("", "")); assert!(!authorized("Bearer abd", "abc"));

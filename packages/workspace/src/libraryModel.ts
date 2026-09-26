@@ -3,6 +3,7 @@ import type { ModelRequest } from "@knowledge-agent/agent";
 export interface LibraryRoot { id: string; path: string; paused: boolean; lastScan: number | null; issue: string | null }
 export interface LibraryTip { id: string; content: string; quote: string }
 export interface LibraryDocument {
+  resourceId?: string;
   id: string; rootId: string; path: string; revision: string; size: number; updatedAt: number;
   text: string; issue: string | null; status: "pending" | "reviewed" | "ignored";
   summary: string; category: string; tags: string[];
@@ -10,6 +11,7 @@ export interface LibraryDocument {
   classificationLocked?: boolean; metadataVersion?: number; aiError?: string;
 }
 export interface LibrarySnapshot {
+  knowledgeCards?: { deviceId: string; records: KnowledgeCardRecord[] };
   version: number; roots: LibraryRoot[]; documents: LibraryDocument[];
   storeRevision?: number;
   autoAnalyze?: boolean; queueState?: "idle" | "running" | "paused";
@@ -20,6 +22,9 @@ export interface LibraryReview extends Pick<LibraryDocument, "id" | "revision" |
 }
 export interface LibraryConfig { autoAnalyze?: boolean; queueState?: "idle" | "running" | "paused"; retryFailed?: boolean }
 export interface LibraryAdapter {
+  saveKnowledgeCard?(review: KnowledgeCardReview): Promise<LibrarySnapshot>;
+  previewKnowledgeCards?(): Promise<KnowledgeCardSnapshot>;
+  exportKnowledgeCards?(): Promise<string | null>;
   load(): Promise<LibrarySnapshot>;
   addFolder(): Promise<LibrarySnapshot>;
   scan(): Promise<LibrarySnapshot>;
@@ -33,6 +38,15 @@ export interface LibraryAdapter {
   restoreSource?(id: string, revision: string): Promise<LibrarySnapshot>;
 }
 export type LibraryFilter = "all" | "pending" | "reviewed" | "ignored" | "issues";
+export interface KnowledgeCard {
+  id: string; version: number; name: string; fileType: string;
+  summary: string; categories: string[]; tags: string[]; tips: { id: string; content: string }[];
+  source: { deviceId: string; deviceName: string; revision: string; lastSeenAt: number | null; availability: "indexed" | "paused" | "unavailable" };
+  analysisStale: boolean; classificationLocked: boolean; updatedAt: number;
+}
+export interface KnowledgeCardRecord { card: KnowledgeCard; scope: "local" | "shared" }
+export interface KnowledgeCardReview { id: string; expectedVersion: number; summary: string; categories: string[]; tags: string[]; scope: "local" | "shared" }
+export interface KnowledgeCardSnapshot { schema: "knowledge-cards/v1"; deviceId: string; generatedAt: number; cards: KnowledgeCard[] }
 export interface LibrarySuggestion { summary: string; category: string; categories: string[]; tags: string[]; tips: LibraryTip[] }
 
 export const normalizeCategories = (paths: string[]) => [...new Set(paths.map((path) => path.split(/[/>\\]/).map((part) => part.trim()).filter(Boolean).slice(0, 4).join("/")).filter(Boolean))].slice(0, 12);

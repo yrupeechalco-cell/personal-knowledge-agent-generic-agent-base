@@ -3,6 +3,7 @@ import { BookOpen, FileText, FolderPlus, FolderSearch, Lightbulb, Pause, Play, R
 import type { ModelRequest } from "@knowledge-agent/agent";
 import { categoriesOf, categoryTree, hasCategory, isAnalysisStale, pendingDocuments, searchLibrary, type LibraryAdapter, type LibraryFilter } from "./libraryModel";
 import { LibraryDocumentDetail } from "./LibraryDocumentDetail";
+import { KnowledgeCards } from "./KnowledgeCards";
 import { useLibraryController } from "./useLibraryController";
 
 interface Props { adapter?: LibraryAdapter; runModel?: (request: ModelRequest) => Promise<string>; model: string; modelReady: boolean; visible: boolean }
@@ -17,7 +18,7 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible }: 
   const [category, setCategory] = useState("");
   const [tag, setTag] = useState("");
   const [rootId, setRootId] = useState("");
-  const [view, setView] = useState<"documents" | "tips">("documents");
+  const [view, setView] = useState<"documents" | "tips" | "cards">(adapter?.saveKnowledgeCard ? "cards" : "documents");
   const [pendingSelection, setPendingSelection] = useState("");
   const [removeId, setRemoveId] = useState("");
   const results = useMemo(() => searchLibrary(data.documents, query, filter).filter((doc) => (filter !== "all" || doc.status !== "ignored") && hasCategory(doc, category) && (!tag || doc.tags.includes(tag)) && (!rootId || doc.rootId === rootId)), [data.documents, query, filter, category, tag, rootId]);
@@ -59,10 +60,11 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible }: 
           <div><strong title={root.path}>{root.path}</strong><small>{root.paused ? "已暂停" : root.lastScan ? `上次扫描 ${new Date(root.lastScan).toLocaleString()}` : "等待扫描"}</small>{root.issue && <small className="library-error">{root.issue}</small>}</div>
           <button disabled={busy || detailDirty} onClick={() => void operate(() => adapter.updateRoot(root.id, root.paused ? "resume" : "pause"))}>{root.paused ? "恢复" : "暂停"}</button>
           <button disabled={busy || detailDirty} onClick={() => setRemoveId(root.id)}>移除</button>
-          {removeId === root.id && <div className="library-remove"><span>移除此目录的索引和整理卡片，原文件保留。重要 tip 可先导出。</span><button disabled={busy || detailDirty} onClick={() => { setRemoveId(""); void operate(() => adapter.updateRoot(root.id, "remove")); }}>确认移除索引</button><button onClick={() => setRemoveId("")}>取消</button></div>}
+          {removeId === root.id && <div className="library-remove"><span>{adapter.saveKnowledgeCard ? "停止接入此目录，已有知识卡片保留并设为仅本机；原文件不变。" : "移除此目录的索引和整理卡片，原文件保留。重要 tip 可先导出。"}</span><button disabled={busy || detailDirty} onClick={() => { setRemoveId(""); void operate(() => adapter.updateRoot(root.id, "remove")); }}>确认移除索引</button><button onClick={() => setRemoveId("")}>取消</button></div>}
         </div>)}
       </details>
-      <div className="library-workbench">
+      {adapter.saveKnowledgeCard && <div className="library-view-controls knowledge-card-navigation" role="group" aria-label="资料查看方式"><div><button disabled={detailDirty} aria-pressed={view === "cards"} className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}>知识卡片</button><button disabled={detailDirty} aria-pressed={view !== "cards"} className={view !== "cards" ? "active" : ""} onClick={() => setView("documents")}>原文与 AI 整理</button></div></div>}
+      {view === "cards" ? <KnowledgeCards records={data.knowledgeCards?.records ?? []} adapter={adapter} busy={busy} operate={operate} onDirty={setDetailDirty}/> : <div className="library-workbench">
         <aside className="library-taxonomy" aria-label="知识分类">
           <h3>知识分类</h3><button className={!category ? "active" : ""} onClick={() => { setCategory(""); setFilter("all"); setTag(""); }}>全部资料</button>
           <button className={category === "__uncategorized" ? "active" : ""} onClick={() => { setCategory("__uncategorized"); setFilter("all"); setTag(""); }}>未分类 <span>{data.documents.filter((doc) => doc.status !== "ignored" && !categoriesOf(doc).length).length}</span></button>
@@ -87,7 +89,7 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible }: 
             <div className="library-detail">{document ? <LibraryDocumentDetail key={`${document.id}:${document.revision}:${document.metadataVersion ?? 0}:${document.issue ?? ""}`} doc={document} rootPath={data.roots.find((root) => root.id === document.rootId)?.path ?? ""} adapter={adapter} busy={busy} model={model} modelReady={modelReady} runModel={runModel} taxonomy={tree.map((node) => node.path)} onDirty={setDetailDirty} operate={operate} onSave={(review) => operate(() => adapter.saveReview(review), "整理结果已保存；分类视图已更新，原文件未改动。")}/> : <div className="library-empty"><BookOpen size={30} /><h3>选择一份资料</h3><p>查看正文、调整知识分类，或提取带有原文出处的知识 tip。</p></div>}</div>
           </div>}
         </div>
-      </div>
+      </div>}
     </>}
     <details className="library-help"><summary>收录范围与使用说明</summary><p>支持 UTF-8 的 Markdown、TXT、CSV、TSV、JSON、YAML、XML、HTML，以及 DOCX 主正文。单份正文上限 1 MB，Word 文件上限 20 MB；PDF、图片、旧版 Word、Excel 等暂仅收录文件名。正文索引总量 16 MB，最多 1500 个文件、10 个不重叠目录。</p><p>分类、标签、摘要和 tip 存在本机知识索引中。原文件更新后保留已确认分类，旧知识内容标记待更新。自动扫描与自动 AI 整理只在 App 运行时进行；正在编辑资料时暂缓。暂停请求会等待当前模型调用返回，然后停止后续分段与保存。</p><p>本地扫描和搜索不调用 AI。点击 AI 整理或开启自动整理后，文件名与已收录正文会分段发送给当前模型。AI 分类和要点需要核对；引用逐字匹配也不能保证推论正确。分类整理不移动或改写原文件，只有「保存原文」会修改文件内容。</p></details>
   </section>;

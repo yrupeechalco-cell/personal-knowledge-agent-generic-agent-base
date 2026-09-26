@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::{HashMap, HashSet}, fs, io::{Read, Write}, path::{Path, PathBuf}, sync::Mutex, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::Manager;
+pub mod cards;
 
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 const MAX_FILES: usize = 1500;
@@ -19,6 +20,7 @@ pub struct Library {
     #[serde(default = "idle")] queue_state: String,
     #[serde(default)] store_revision: u64,
     #[serde(default)] mobile_receipts: HashMap<String, MobileReceipt>,
+    #[serde(default)] knowledge_cards: cards::CardStore,
 }
 fn idle() -> String { "idle".into() }
 
@@ -36,6 +38,7 @@ pub struct Root {
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     id: String,
+    #[serde(default)] resource_id: String,
     root_id: String,
     path: String,
     revision: String,
@@ -74,7 +77,7 @@ pub fn mobile_document_id(change: &MobileChange) -> String { change.doc.id.clone
 
 pub fn mobile_public_snapshot(data: &Library) -> serde_json::Value {
     let mut value = serde_json::to_value(data).unwrap_or_default();
-    if let Some(object) = value.as_object_mut() { object.remove("mobileReceipts"); }
+    if let Some(object) = value.as_object_mut() { object.remove("mobileReceipts"); object.remove("knowledgeCards"); }
     value
 }
 
@@ -268,7 +271,7 @@ fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default
 fn store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("document-library");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("index-v1.json"))
+    Ok(dir.join("index-v3.json"))
 }
 
 fn load(path: &Path) -> Result<Library, String> {
@@ -278,7 +281,7 @@ fn load(path: &Path) -> Result<Library, String> {
         return Err("资料索引超过读取限制，请先备份检查；原索引未被覆盖。".into());
     }
     let mut data: Library = serde_json::from_reader(file).map_err(|e| format!("资料索引损坏，请先备份检查；原索引未被覆盖：{e}"))?;
-    if ![1, 2].contains(&data.version) { return Err("资料索引版本不兼容，请更新 App。".into()); }
+    if ![1, 2, 3].contains(&data.version) { return Err("资料索引版本不兼容，请更新 App。".into()); }
     if data.version == 1 {
         for doc in &mut data.documents {
             doc.categories = normalize_categories(&[doc.category.clone()]);
@@ -287,6 +290,18 @@ fn load(path: &Path) -> Result<Library, String> {
         }
         data.version = 2;
     }
+    Ok(data)
+}
+
+// The v1/v2 index stays byte-for-byte intact for rollback to 0.3.4.
+// A failed migration never replaces it or starts with an empty knowledge library.
+fn load_current(path: &Path) -> Result<Library, String> {
+    let legacy = path.with_file_name("index-v1.json");
+    let migrating = !path.exists();
+    let mut data = load(if migrating && legacy.exists() { &legacy } else { path })?;
+    let changed = cards::reconcile(&mut data)?;
+    data.version = 3;
+    if migrating || changed { persist(path, &data)?; }
     Ok(data)
 }
 
@@ -314,8 +329,9 @@ where F: FnOnce(&mut Library) -> Result<(), String> + Send + 'static {
         let _guard = STORE_LOCK.lock().map_err(|_| "资料索引正处于错误状态，请重启 App。".to_string())?;
         let path = store_path(&app)?;
         let _file_guard = acquire_store(&path)?;
-        let mut data = load(&path)?;
+        let mut data = load_current(&path)?;
         change(&mut data)?;
+        cards::reconcile(&mut data)?;
         data.store_revision += 1;
         persist(&path, &data)?;
         Ok(data)
@@ -326,7 +342,9 @@ where F: FnOnce(&mut Library) -> Result<(), String> + Send + 'static {
 pub async fn library_load(app: tauri::AppHandle) -> Result<Library, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = STORE_LOCK.lock().map_err(|e| e.to_string())?;
-        load(&store_path(&app)?)
+        let path = store_path(&app)?;
+        let _file_guard = acquire_store(&path)?;
+        load_current(&path)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -389,6 +407,8 @@ pub async fn library_update_root(app: tauri::AppHandle, id: String, action: Stri
             "pause" => root.paused = true,
             "resume" => root.paused = false,
             "remove" => {
+                let removed: HashSet<_> = data.documents.iter().filter(|d| d.root_id == id).map(|d| d.resource_id.clone()).collect();
+                cards::make_local(data, &removed);
                 data.roots.retain(|r| r.id != id);
                 data.documents.retain(|d| d.root_id != id);
             },

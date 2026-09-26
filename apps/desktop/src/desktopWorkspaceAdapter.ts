@@ -51,6 +51,9 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
       useBundled: () => invoke<void>("typewords_use_bundled")
     },
     library: {
+      saveKnowledgeCard: (review) => invoke("library_save_card", { review }),
+      previewKnowledgeCards: () => invoke("library_card_snapshot"),
+      exportKnowledgeCards: () => invoke("library_export_cards"),
       load: () => invoke("library_load"),
       addFolder: () => invoke("library_add_folder"),
       scan: () => invoke("library_scan"),

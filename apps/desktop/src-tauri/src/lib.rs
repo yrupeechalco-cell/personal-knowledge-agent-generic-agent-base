@@ -967,6 +967,8 @@ pub fn run() {
             library::library_update_root, library::library_save_review, library::library_export,
             library::library_configure, library::library_record_error, library::library_open_source,
             library::library_save_source, library::library_restore_source,
+            library::cards::library_save_card, library::cards::library_card_snapshot,
+            library::cards::library_export_cards,
             select_vault_dir,
             select_read_only_structure_dir,
             list_storage_roots,
