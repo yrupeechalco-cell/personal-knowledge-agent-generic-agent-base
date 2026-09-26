@@ -1,4 +1,5 @@
 mod library;
+mod mobile_sync;
 mod typewords;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use quick_xml::{events::Event as XmlEvent, Reader as XmlReader};
@@ -953,10 +954,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(typewords::TypeWordsProcess::default())
+        .manage(mobile_sync::MobileSyncState::default())
+        .setup(|app| { mobile_sync::restore(app.handle()); Ok(()) })
         .manage(VaultWatcherState {
             watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            mobile_sync::mobile_sync_status, mobile_sync::mobile_sync_enable, mobile_sync::mobile_sync_disable,
             typewords::typewords_start, typewords::typewords_select_directory, typewords::typewords_use_bundled,
             library::library_load, library::library_add_folder, library::library_scan,
             library::library_update_root, library::library_save_review, library::library_export,
@@ -1002,7 +1006,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building knowledge agent desktop")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) { typewords::shutdown(app); }
+            if matches!(event, tauri::RunEvent::Exit) { mobile_sync::shutdown(app); typewords::shutdown(app); }
         });
 }
 

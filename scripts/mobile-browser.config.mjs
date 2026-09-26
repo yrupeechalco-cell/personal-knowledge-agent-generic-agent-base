@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   testDir: './browser-tests',
-  testMatch: 'mobile.spec.mjs',
+  testMatch: 'mobile-library.spec.mjs',
   outputDir: '../.artifacts/mobile-browser-results',
   timeout: 45000,
   workers: 1,

@@ -4,6 +4,7 @@ import {
   type KnowledgeWorkspaceAdapter
 } from "@knowledge-agent/workspace";
 import { LanguageProvider } from "@knowledge-agent/ui";
+import { MobileLibraryApp } from "./mobile/MobileLibraryApp";
 import { chooseKnowledgeFiles, readImportedVault } from "./importedVault";
 import {
   githubRepositorySlug,
@@ -188,6 +189,9 @@ function clearRepositoryQuery() {
 }
 
 export function KnowledgeAgentWebApp() {
+  if (!new URLSearchParams(location.search).has('repo') && (new URLSearchParams(location.search).has('mobile') || window.innerWidth <= 760)) {
+    return <MobileLibraryApp />;
+  }
   return (
     <LanguageProvider>
       <KnowledgeWorkspace adapter={webWorkspaceAdapter} />

@@ -1,7 +1,7 @@
 {
   "name": "personal-knowledge-agent-generic-agent-base",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "GitHub-native Obsidian-like personal knowledge base Agent.",
   "type": "module",
   "workspaces": [
@@ -14,6 +14,7 @@
     "dev:web": "npm run dev -w apps/web",
     "dev:mobile": "node scripts/mobile-preview.mjs",
     "test:mobile": "playwright test --config scripts/mobile-browser.config.mjs",
+    "mobile:prepare": "npm run build:web && node scripts/prepare-mobile.mjs",
     "tauri:dev": "npm run tauri -w apps/desktop -- dev",
     "tauri:build": "npm run tauri -w apps/desktop -- build",
     "build:web": "npm run build -w apps/web",
@@ -40,6 +41,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^27.3.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",

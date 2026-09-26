@@ -43,6 +43,7 @@ private-vaults/
 .local-plugin-logs/
 typewords-*.log
 apps/desktop/src-tauri/resources/typewords/
+apps/desktop/src-tauri/resources/mobile-web/
 third_party/typewords/.nuxt/
 third_party/typewords/.output/
 third_party/typewords/.nitro/

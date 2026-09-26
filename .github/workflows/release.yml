@@ -67,11 +67,32 @@ jobs:
           path: .artifacts/typewords-browser-results
           if-no-files-found: ignore
 
+      - name: Test mobile persistence and conflict handling
+        run: npx playwright test --config scripts/mobile-browser.config.mjs --project phone-chromium
+
+      - name: Save mobile browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-browser-evidence
+          path: .artifacts/mobile-browser-results
+          if-no-files-found: ignore
+
       - name: Build desktop frontend for native tests
-        run: npm run build:desktop
+        run: |
+          npm run mobile:prepare
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build:desktop
 
       - name: Test native document index
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Save resolved native dependency lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-dependency-lock
+          path: apps/desktop/src-tauri/Cargo.lock
 
       - name: Build and publish signed installer
         uses: tauri-apps/tauri-action@v1

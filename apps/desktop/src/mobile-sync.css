@@ -1,0 +1,12 @@
+.mobile-sync-overlay { position:fixed; inset:0; z-index:300; background:#0007; display:flex; align-items:center; justify-content:center; padding:30px; }
+.mobile-sync-panel { width:520px; max-height:90vh; overflow:auto; border:1px solid #ddd4e5; border-radius:16px; background:#fcfbfe; color:#29222f; padding:24px; box-shadow:0 16px 80px #0004; }
+.mobile-sync-panel header { display:flex; justify-content:space-between; align-items:center; }
+.mobile-sync-panel h2 { margin:0; }
+.mobile-sync-panel p { line-height:1.7; font-size:13px; overflow-wrap:anywhere; }
+.mobile-sync-panel button { padding:10px 14px; border:1px solid #d5c9df; background:#f3edf8; border-radius:8px; color:#4f3b6b; cursor:pointer; }
+.mobile-sync-panel button:disabled { opacity:.5; }
+.mobile-sync-panel label { display:block; font-size:12px; }
+.mobile-sync-panel input { width:100%; padding:10px; margin-top:6px; background:white; color:#29222f; border:1px solid #ddd4e5; border-radius:7px; }
+.mobile-sync-qr { display:flex; flex-direction:column; align-items:center; gap:12px; padding:15px 0; }
+.mobile-sync-qr small { color:#7c707f; }
+.mobile-sync-panel [role=alert] { color:#a43d2b; }

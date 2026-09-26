@@ -10,6 +10,7 @@ const server = await createServer({
   root: path.join(repo, 'apps/web'),
   server: {
     host: '0.0.0.0', port, strictPort: true,
+    proxy: { '/api/mobile': { target: 'http://127.0.0.1:5177', changeOrigin: true, headers: { Origin: 'http://127.0.0.1:5177' } } },
     // Only the app source is served. Never expose ignored notes, tooling, or keys.
     fs: {
       strict: true,

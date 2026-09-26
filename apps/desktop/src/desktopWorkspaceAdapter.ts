@@ -41,6 +41,7 @@ export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   let startingTypeWords: Promise<void> | undefined;
   return {
     canOpenVault: true,
+    openMobileSync: () => { window.dispatchEvent(new Event('open-mobile-sync')); },
     typewords: {
       ensureStarted() {
         startingTypeWords ??= invoke<void>("typewords_start").finally(() => { startingTypeWords = undefined; });

@@ -1,0 +1,11 @@
+import { cp, mkdir, readdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const repo = fileURLToPath(new URL('..', import.meta.url));
+const target = path.resolve(repo, 'apps/desktop/src-tauri/resources/mobile-web');
+const expected = path.join(repo, 'apps', 'desktop', 'src-tauri', 'resources') + path.sep;
+if (!target.startsWith(expected)) throw new Error('Unexpected mobile resources path');
+await mkdir(target, { recursive: true });
+for (const entry of await readdir(target)) await rm(path.join(target, entry), { recursive: true, force: true });
+await cp(path.join(repo, 'apps/web/dist'), target, { recursive: true });
+console.log('Bundled mobile web app for the installed desktop sync server.');

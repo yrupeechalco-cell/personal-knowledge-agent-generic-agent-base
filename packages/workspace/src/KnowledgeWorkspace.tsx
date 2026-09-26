@@ -83,6 +83,7 @@ import {
   RotateCcw,
   Settings,
   ShieldCheck,
+  Smartphone,
   TableProperties,
   Trash2,
   X
@@ -331,6 +332,7 @@ export interface CodexConnectionStatus {
 
 export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
+  openMobileSync?(): void;
   mobileLayout?: boolean;
   importFiles?(): Promise<LoadedVault | null>;
   library?: LibraryAdapter;
@@ -3936,6 +3938,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <Trash2 />
         </IconButton>
         <div className="ribbon-spacer" />
+        {adapter.openMobileSync && <button className="icon-button" title="手机同步" aria-label="手机同步" onClick={adapter.openMobileSync}><Smartphone size={17} /></button>}
         <IconButton active={agentPanelMode !== "hidden"} label={t("智能体")} onClick={focusAgent}>
           <Bot />
         </IconButton>

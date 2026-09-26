@@ -18,6 +18,7 @@ pub struct Library {
     #[serde(default)] auto_analyze: bool,
     #[serde(default = "idle")] queue_state: String,
     #[serde(default)] store_revision: u64,
+    #[serde(default)] mobile_receipts: HashMap<String, MobileReceipt>,
 }
 fn idle() -> String { "idle".into() }
 
@@ -56,6 +57,108 @@ pub struct Document {
 
 #[derive(Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Tip { id: String, content: String, quote: String }
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MobileReceipt { id: String, revision: String, metadata_version: u64 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileBase { revision: String, metadata_version: u64 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileChange { pub operation_id: String, pub doc: Document, base: Option<MobileBase> }
+
+pub fn mobile_document_id(change: &MobileChange) -> String { change.doc.id.clone() }
+
+pub fn mobile_public_snapshot(data: &Library) -> serde_json::Value {
+    let mut value = serde_json::to_value(data).unwrap_or_default();
+    if let Some(object) = value.as_object_mut() { object.remove("mobileReceipts"); }
+    value
+}
+
+pub fn mobile_find(data: &Library, id: &str) -> Option<Document> { data.documents.iter().find(|doc| doc.id == id).cloned() }
+pub fn mobile_conflict(data: &Library, id: &str, operation: &str) -> Option<Document> {
+    mobile_find(data, data.mobile_receipts.get(operation).map(|receipt| receipt.id.as_str()).unwrap_or(id))
+}
+
+pub async fn mobile_add_inbox(app: tauri::AppHandle, path: PathBuf) -> Result<Library, String> {
+    transaction(app, move |data| {
+        let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+        if !data.roots.iter().any(|root| Path::new(&root.id) == canonical) { add_root(data, &canonical)?; }
+        scan(data); Ok(())
+    }).await
+}
+
+fn mobile_review(doc: &Document, current: &Document) -> Review {
+    Review { id: current.id.clone(), revision: current.revision.clone(), status: doc.status.clone(),
+        summary: doc.summary.clone(), category: doc.category.clone(), categories: doc.categories.clone(), tags: doc.tags.clone(), tips: doc.tips.clone(),
+        classification_locked: Some(true), metadata_version: Some(current.metadata_version), source: "manual".into(), analysis_revision: Some(if doc.summary == current.summary && doc.tips == current.tips && !current.analysis_revision.is_empty() { current.analysis_revision.clone() } else { current.revision.clone() }) }
+}
+
+fn valid_mobile_id(id: &str) -> bool {
+    id.len() == 36 && id.bytes().enumerate().all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() })
+}
+
+// Reuse the desktop's revision checks, metadata validation, lock and source backup.
+// No client-supplied absolute path is ever used as a write destination.
+fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path) -> Result<String, String> {
+    if !valid_mobile_id(&change.operation_id) { return Err("无效的同步操作编号。".into()); }
+    scan(data);
+    if let Some(receipt) = data.mobile_receipts.get(&change.operation_id) {
+        let current = data.documents.iter().find(|doc| doc.id == receipt.id);
+        if current.is_some_and(|doc| doc.revision == receipt.revision && doc.metadata_version == receipt.metadata_version) { return Ok(receipt.id.clone()); }
+        return Err("conflict:已同步的资料又在电脑上更新，请合并两个版本。".into());
+    }
+    // Never silently evict idempotency receipts while an offline device might retry.
+    if data.mobile_receipts.len() >= 100000 { return Err("同步历史已达容量上限，请导出备份后维护同步记录。".into()); }
+    let incoming = change.doc;
+    if incoming.text.len() > MAX_TEXT_BYTES as usize || incoming.text.contains('\0') { return Err("原文最多 1 MB，且不能包含二进制内容。".into()); }
+    let id = if let Some(base) = change.base {
+        let current = data.documents.iter().find(|doc| doc.id == incoming.id).ok_or("conflict:电脑已移除此资料。")?.clone();
+        if current.revision != base.revision || current.metadata_version != base.metadata_version { return Err("conflict:电脑与手机都修改了此资料。".into()); }
+        let mut candidate = data.clone();
+        let index = check_document(&candidate, &current.id, &current.revision).map_err(|e| format!("conflict:{e}"))?;
+        let preserves_knowledge = incoming.summary == current.summary && incoming.tips == current.tips;
+        if !preserves_knowledge { candidate.documents[index].text = incoming.text.clone(); }
+        let review = mobile_review(&incoming, &current);
+        // Validate metadata against the proposed body before touching the source.
+        save_review(&mut candidate, review)?;
+        if incoming.text != current.text { write_source(data, &current.id, &current.revision, &incoming.text, backups)?; }
+        let updated = data.documents.iter().find(|doc| doc.id == current.id).ok_or("资料已移除。")?.clone();
+        save_review(data, mobile_review(&incoming, &updated))?;
+        current.id
+    } else {
+        let uuid = incoming.id.strip_prefix("mobile:").filter(|id| valid_mobile_id(id)).ok_or("新资料编号无效。")?;
+        let root = data.roots.iter().find(|root| Path::new(&root.id) == inbox && !root.paused).ok_or("手机收件文件夹已移除或暂停，请在电脑上重新开启同步。")?.clone();
+        let safe_name: String = incoming.path.split(['/', '\\']).next_back().unwrap_or("笔记").chars().filter(|ch| ch.is_alphanumeric() || ['-', '_', '（', '）', ' '].contains(ch)).take(45).collect();
+        let relative = format!("手机-{}-{uuid}.md", if safe_name.is_empty() { "笔记" } else { &safe_name });
+        let destination = inbox.join(&relative);
+        if linked(&fs::symlink_metadata(inbox).map_err(|e| e.to_string())?) || inbox.canonicalize().map_err(|e| e.to_string())? != inbox { return Err("收件目录已改变，请重新选择。".into()); }
+        if !super::is_allowed_path(&relative) || data.documents.len() >= MAX_FILES || data.documents.iter().map(|doc| doc.text.len()).sum::<usize>() + incoming.text.len() > MAX_INDEX_BYTES { return Err("文件名受限或资料容量已达上限。".into()); }
+        // Metadata constraints are checked before a new file can be created.
+        if incoming.summary.chars().count() > 6000 || incoming.tags.len() > 20 || incoming.tags.iter().any(|tag| tag.chars().count() > 60) || incoming.categories.len() > 12 || incoming.categories.iter().any(|s| s.chars().count() > 120) || incoming.category.chars().count() > 120 || incoming.tips.len() > 16 || !["pending", "reviewed", "ignored"].contains(&incoming.status.as_str()) || incoming.tips.iter().any(|tip| tip.content.trim().is_empty() || tip.content.chars().count() > 1000 || tip.quote.trim().chars().count() < 4 || tip.quote.chars().count() > 500 || !incoming.text.contains(tip.quote.trim())) { return Err("摘要、分类、标签或知识 tip 不符合保存要求。".into()); }
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&destination).map_err(|e| format!("新笔记未写入（同名文件不会覆盖）：{e}"))?;
+        file.write_all(incoming.text.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?; drop(file);
+        scan(data);
+        let id = format!("{}\n{}", root.id, relative);
+        let current = data.documents.iter().find(|doc| doc.id == id).ok_or("新文件已保存，但尚未收录，请在电脑上重新扫描。")?.clone();
+        save_review(data, mobile_review(&incoming, &current))?;
+        id
+    };
+    let current = data.documents.iter().find(|doc| doc.id == id).ok_or("资料已移除。")?;
+    data.mobile_receipts.insert(change.operation_id, MobileReceipt { id: id.clone(), revision: current.revision.clone(), metadata_version: current.metadata_version });
+    Ok(id)
+}
+
+pub async fn mobile_save(app: tauri::AppHandle, change: MobileChange, inbox: PathBuf) -> Result<Document, String> {
+    let backups = store_path(&app)?.parent().ok_or("索引目录不存在。")?.join("source-backups");
+    let operation = change.operation_id.clone();
+    let data = transaction(app, move |data| { mobile_apply(data, change, &inbox, &backups)?; Ok(()) }).await?;
+    let receipt = data.mobile_receipts.get(&operation).ok_or("同步记录未保存。")?;
+    mobile_find(&data, &receipt.id).ok_or("资料已移除。".into())
+}
 
 #[derive(Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -612,6 +715,52 @@ mod tests {
 
     fn review_for(doc: &Document) -> Review {
         Review { id: doc.id.clone(), revision: doc.revision.clone(), metadata_version: Some(doc.metadata_version), status: "reviewed".into(), summary: "人物需要有清楚的动机".into(), category: "创作/人物".into(), categories: vec!["创作/人物".into(), "学习/叙事".into()], tags: vec!["人物动机".into()], tips: vec![Tip { id: "1".into(), content: "先写人物动机，再写行动".into(), quote: "人物动机决定行动".into() }], ..Review::default() }
+    }
+
+    fn mobile_change(doc: &Document, operation: &str) -> MobileChange {
+        MobileChange { operation_id: operation.into(), base: Some(MobileBase { revision: doc.revision.clone(), metadata_version: doc.metadata_version }), doc: doc.clone() }
+    }
+
+    #[test]
+    fn mobile_sync_is_idempotent_and_preserves_source_location() {
+        let fixture = Fixture::new(); let path = fixture.0.join("资料.md"); fs::write(&path, "原文").unwrap();
+        let mut data = fixture.library(); scan(&mut data); let original = data.documents[0].clone();
+        let operation = "12345678-1234-4234-8234-123456789abc";
+        let mut change = mobile_change(&original, operation); change.doc.text = "手机修改的正文".into(); change.doc.categories = vec!["工作/项目".into()]; change.doc.tags = vec!["手机".into()];
+        let encoded = serde_json::to_value(&change.doc).unwrap();
+        let id = mobile_apply(&mut data, change, &fixture.0, &fixture.0.join("backups")).unwrap();
+        assert_eq!(id, original.id); assert_eq!(fs::read_to_string(&path).unwrap(), "手机修改的正文"); assert_eq!(data.documents[0].categories, vec!["工作/项目"]);
+        let after = data.documents[0].clone();
+        let retry = MobileChange { operation_id: operation.into(), base: Some(MobileBase { revision: original.revision.clone(), metadata_version: original.metadata_version }), doc: serde_json::from_value(encoded).unwrap() };
+        mobile_apply(&mut data, retry, &fixture.0, &fixture.0.join("backups")).unwrap();
+        assert_eq!(data.documents[0].metadata_version, after.metadata_version);
+        let stale = mobile_change(&original, "12345678-1234-4234-8234-123456789abd");
+        assert!(mobile_apply(&mut data, stale, &fixture.0, &fixture.0.join("backups")).unwrap_err().starts_with("conflict:"));
+        assert_eq!(fs::read_to_string(path).unwrap(), "手机修改的正文");
+    }
+
+    #[test]
+    fn mobile_sync_validates_before_writing_and_detects_external_changes() {
+        let fixture = Fixture::new(); let path = fixture.0.join("资料.md"); fs::write(&path, "原文").unwrap();
+        let mut data = fixture.library(); scan(&mut data); let original = data.documents[0].clone();
+        let mut change = mobile_change(&original, "12345678-1234-4234-8234-123456789abc"); change.doc.text = "不应写入".into(); change.doc.tags = vec!["x".repeat(61)];
+        assert!(mobile_apply(&mut data, change, &fixture.0, &fixture.0.join("backups")).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "原文");
+        fs::write(&path, "电脑外部修改，必须保留").unwrap();
+        assert!(mobile_apply(&mut data, mobile_change(&original, "12345678-1234-4234-8234-123456789abd"), &fixture.0, &fixture.0.join("backups")).unwrap_err().starts_with("conflict:"));
+        assert_eq!(fs::read_to_string(path).unwrap(), "电脑外部修改，必须保留");
+    }
+
+    #[test]
+    fn mobile_new_notes_stay_in_selected_inbox_and_retries_do_not_duplicate() {
+        let fixture = Fixture::new(); let mut data = fixture.library();
+        let inbox = fixture.0.canonicalize().unwrap();
+        let doc = Document { id: "mobile:12345678-1234-4234-8234-123456789abc".into(), path: "../../outside.md".into(), text: "手机新笔记".into(), status: "reviewed".into(), ..Document::default() };
+        let make_change = || MobileChange { operation_id: "12345678-1234-4234-8234-123456789abd".into(), base: None, doc: doc.clone() };
+        mobile_apply(&mut data, make_change(), &inbox, &fixture.0.join("backups")).unwrap();
+        mobile_apply(&mut data, make_change(), &inbox, &fixture.0.join("backups")).unwrap();
+        assert_eq!(data.documents.len(), 1); assert_eq!(data.documents[0].text, "手机新笔记");
+        assert!(source_path(&data.roots[0], &data.documents[0]).unwrap().starts_with(inbox));
     }
 
     #[test]
