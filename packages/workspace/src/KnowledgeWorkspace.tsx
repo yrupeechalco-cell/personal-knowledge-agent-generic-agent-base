@@ -65,12 +65,14 @@ import {
   FilePlus2,
   File,
   FileText,
+  FileUp,
   Folder,
   FolderOpen,
   FolderSearch,
   GitBranch,
   HardDrive,
   Maximize2,
+  MoreHorizontal,
   Minus,
   Network,
   PanelLeft,
@@ -171,7 +173,7 @@ const BASES_TAB_ID = "vault-bases";
 type CenterMode = "graph" | "canvas" | "edit" | "explorer" | "trash" | "bases" | "slides" | "typewords" | "library";
 type GraphPerspective = "knowledge" | "files";
 type EditorMode = "edit" | "preview";
-type SourceKind = "empty" | "browser-directory" | "desktop" | "structure" | "github-public";
+type SourceKind = "empty" | "browser-directory" | "browser-import" | "desktop" | "structure" | "github-public";
 type DraftChangeKind = "created" | "modified" | "deleted";
 type AgentMode = "daily" | "organizer" | "linker";
 type AgentPanelMode = "docked" | "hidden";
@@ -329,6 +331,8 @@ export interface CodexConnectionStatus {
 
 export interface KnowledgeWorkspaceAdapter {
   canOpenVault: boolean;
+  mobileLayout?: boolean;
+  importFiles?(): Promise<LoadedVault | null>;
   library?: LibraryAdapter;
   typewords?: TypeWordsAdapter;
   windowControls?: {
@@ -501,6 +505,7 @@ export function removeAgentConversationSession<T extends { id: string; label: st
 
 export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAdapter }) {
   const { locale, runtime, setLocale, t } = useLocalization();
+  const [isMobile, setIsMobile] = useState(() => Boolean(adapter.mobileLayout && window.innerWidth <= 760));
   const initialVault = useMemo(() => createEmptyVault(), []);
   const [appTheme, setAppTheme] = useState<AppTheme>(() => {
     try {
@@ -560,7 +565,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const [agentKeyDialogDismissed, setAgentKeyDialogDismissed] = useState(false);
   const [status, setStatus] = useState("尚未连接知识库。请选择一个 Markdown 文件夹开始使用。");
   const [sourceSafety, setSourceSafety] = useState(initialVault.safetyManifest);
-  const [leftVisible, setLeftVisible] = useState(true);
+  const [leftVisible, setLeftVisible] = useState(!isMobile);
   const [agentPanelMode, setAgentPanelMode] = useState<AgentPanelMode>("hidden");
   const [noteFilter, setNoteFilter] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
@@ -730,8 +735,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           ["path", "content"]
         ),
         async run(input) {
-          if (sourceKindRef.current === "github-public") {
-            return "The current GitHub public repository is read-only. Open a local vault before creating notes.";
+          if (isReadOnlyVaultSource(sourceKindRef.current)) {
+            return "The current source is read-only. Open a local vault before creating notes.";
           }
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
@@ -770,8 +775,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           ["path", "content"]
         ),
         run(input, context) {
-          if (sourceKindRef.current === "github-public") {
-            return "The current GitHub public repository is read-only. Open a local vault before editing notes.";
+          if (isReadOnlyVaultSource(sourceKindRef.current)) {
+            return "The current source is read-only. Open a local vault before editing notes.";
           }
           const { path, content } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
@@ -927,8 +932,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         description: "Delete an existing note. When the current user message explicitly authorizes deletion, the desktop App moves it to the 30-day trash directly; otherwise it opens the usual deletion confirmation dialog.",
         parameters: objectSchema({ path: stringSchema("Vault-relative Markdown path to request deletion for.") }, ["path"]),
         async run(input) {
-          if (sourceKindRef.current === "github-public") {
-            return "The current GitHub public repository is read-only. Open a local vault before deleting notes.";
+          if (isReadOnlyVaultSource(sourceKindRef.current)) {
+            return "The current source is read-only. Open a local vault before deleting notes.";
           }
           const { path } = parseAgentToolArguments(input);
           const notePath = ensureMarkdownPath(normalizePath(String(path ?? "")));
@@ -988,6 +993,26 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       }),
     [adapter, appAgentTools, selectedAgentMode, selectedAgentModel]
   );
+
+  useEffect(() => {
+    if (!adapter.mobileLayout || !window.matchMedia) return;
+    const query = window.matchMedia("(max-width: 760px)");
+    const update = () => {
+      setIsMobile(query.matches);
+      setLeftVisible(!query.matches);
+    };
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, [adapter.mobileLayout]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLeftVisible(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [isMobile]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = appTheme;
@@ -1220,7 +1245,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   const isReadOnlyStructure = sourceKind === "structure";
   const isReadOnlyRepository = sourceKind === "github-public";
-  const isReadOnlyContent = isReadOnlyStructure || isReadOnlyRepository;
+  const isReadOnlyContent = isReadOnlyVaultSource(sourceKind);
   const index = useMemo(
     () => buildVaultIndex(files, { includeExcludedPaths: isReadOnlyStructure }),
     [files, isReadOnlyStructure]
@@ -1668,6 +1693,30 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       setCenterMode("graph");
     }
     setStatus(nextStatus);
+  }
+
+  async function importFiles() {
+    if (!adapter.importFiles || storageBusy) return;
+    // Invoke the picker synchronously from the tap so Safari retains user activation.
+    const selection = adapter.importFiles();
+    setStorageBusy(true);
+    try {
+      const vault = await selection;
+      if (!vault) return;
+      await flushCanvasSaveBeforeSourceChange();
+      applyLoadedVault(vault);
+      setStorageOpen(false);
+      if (isMobile) {
+        setLeftVisible(true);
+        setAgentPanelMode("hidden");
+        setCenterMode("explorer");
+        setActiveTabId(EXPLORER_TAB_ID);
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? `导入失败：${error.message}` : "导入失败，请重新选择文件。");
+    } finally {
+      setStorageBusy(false);
+    }
   }
 
   async function openLocalVault() {
@@ -2673,6 +2722,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function openWorkspaceLauncher(mode: WorkspaceLauncherMode) {
+    if (isMobile) {
+      setLeftVisible(false);
+      setAgentPanelMode("hidden");
+    }
     setLauncherMode(mode);
     setLauncherQuery("");
     setLauncherOpen(true);
@@ -3177,6 +3230,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function openGraphTab() {
+    if (isMobile) {
+      setLeftVisible(false);
+      setAgentPanelMode("hidden");
+    }
     if (sourceKind === "structure") {
       openExplorerTab();
       setStatus("当前是只读硬盘浏览模式；关系图谱只用于已打开的 Markdown 知识库。");
@@ -3267,6 +3324,10 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function openNoteTab(path: string) {
+    if (isMobile) {
+      setLeftVisible(false);
+      setAgentPanelMode("hidden");
+    }
     const id = tabIdForPath(path);
     setWorkspaceTabs((current) => (current.some((tab) => tab.id === id) ? current : [...current, { id, mode: "edit", path }]));
     setActiveTabId(id);
@@ -3276,6 +3337,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   }
 
   function activateTab(tab: WorkspaceTab) {
+    if (isMobile) setLeftVisible(false);
     setActiveTabId(tab.id);
     setCenterMode(tab.mode);
     if (tab.path) setCurrentPath(tab.path);
@@ -3621,6 +3683,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
   const shellClassName = [
     "obsidian-shell",
     `theme-${appTheme}`,
+    isMobile ? "mobile-layout" : "",
     leftVisible ? "" : "left-collapsed",
     agentPanelMode === "hidden" ? "agent-collapsed" : ""
   ].filter(Boolean).join(" ");
@@ -3642,6 +3705,21 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
   return (
     <div ref={shellRef} className={shellClassName} style={shellStyle}>
+      {isMobile ? <>
+        <header className="mobile-header">
+          <button aria-label="打开存储空间" onClick={() => { setLeftVisible(false); setStorageOpen((open) => !open); }} type="button"><FolderOpen size={21} /></button>
+          <div><strong>{centerMode === "edit" && currentNote ? currentNote.title : "我的知识库"}</strong><small>{sourceKind === "empty" ? "从一份文档开始" : `${index.notes.length} 篇文档 · ${t(sourceLabel)}`}</small></div>
+          {adapter.importFiles ? <button aria-label="导入文件" disabled={storageBusy} onClick={() => void importFiles()} type="button"><FileUp size={21} /></button> : null}
+        </header>
+        {leftVisible ? <button className="mobile-drawer-backdrop" aria-label="关闭文件列表" onClick={() => setLeftVisible(false)} type="button" /> : null}
+        <nav className="mobile-navigation" aria-label="手机导航">
+          <button aria-pressed={leftVisible} onClick={() => { setLeftVisible((visible) => !visible); setAgentPanelMode("hidden"); }} type="button"><Folder size={21} /><span>文件</span></button>
+          <button aria-pressed={launcherOpen && launcherMode === "search"} onClick={focusSearch} type="button"><Search size={21} /><span>搜索</span></button>
+          <button aria-pressed={!leftVisible && agentPanelMode === "hidden" && centerMode === "graph"} onClick={openGraphTab} type="button"><Network size={21} /><span>图谱</span></button>
+          <button aria-pressed={agentPanelMode !== "hidden"} onClick={() => { setLeftVisible(false); setAgentPanelMode((mode) => mode === "hidden" ? "docked" : "hidden"); }} type="button"><Bot size={21} /><span>助手</span></button>
+          <button aria-pressed={launcherOpen && launcherMode === "commands"} onClick={() => openWorkspaceLauncher("commands")} type="button"><MoreHorizontal size={21} /><span>更多</span></button>
+        </nav>
+      </> : null}
       <header
         className={adapter.windowControls ? "app-chrome app-chrome-desktop" : "app-chrome"}
         onDoubleClick={toggleWindowMaximize}
@@ -3868,12 +3946,15 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
 
       <aside className="left-rail">
         <div className="rail-toolbar">
+          {isMobile ? <strong className="mobile-drawer-title">文件与标签</strong> : null}
+          {adapter.importFiles ? <button onClick={() => void importFiles()} disabled={storageBusy} title="导入文档" type="button"><FileUp size={16} /></button> : null}
           <button onClick={openLocalVault} disabled={!directoryPickerAvailable} title={t("打开本地知识库")} type="button">
             <FolderOpen size={16} />
           </button>
           <button disabled={isReadOnlyContent} onClick={createSessionNote} title={isReadOnlyContent ? t("只读来源不能新建笔记") : t("新建会话笔记")} type="button">
             <FilePlus2 size={16} />
           </button>
+          {isMobile ? <button aria-label="收起文件列表" onClick={() => setLeftVisible(false)} type="button"><X size={18} /></button> : null}
         </div>
 
         <section className="vault-panel file-card">
@@ -4127,6 +4208,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           <WorkspaceEmptyState
             canCreate={Boolean(adapter.createVaultFolder)}
             canOpen={adapter.canOpenVault}
+            onImport={adapter.importFiles ? () => void importFiles() : undefined}
+            importing={storageBusy}
             onCreate={() => setStorageOpen(true)}
             onOpen={() => void openLocalVault()}
           />
@@ -4946,11 +5029,15 @@ function IconButton({
 function WorkspaceEmptyState({
   canCreate,
   canOpen,
+  onImport,
+  importing,
   onCreate,
   onOpen
 }: {
   canCreate: boolean;
   canOpen: boolean;
+  onImport?(): void;
+  importing?: boolean;
   onCreate(): void;
   onOpen(): void;
 }) {
@@ -4961,12 +5048,13 @@ function WorkspaceEmptyState({
         <FolderOpen size={24} />
       </div>
       <h1>{t("连接你的知识库")}</h1>
-      <p>{t("打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。")}</p>
+      <p>{onImport && !canOpen ? "选择 Markdown 或 TXT 文档，试试阅读、搜索和标签浏览。" : t("打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。")}</p>
       <div className="workspace-empty-actions">
-        <button className="primary" disabled={!canOpen} onClick={onOpen} type="button">
+        {onImport ? <button className="primary" disabled={importing} onClick={onImport} type="button"><FileUp size={16} />{importing ? "正在导入…" : "选择文档预览"}</button> : null}
+        {canOpen || !onImport ? <button className={onImport ? "" : "primary"} disabled={!canOpen} onClick={onOpen} type="button">
           <FolderOpen size={16} />
           {t("打开本地知识库")}
-        </button>
+        </button> : null}
         {canCreate ? (
           <button onClick={onCreate} type="button">
             <FilePlus2 size={16} />
@@ -4974,7 +5062,7 @@ function WorkspaceEmptyState({
           </button>
         ) : null}
       </div>
-      <small>{canOpen ? t("只有你主动选择的文件夹会被读取。") : t("当前浏览器不支持文件夹选择器，请使用最新版 Chrome 或 Edge。")}</small>
+      <small>{onImport ? "导入仅供本次浏览，刷新后需重新选择。不会上传或修改原文件。" : canOpen ? t("只有你主动选择的文件夹会被读取。") : t("当前浏览器不支持文件夹选择器，请使用最新版 Chrome 或 Edge。")}</small>
     </section>
   );
 }
@@ -5613,8 +5701,12 @@ function filterNotes(notes: ReturnType<typeof buildVaultIndex>["notes"], query: 
   });
 }
 
+export function isReadOnlyVaultSource(sourceKind: SourceKind): boolean {
+  return sourceKind === "structure" || sourceKind === "github-public" || sourceKind === "browser-import";
+}
+
 export function isCanvasReadOnlySource(sourceKind: SourceKind): boolean {
-  return sourceKind === "structure" || sourceKind === "github-public";
+  return isReadOnlyVaultSource(sourceKind);
 }
 
 export function shouldShowWorkspaceEmptyState(

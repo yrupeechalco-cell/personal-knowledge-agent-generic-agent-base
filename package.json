@@ -12,6 +12,8 @@
     "dev": "npm run dev -w apps/desktop",
     "dev:desktop": "npm run dev -w apps/desktop",
     "dev:web": "npm run dev -w apps/web",
+    "dev:mobile": "node scripts/mobile-preview.mjs",
+    "test:mobile": "playwright test --config scripts/mobile-browser.config.mjs",
     "tauri:dev": "npm run tauri -w apps/desktop -- dev",
     "tauri:build": "npm run tauri -w apps/desktop -- build",
     "build:web": "npm run build -w apps/web",

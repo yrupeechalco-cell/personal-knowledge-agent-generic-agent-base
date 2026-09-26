@@ -4,6 +4,7 @@ import {
   type KnowledgeWorkspaceAdapter
 } from "@knowledge-agent/workspace";
 import { LanguageProvider } from "@knowledge-agent/ui";
+import { chooseKnowledgeFiles, readImportedVault } from "./importedVault";
 import {
   githubRepositorySlug,
   loadPublicGitHubVault,
@@ -19,10 +20,18 @@ import {
 } from "./vaultSources";
 
 const webWorkspaceAdapter: KnowledgeWorkspaceAdapter = {
+  mobileLayout: true,
   canOpenVault: isDirectoryPickerSupported(),
+  async importFiles() {
+    const vault = await readImportedVault(await chooseKnowledgeFiles());
+    if (vault) {
+      clearRepositoryQuery();
+    }
+    return vault;
+  },
   async loadInitialVault() {
     const repository = new URLSearchParams(window.location.search).get("repo");
-    if (!repository) return loadEmptyVault();
+    if (!repository) return { ...loadEmptyVault(), unsupportedReason: "选择文档开始预览；文件只在当前浏览器中读取。" };
     clearBrowserDirectoryVault();
     return loadPublicGitHubVault(repository);
   },
@@ -42,6 +51,7 @@ const webWorkspaceAdapter: KnowledgeWorkspaceAdapter = {
   selectAgentAttachments: selectBrowserAgentAttachments,
   publicGitHubExampleRepository: OFFICIAL_DEMO_REPOSITORY,
   getSourceLabel(sourceKind) {
+    if (sourceKind === "browser-import") return "导入文件 · 只读预览";
     if (sourceKind === "github-public") return "GitHub 公开库 · 只读";
     return sourceKind === "empty" ? "未连接" : "本地知识库";
   }

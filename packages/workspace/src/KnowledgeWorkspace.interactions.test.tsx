@@ -45,6 +45,33 @@ function createLoadedAdapter(): KnowledgeWorkspaceAdapter {
 }
 
 describe("KnowledgeWorkspace navigation", () => {
+  it.each(["app_create_note", "app_replace_note"])("keeps imported files read-only even for Agent tool %s", async (tool) => {
+    const files = [{ path: "A.md", content: "# A\n\n需要保留的原文" }];
+    let turns = 0;
+    const vault = { files, sourceName: "导入的文件", sourceKind: "browser-import" as const, safetyManifest: buildSafetyManifest(["A.md"]) };
+    const writeChanges = vi.fn();
+    const adapter: KnowledgeWorkspaceAdapter = {
+      canOpenVault: false,
+      loadInitialVault: () => vault,
+      openVault: vi.fn(),
+      writeChanges,
+      runModel: async () => "ready",
+      runModelTurn: async () => ++turns === 1
+        ? { content: "", toolCalls: [{ id: "readonly-1", name: tool, arguments: JSON.stringify({ path: tool === "app_create_note" ? "B.md" : "A.md", content: "# Replaced" }) }] }
+        : { content: "只读检查完成", toolCalls: [] }
+    };
+    render(<KnowledgeWorkspace adapter={adapter} />);
+    fireEvent.click(await screen.findByTitle("A.md"));
+    fireEvent.click(screen.getByRole("button", { name: "智能体" }));
+    fireEvent.change(screen.getByLabelText("智能体输入"), { target: { value: "请改写当前文档" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("只读检查完成");
+    expect(writeChanges).not.toHaveBeenCalled();
+    expect(screen.queryByTitle("B.md")).toBeNull();
+    expect(document.querySelector(".markdown-preview")?.textContent).toContain("需要保留的原文");
+    expect(screen.queryByLabelText("Unsaved changes")).toBeNull();
+  });
+
   it("switches sidebar features without title-bar tabs and retains the English iframe", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({}));
     const adapter = createEmptyAdapter();
