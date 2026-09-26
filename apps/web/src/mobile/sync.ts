@@ -49,6 +49,7 @@ async function performSync() {
       const remote = result.document as LibraryDocument;
       if (!remote?.id) throw new Error('同步响应不完整，待同步修改已保留。');
       next.documents = next.documents.filter(entry => entry === local || entry.doc.id !== remote.id);
+      local.localId ??= sent.doc.id;
       // An edit made while the network was waiting must survive the response.
       local.base = remote;
       if (local.editId === sent.editId) { local.doc = remote; local.pending = false; }

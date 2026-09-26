@@ -105,7 +105,7 @@ jobs:
           tagName: app-v__VERSION__
           releaseName: "Knowledge Agent v__VERSION__"
           releaseBody: "Windows 日用内测版。该版本接入签名自动更新；后续版本会在客户端内主动提醒并可下载安装。详细改动见仓库 CHANGELOG.md。"
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
 
       - name: Validate updater manifest and use stable download URL

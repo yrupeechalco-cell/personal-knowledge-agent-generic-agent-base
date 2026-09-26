@@ -62,3 +62,5 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 开发端口 5176 代理 `/api/mobile` 到本机 App 的 5177，同步仍需原生 App 明确开启。正式安装包自身提供网页，日常使用二维码中的 5177 地址。
 
 自动浏览器测试使用合成资料和模拟同步接口，验证两种引擎的本机保存、断线编辑和冲突 UI；Rust 测试使用临时真实文件验证同位置写回、重复提交、版本冲突、路径限制和认证。模拟接口测试不等同于真机/原生 HTTP 端到端验收。
+
+发布流程先生成签名的草稿 Release。安装包完成原生 HTTP 与真实文件往返验收后，再将该 Release 发布并设置为 latest，向正式 App 提供更新。

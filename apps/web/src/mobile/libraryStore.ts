@@ -2,6 +2,7 @@ import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspac
 
 export interface LocalDocument {
   doc: LibraryDocument;
+  localId?: string;
   base: LibraryDocument | null;
   pending: boolean;
   editId: string;
@@ -66,9 +67,11 @@ export async function saveMobileDocument(doc: LibraryDocument, expectedEditId?: 
   if (new TextEncoder().encode(doc.text).length > 1024 * 1024 || doc.text.includes('\0')) throw new Error('正文最多 1 MB，且不能包含二进制内容。');
   if (doc.summary.length > 6000 || doc.tags.length > 20 || doc.tags.some(tag => tag.length > 60)) throw new Error('摘要或标签超过限制。');
   return updateMobileState(state => {
-    const existing = state.documents.find(item => item.doc.id === doc.id);
+    const existing = state.documents.find(item => item.doc.id === doc.id || item.localId === doc.id);
     if (existing && expectedEditId !== existing.editId) throw new Error('这篇资料已在另一个页面或同步中更新。你的输入仍在，请复制后返回重新打开。');
-    const entry: LocalDocument = { ...existing, doc: { ...doc, updatedAt: Date.now() }, base: existing?.base ?? null,
+    const savedDoc = existing?.base && existing.doc.id !== doc.id
+      ? { ...doc, id: existing.doc.id, rootId: existing.doc.rootId, path: existing.doc.path, revision: existing.doc.revision } : doc;
+    const entry: LocalDocument = { ...existing, localId: existing?.localId ?? doc.id, doc: { ...savedDoc, updatedAt: Date.now() }, base: existing?.base ?? null,
       pending: true, editId: crypto.randomUUID() };
     if (existing) state.documents[state.documents.indexOf(existing)] = entry;
     else {

@@ -35,4 +35,17 @@ describe('durable mobile library', () => {
     await expect(mergeSnapshot({ version: 2, roots: [], documents: [] }, 'B')).rejects.toThrow('另一台电脑');
     expect((await readMobileState()).documents).toHaveLength(2);
   });
+  it('keeps an editor attached when the first upload assigns a desktop file id', async () => {
+    const doc = newDocument('新笔记.md', '首次保存'); await saveMobileDocument(doc);
+    const opened = (await readMobileState()).documents[0];
+    await updateMobileState(state => {
+      const current = state.documents[0];
+      current.doc = { ...current.doc, id: 'desktop-id', path: '手机-新笔记.md', revision: '1' };
+      current.base = current.doc; current.pending = false;
+    });
+    await saveMobileDocument({ ...opened.doc, text: '上传期间重新打开并继续编辑' }, opened.editId);
+    const state = await readMobileState();
+    expect(state.documents).toHaveLength(1); expect(state.documents[0].doc.id).toBe('desktop-id');
+    expect(state.documents[0].doc.text).toBe('上传期间重新打开并继续编辑'); expect(state.documents[0].pending).toBe(true);
+  });
 });
