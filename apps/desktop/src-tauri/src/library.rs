@@ -503,6 +503,15 @@ fn scan(data: &mut Library) {
                 keep
             });
         }
+        // A rename candidate must be unique on both sides. If two new paths
+        // have the same revision, choosing the first would attach old labels
+        // to an arbitrary copy merely because directory traversal found it first.
+        let mut new_revision_counts = HashMap::<String, usize>::new();
+        for (_, relative, meta) in &traversal.files {
+            if !docs.contains_key(&format!("{}\n{}", root.id, relative)) {
+                *new_revision_counts.entry(revision(meta)).or_default() += 1;
+            }
+        }
         for (path, relative, meta) in traversal.files {
             let id = format!("{}\n{}", root.id, relative);
             let rev = revision(&meta);
@@ -521,7 +530,7 @@ fn scan(data: &mut Library) {
             let (text, issue) = match result { Ok(text) => (text, None), Err(error) => (String::new(), Some(error)) };
             // Preserve metadata on an unambiguous in-folder rename. Identical duplicates
             // deliberately do not inherit each other's classification.
-            if previous.is_none() && issue.is_none() && !text.is_empty() {
+            if previous.is_none() && issue.is_none() && !text.is_empty() && new_revision_counts.get(&rev) == Some(&1) {
                 let matches = removed.iter().enumerate().filter(|(_, old)| old.revision == rev && old.text == text).map(|(i, _)| i).collect::<Vec<_>>();
                 if matches.len() == 1 { previous = Some(removed.remove(matches[0])); }
             }

@@ -319,4 +319,22 @@ mod tests {
         let updated = data.knowledge_cards.records.iter().find(|r| r.card.id == id).unwrap();
         assert!(updated.card.analysis_stale); assert_eq!(updated.card.tags, vec!["已确认标签"]);
     }
+
+    #[test]
+    fn ambiguous_new_paths_do_not_inherit_old_identity_or_annotations() {
+        let fixture = Fixture::new(); let mut data = fixture.library(); reconcile(&mut data).unwrap();
+        let id = data.documents[0].resource_id.clone();
+        let modified = fs::metadata(fixture.source()).unwrap().modified().unwrap();
+        for name in ["copy-a.txt", "copy-b.txt"] {
+            let destination = fixture.0.join("sources").join(name);
+            fs::copy(fixture.source(), &destination).unwrap();
+            fs::OpenOptions::new().write(true).open(destination).unwrap().set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
+        }
+        fs::remove_file(fixture.source()).unwrap(); scan(&mut data); reconcile(&mut data).unwrap();
+        assert_eq!(data.documents.len(), 2);
+        assert!(data.documents.iter().all(|doc| doc.resource_id != id && doc.tags.is_empty()));
+        let preserved = data.knowledge_cards.records.iter().find(|r| r.card.id == id).unwrap();
+        assert_eq!(preserved.card.tags, vec!["已确认标签"]);
+        assert_eq!(preserved.card.source.availability, "unavailable");
+    }
 }
