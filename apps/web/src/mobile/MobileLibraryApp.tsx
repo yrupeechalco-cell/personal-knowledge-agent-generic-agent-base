@@ -99,7 +99,7 @@ function MobileDocumentEditor({ entry, onClose, onSaved }: { entry: LocalDocumen
       const nextCategories = normalizeCategories(categories.split('\n'));
       await saveMobileDocument({ ...doc, categories: nextCategories, category: nextCategories[0] ?? '',
         tags: [...new Set(tags.split(/[，,\n]/).map(tag => tag.trim()).filter(Boolean))], classificationLocked: true,
-        status: doc.status === 'ignored' ? 'ignored' : 'reviewed' }, entry.editId || undefined);
+        status: doc.status === 'ignored' ? 'ignored' : doc.text !== entry.doc.text || !entry.editId ? 'pending' : 'reviewed' }, entry.editId || undefined);
       onSaved();
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   }

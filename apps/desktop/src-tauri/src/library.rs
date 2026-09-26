@@ -724,18 +724,19 @@ mod tests {
     #[test]
     fn mobile_sync_is_idempotent_and_preserves_source_location() {
         let fixture = Fixture::new(); let path = fixture.0.join("资料.md"); fs::write(&path, "原文").unwrap();
+        let backups = Fixture::new();
         let mut data = fixture.library(); scan(&mut data); let original = data.documents[0].clone();
         let operation = "12345678-1234-4234-8234-123456789abc";
         let mut change = mobile_change(&original, operation); change.doc.text = "手机修改的正文".into(); change.doc.categories = vec!["工作/项目".into()]; change.doc.tags = vec!["手机".into()];
         let encoded = serde_json::to_value(&change.doc).unwrap();
-        let id = mobile_apply(&mut data, change, &fixture.0, &fixture.0.join("backups")).unwrap();
+        let id = mobile_apply(&mut data, change, &fixture.0, &backups.0).unwrap();
         assert_eq!(id, original.id); assert_eq!(fs::read_to_string(&path).unwrap(), "手机修改的正文"); assert_eq!(data.documents[0].categories, vec!["工作/项目"]);
         let after = data.documents[0].clone();
         let retry = MobileChange { operation_id: operation.into(), base: Some(MobileBase { revision: original.revision.clone(), metadata_version: original.metadata_version }), doc: serde_json::from_value(encoded).unwrap() };
-        mobile_apply(&mut data, retry, &fixture.0, &fixture.0.join("backups")).unwrap();
+        mobile_apply(&mut data, retry, &fixture.0, &backups.0).unwrap();
         assert_eq!(data.documents[0].metadata_version, after.metadata_version);
         let stale = mobile_change(&original, "12345678-1234-4234-8234-123456789abd");
-        assert!(mobile_apply(&mut data, stale, &fixture.0, &fixture.0.join("backups")).unwrap_err().starts_with("conflict:"));
+        assert!(mobile_apply(&mut data, stale, &fixture.0, &backups.0).unwrap_err().starts_with("conflict:"));
         assert_eq!(fs::read_to_string(path).unwrap(), "手机修改的正文");
     }
 
@@ -761,6 +762,22 @@ mod tests {
         mobile_apply(&mut data, make_change(), &inbox, &fixture.0.join("backups")).unwrap();
         assert_eq!(data.documents.len(), 1); assert_eq!(data.documents[0].text, "手机新笔记");
         assert!(source_path(&data.roots[0], &data.documents[0]).unwrap().starts_with(inbox));
+    }
+
+    #[test]
+    fn mobile_body_edit_keeps_old_knowledge_marked_stale() {
+        let fixture = Fixture::new(); let backups = Fixture::new();
+        fs::write(fixture.0.join("note.md"), "人物动机决定行动").unwrap();
+        let mut data = fixture.library(); scan(&mut data);
+        let review = review_for(&data.documents[0]); save_review(&mut data, review).unwrap();
+        let original = data.documents[0].clone();
+        let mut change = mobile_change(&original, "12345678-1234-4234-8234-123456789abc");
+        change.doc.text = "删除旧段落之后的新正文".into();
+        mobile_apply(&mut data, change, &fixture.0, &backups.0).unwrap();
+        assert!(data.documents[0].tips == original.tips);
+        assert_eq!(data.documents[0].analysis_revision, original.analysis_revision);
+        assert_ne!(data.documents[0].analysis_revision, data.documents[0].revision);
+        assert_eq!(data.documents[0].status, "pending");
     }
 
     #[test]

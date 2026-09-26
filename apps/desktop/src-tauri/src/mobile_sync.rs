@@ -61,13 +61,23 @@ pub fn mobile_sync_status(app: tauri::AppHandle) -> Result<Status, String> {
 
 #[tauri::command]
 pub async fn mobile_sync_enable(app: tauri::AppHandle) -> Result<Status, String> {
+    enable(app, false).await
+}
+
+#[tauri::command]
+pub async fn mobile_sync_choose_inbox(app: tauri::AppHandle) -> Result<Status, String> {
+    enable(app, true).await
+}
+
+async fn enable(app: tauri::AppHandle, choose_inbox: bool) -> Result<Status, String> {
     let mut config = load_config(&app)?;
-    if config.inbox.is_empty() {
+    if config.inbox.is_empty() || choose_inbox || !Path::new(&config.inbox).is_dir() {
         let picked = rfd::AsyncFileDialog::new().set_title("手机新笔记保存到哪个文件夹？请选择一个现有监测根目录或新的资料目录").pick_folder().await;
         let Some(picked) = picked else { return mobile_sync_status(app); };
         let path = picked.path().canonicalize().map_err(|e| e.to_string())?;
         super::library::mobile_add_inbox(app.clone(), path.clone()).await?;
         config.inbox = path.to_string_lossy().into();
+        shutdown(&app);
     }
     if config.server_id.is_empty() { config.server_id = secret()?; }
     if config.token.is_empty() { config.token = secret()?; }
