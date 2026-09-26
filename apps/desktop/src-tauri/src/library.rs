@@ -103,6 +103,7 @@ pub(crate) fn valid_mobile_id(id: &str) -> bool {
 
 // Reuse the desktop's revision checks, metadata validation, lock and source backup.
 // No client-supplied absolute path is ever used as a write destination.
+#[cfg(test)]
 fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path) -> Result<String, String> {
     mobile_apply_content(data, change, inbox, backups, None)
 }
@@ -111,8 +112,8 @@ fn mobile_apply_content(data: &mut Library, change: MobileChange, inbox: &Path, 
 }
 enum AttachmentSource<'a> { Bytes(&'a [u8]), File(&'a Path) }
 impl AttachmentSource<'_> {
-    fn size(&self) -> Result<u64, String> { match self { Self::Bytes(bytes) => Ok(bytes.len() as u64), Self::File(path) => fs::metadata(path).map(|m| m.len()).map_err(|e| e.to_string()) } }
-    fn reader(&self) -> Result<Box<dyn Read + '_>, String> { match self { Self::Bytes(bytes) => Ok(Box::new(std::io::Cursor::new(bytes))), Self::File(path) => Ok(Box::new(fs::File::open(path).map_err(|e| e.to_string())?)) } }
+    fn size(&self) -> Result<u64, String> { match self { Self::Bytes(bytes) => Ok(bytes.len() as u64), Self::File(path) => fs::metadata(path).map(|m| m.len()).map_err(|e| format!("读取暂存附件信息失败：{e}")) } }
+    fn reader(&self) -> Result<Box<dyn Read + '_>, String> { match self { Self::Bytes(bytes) => Ok(Box::new(std::io::Cursor::new(bytes))), Self::File(path) => Ok(Box::new(fs::File::open(path).map_err(|e| format!("打开暂存附件失败：{e}"))?)) } }
     fn validate(&self, name: &str) -> Result<(), String> {
         let size = self.size()?;
         if size == 0 { return Err("附件不能为空。".into()); }
@@ -187,7 +188,7 @@ fn mobile_apply_source(data: &mut Library, change: MobileChange, inbox: &Path, b
         scan(data);
         let id = format!("{}\n{}", root.id, relative);
         let current = data.documents.iter().find(|doc| doc.id == id).ok_or("新文件已保存，但尚未收录，请在电脑上重新扫描。")?.clone();
-        save_review(data, mobile_review(&incoming, &current))?;
+        save_review(data, mobile_review(&incoming, &current)).map_err(|e| format!("附件已写入，保存资料信息失败：{e}"))?;
         id
     };
     let current = data.documents.iter().find(|doc| doc.id == id).ok_or("资料已移除。")?;
@@ -217,6 +218,7 @@ pub async fn mobile_attachment(app: tauri::AppHandle, id: String, expected: Stri
     let data = library_load(app).await?;
     attachment_range(&data, &id, &expected, offset)
 }
+#[cfg(test)]
 fn attachment_bytes(data: &Library, id: &str, expected: &str) -> Result<(Vec<u8>, &'static str), String> {
     attachment_range(data, id, expected, None)
 }
@@ -725,7 +727,8 @@ mod tests {
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!("knowledge-library-test-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+            static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!("knowledge-library-test-{}-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(), SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
             fs::create_dir_all(&path).unwrap(); Self(path)
         }
         fn library(&self) -> Library { let mut data = Library { version: 1, ..Library::default() }; add_root(&mut data, &self.0).unwrap(); data }
@@ -957,7 +960,8 @@ mod tests {
         file.write_all(b"\x00\x00\x00\x18ftypisom").unwrap(); file.set_len(60 * 1024 * 1024 + 17).unwrap(); drop(file);
         let doc = Document { id: "mobile:12345678-1234-4234-8234-123456789abc".into(), path: "large.mp4".into(), size: 60 * 1024 * 1024 + 17, status: "pending".into(), ..Default::default() };
         let make = || MobileChange { operation_id: "12345678-1234-4234-8234-123456789abd".into(), doc: doc.clone(), base: None };
-        let id = mobile_apply_source(&mut data, make(), &inbox, &backups.0, Some(AttachmentSource::File(&path))).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), doc.size);
+        let id = mobile_apply_source(&mut data, make(), &inbox, &backups.0, Some(AttachmentSource::File(&path))).unwrap_or_else(|error| panic!("{error}; staged_exists={}; inbox_exists={}", path.exists(), inbox.exists()));
         let saved = mobile_find(&data, &id).unwrap();
         assert!(AttachmentSource::File(&path).equals(&inbox.join(&saved.path)).unwrap());
         assert!(attachment_bytes(&data, &id, &saved.revision).is_err());

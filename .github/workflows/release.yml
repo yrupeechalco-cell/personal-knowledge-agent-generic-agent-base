@@ -29,6 +29,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
 
       - name: Install dependencies
         run: npm ci
