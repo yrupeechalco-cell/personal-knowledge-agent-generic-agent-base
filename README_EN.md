@@ -4,6 +4,10 @@
 
 ## English Introduction
 
+### Desktop knowledge cards in 0.3.5
+
+The desktop trial adds independent knowledge cards with stable IDs, multiple classifications, editable annotations when the original is unavailable, and an explicit local/shared scope. Preview and JSON export include only eligible card fields; source text, source quotes, binary files, full local paths, and pairing credentials are excluded. Marking a card as shareable does not upload it: account and mobile card synchronization are not connected yet. The previous mobile file-transfer protocol is paused in this version. The pre-upgrade index remains intact for rollback to 0.3.4. See the [usage and rollback guide](docs/DESKTOP_KNOWLEDGE_CARDS.md).
+
 Personal Knowledge Agent is a local-first knowledge workspace for Windows and the Web. It brings file organization, knowledge relationships, Markdown reading and editing, and an AI note Agent into one focused three-column interface.
 
 The product takes inspiration from Obsidian's local-file philosophy, wiki links, and graph navigation, but it is an independent application. It does not require a proprietary database or lock notes into a private format. Any regular Markdown folder can be opened directly, including an existing Obsidian vault. The files remain ordinary files that the user owns and can use outside this App.
