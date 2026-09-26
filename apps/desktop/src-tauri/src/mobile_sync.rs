@@ -159,7 +159,7 @@ fn handle(mut request: Request, app: &tauri::AppHandle, config: &Config, assets:
         if !authorized(&header(&request, "Authorization"), &config.token) { return json_reply(request, 401, json!({"error":"需要设备配对。"})); }
         if url == "/api/mobile/snapshot" && request.method() == &Method::Get {
             return match tauri::async_runtime::block_on(super::library::library_scan(app.clone())) {
-                Ok(snapshot) => json_reply(request, 200, json!({"serverId":config.server_id,"capabilities":{"media":true},"snapshot":super::library::mobile_public_snapshot(&snapshot)})),
+                Ok(snapshot) => json_reply(request, 200, json!({"serverId":config.server_id,"capabilities":{"media":true,"mediaChunks":true},"snapshot":super::library::mobile_public_snapshot(&snapshot)})),
                 Err(error) => json_reply(request, 503, json!({"error":error})),
             };
         }
@@ -167,10 +167,43 @@ fn handle(mut request: Request, app: &tauri::AppHandle, config: &Config, assets:
             if !header(&request, "Content-Type").starts_with("application/json") || request.body_length().is_none_or(|len| len > 16384) { return json_reply(request, 413, json!({"error":"附件请求格式无效。"})); }
             let mut body = Vec::new();
             if request.as_reader().take(16385).read_to_end(&mut body).is_err() || body.len() > 16384 { return json_reply(request, 413, json!({"error":"附件请求过大。"})); }
-            #[derive(Deserialize)] struct AttachmentRequest { id: String, revision: String }
+            #[derive(Deserialize)] struct AttachmentRequest { id: String, revision: String, #[serde(default)] offset: Option<u64> }
             let input = match serde_json::from_slice::<AttachmentRequest>(&body) { Ok(input) => input, Err(_) => return json_reply(request, 422, json!({"error":"附件编号无效。"})) };
-            return match tauri::async_runtime::block_on(super::library::mobile_attachment(app.clone(), input.id, input.revision)) {
+            return match tauri::async_runtime::block_on(super::library::mobile_attachment(app.clone(), input.id, input.revision, input.offset)) {
                 Ok((bytes, mime)) => reply(request, 200, bytes, mime),
+                Err(error) => json_reply(request, 422, json!({"error":error})),
+            };
+        }
+        if url == "/api/mobile/media-chunk" && request.method() == &Method::Post {
+            let limit = super::mobile_media::CHUNK_BYTES + 16388;
+            if header(&request, "Content-Type") != "application/octet-stream" || request.body_length().is_none_or(|len| len > limit) { return json_reply(request, 413, json!({"error":"附件分块请求过大或格式无效。"})); }
+            let mut body = Vec::new();
+            if request.as_reader().take(limit as u64 + 1).read_to_end(&mut body).is_err() { return json_reply(request, 422, json!({"error":"附件上传中断，请重试。"})); }
+            let (upload, bytes) = match super::mobile_media::decode_chunk(&body) { Ok(input) => input, Err(error) => return json_reply(request, 422, json!({"error":error})) };
+            // A lost final response must not make the phone upload the original again.
+            if upload.offset == 0 && tauri::async_runtime::block_on(super::library::library_load(app.clone())).is_ok_and(|data| super::library::mobile_operation_saved(&data, &upload.operation_id)) {
+                return json_reply(request, 200, json!({"offset":upload.total}));
+            }
+            return match super::mobile_media::directory(app).and_then(|dir| super::mobile_media::receive(&dir, &upload, bytes)) {
+                Ok(offset) => json_reply(request, 200, json!({"offset":offset})),
+                Err(error) => json_reply(request, 422, json!({"error":error})),
+            };
+        }
+        if url == "/api/mobile/media-finish" && request.method() == &Method::Post {
+            if !header(&request, "Content-Type").starts_with("application/json") || request.body_length().is_none_or(|len| len as u64 > MAX_BODY) { return json_reply(request, 413, json!({"error":"附件信息无效或过大。"})); }
+            let mut body = Vec::new();
+            if request.as_reader().take(MAX_BODY + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_BODY { return json_reply(request, 413, json!({"error":"无法读取附件信息。"})); }
+            let change = match serde_json::from_slice::<super::library::MobileChange>(&body) { Ok(value) => value, Err(_) => return json_reply(request, 422, json!({"error":"附件信息格式无效。"})) };
+            let id = super::library::mobile_document_id(&change); let operation = change.operation_id.clone();
+            let directory = match super::mobile_media::directory(app) { Ok(dir) => dir, Err(error) => return json_reply(request, 422, json!({"error":error})) };
+            let path = match super::mobile_media::staged_path(&directory, &operation) { Ok(path) => path, Err(error) => return json_reply(request, 422, json!({"error":error})) };
+            return match tauri::async_runtime::block_on(super::library::mobile_save_file(app.clone(), change, PathBuf::from(&config.inbox), path)) {
+                Ok(document) => { super::mobile_media::cleanup(&directory, &operation); let _ = app.emit("mobile-library-changed", ()); json_reply(request, 200, json!({"document":document})) },
+                Err(error) if error.starts_with("conflict:") => {
+                    let data = tauri::async_runtime::block_on(super::library::library_load(app.clone()));
+                    let document = data.ok().and_then(|data| super::library::mobile_conflict(&data, &id, &operation));
+                    json_reply(request, 409, json!({"error":error,"document":document}))
+                },
                 Err(error) => json_reply(request, 422, json!({"error":error})),
             };
         }

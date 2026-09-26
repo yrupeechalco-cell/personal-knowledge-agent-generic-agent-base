@@ -97,7 +97,7 @@ fn mobile_review(doc: &Document, current: &Document) -> Review {
         classification_locked: Some(true), metadata_version: Some(current.metadata_version), source: "manual".into(), analysis_revision: Some(if doc.summary == current.summary && doc.tips == current.tips && !current.analysis_revision.is_empty() { current.analysis_revision.clone() } else { current.revision.clone() }) }
 }
 
-fn valid_mobile_id(id: &str) -> bool {
+pub(crate) fn valid_mobile_id(id: &str) -> bool {
     id.len() == 36 && id.bytes().enumerate().all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() })
 }
 
@@ -107,6 +107,27 @@ fn mobile_apply(data: &mut Library, change: MobileChange, inbox: &Path, backups:
     mobile_apply_content(data, change, inbox, backups, None)
 }
 fn mobile_apply_content(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path, attachment: Option<&[u8]>) -> Result<String, String> {
+    mobile_apply_source(data, change, inbox, backups, attachment.map(AttachmentSource::Bytes))
+}
+enum AttachmentSource<'a> { Bytes(&'a [u8]), File(&'a Path) }
+impl AttachmentSource<'_> {
+    fn size(&self) -> Result<u64, String> { match self { Self::Bytes(bytes) => Ok(bytes.len() as u64), Self::File(path) => fs::metadata(path).map(|m| m.len()).map_err(|e| e.to_string()) } }
+    fn reader(&self) -> Result<Box<dyn Read + '_>, String> { match self { Self::Bytes(bytes) => Ok(Box::new(std::io::Cursor::new(bytes))), Self::File(path) => Ok(Box::new(fs::File::open(path).map_err(|e| e.to_string())?)) } }
+    fn validate(&self, name: &str) -> Result<(), String> {
+        let size = self.size()?;
+        let limit = if super::mobile_media::mime(name).is_some_and(|mime| mime.starts_with("image/")) { 50 * 1024 * 1024 } else { super::mobile_media::MAX_BYTES };
+        if size == 0 || size > limit as u64 { return Err("附件大小超过限制。".into()); }
+        let mut header = Vec::new(); self.reader()?.take(32).read_to_end(&mut header).map_err(|e| e.to_string())?;
+        super::mobile_media::validate(name, &header)
+    }
+    fn equals(&self, path: &Path) -> Result<bool, String> {
+        let mut left = self.reader()?; let mut right = fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut a = [0u8; 65536]; let mut b = [0u8; 65536];
+        loop { let count = left.read(&mut a).map_err(|e| e.to_string())?; if count == 0 { return Ok(true); } right.read_exact(&mut b[..count]).map_err(|e| e.to_string())?; if a[..count] != b[..count] { return Ok(false); } }
+    }
+}
+pub fn mobile_operation_saved(data: &Library, operation: &str) -> bool { data.mobile_receipts.contains_key(operation) }
+fn mobile_apply_source(data: &mut Library, change: MobileChange, inbox: &Path, backups: &Path, attachment: Option<AttachmentSource<'_>>) -> Result<String, String> {
     if !valid_mobile_id(&change.operation_id) { return Err("无效的同步操作编号。".into()); }
     scan(data);
     if let Some(receipt) = data.mobile_receipts.get(&change.operation_id) {
@@ -117,9 +138,9 @@ fn mobile_apply_content(data: &mut Library, change: MobileChange, inbox: &Path, 
     // Never silently evict idempotency receipts while an offline device might retry.
     if data.mobile_receipts.len() >= 100000 { return Err("同步历史已达容量上限，请导出备份后维护同步记录。".into()); }
     let incoming = change.doc;
-    if let Some(bytes) = attachment {
-        if change.base.is_some() || !incoming.text.is_empty() || incoming.size != bytes.len() as u64 { return Err("附件请求格式无效。".into()); }
-        super::mobile_media::validate(&incoming.path, bytes)?;
+    if let Some(source) = &attachment {
+        if change.base.is_some() || !incoming.text.is_empty() || incoming.size != source.size()? { return Err("附件请求格式无效或上传尚未完成。".into()); }
+        source.validate(&incoming.path)?;
     }
     if incoming.text.len() > MAX_TEXT_BYTES as usize || incoming.text.contains('\0') { return Err("原文最多 1 MB，且不能包含二进制内容。".into()); }
     let id = if let Some(base) = change.base {
@@ -149,15 +170,16 @@ fn mobile_apply_content(data: &mut Library, change: MobileChange, inbox: &Path, 
         if !super::is_allowed_path(&relative) || data.documents.len() >= MAX_FILES || data.documents.iter().map(|doc| doc.text.len()).sum::<usize>() + incoming.text.len() > MAX_INDEX_BYTES { return Err("文件名受限或资料容量已达上限。".into()); }
         // Metadata constraints are checked before a new file can be created.
         if incoming.summary.chars().count() > 6000 || incoming.tags.len() > 20 || incoming.tags.iter().any(|tag| tag.chars().count() > 60) || incoming.categories.len() > 12 || incoming.categories.iter().any(|s| s.chars().count() > 120) || incoming.category.chars().count() > 120 || incoming.tips.len() > 16 || !["pending", "reviewed", "ignored"].contains(&incoming.status.as_str()) || incoming.tips.iter().any(|tip| tip.content.trim().is_empty() || tip.content.chars().count() > 1000 || tip.quote.trim().chars().count() < 4 || tip.quote.chars().count() > 500 || !incoming.text.contains(tip.quote.trim())) { return Err("摘要、分类、标签或知识 tip 不符合保存要求。".into()); }
-        let content = attachment.unwrap_or(incoming.text.as_bytes());
+        let content = attachment.unwrap_or(AttachmentSource::Bytes(incoming.text.as_bytes()));
         // An interrupted index save may leave a complete file. Retry adopts only
         // byte-identical content at this generated id, never overwriting a source.
         if destination.exists() {
             let metadata = fs::symlink_metadata(&destination).map_err(|e| e.to_string())?;
-            if linked(&metadata) || metadata.len() != content.len() as u64 || fs::read(&destination).map_err(|e| e.to_string())? != content { return Err("同名资料已存在且内容不同，未覆盖。".into()); }
+            if linked(&metadata) || metadata.len() != content.size()? || !content.equals(&destination)? { return Err("同名资料已存在且内容不同，未覆盖。".into()); }
         } else {
+            let mut reader = content.reader()?;
             let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&destination).map_err(|e| format!("新资料未写入：{e}"))?;
-            if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+            if let Err(error) = std::io::copy(&mut reader, &mut file).and_then(|count| if count != incoming.size && is_media { Err(std::io::Error::other("附件复制不完整")) } else { file.sync_all() }) {
                 drop(file); let _ = fs::remove_file(&destination); return Err(format!("附件写入失败：{error}"));
             }
             drop(file);
@@ -183,22 +205,38 @@ pub async fn mobile_save_content(app: tauri::AppHandle, change: MobileChange, in
     let receipt = data.mobile_receipts.get(&operation).ok_or("同步记录未保存。")?;
     mobile_find(&data, &receipt.id).ok_or("资料已移除。".into())
 }
+pub async fn mobile_save_file(app: tauri::AppHandle, change: MobileChange, inbox: PathBuf, path: PathBuf) -> Result<Document, String> {
+    let backups = store_path(&app)?.parent().ok_or("索引目录不存在。")?.join("source-backups");
+    let operation = change.operation_id.clone();
+    let data = transaction(app, move |data| { mobile_apply_source(data, change, &inbox, &backups, Some(AttachmentSource::File(&path)))?; Ok(()) }).await?;
+    let receipt = data.mobile_receipts.get(&operation).ok_or("同步记录未保存。")?;
+    mobile_find(&data, &receipt.id).ok_or("资料已移除。".into())
+}
 
-pub async fn mobile_attachment(app: tauri::AppHandle, id: String, expected: String) -> Result<(Vec<u8>, &'static str), String> {
+pub async fn mobile_attachment(app: tauri::AppHandle, id: String, expected: String, offset: Option<u64>) -> Result<(Vec<u8>, &'static str), String> {
     let data = library_load(app).await?;
-    attachment_bytes(&data, &id, &expected)
+    attachment_range(&data, &id, &expected, offset)
 }
 fn attachment_bytes(data: &Library, id: &str, expected: &str) -> Result<(Vec<u8>, &'static str), String> {
+    attachment_range(data, id, expected, None)
+}
+fn attachment_range(data: &Library, id: &str, expected: &str, offset: Option<u64>) -> Result<(Vec<u8>, &'static str), String> {
+    use std::io::{Seek, SeekFrom};
     let index = check_document(data, id, expected)?;
     let doc = &data.documents[index];
     let root = data.roots.iter().find(|root| root.id == doc.root_id && !root.paused).ok_or("资料目录已暂停或移除。")?;
     let mime = super::mobile_media::mime(&doc.path).ok_or("暂不提供此格式的附件。")?;
-    if doc.size > super::mobile_media::MAX_BYTES as u64 { return Err("附件超过 50 MB，请在电脑上打开。".into()); }
+    if doc.size > super::mobile_media::MAX_BYTES as u64 || offset.is_none() && doc.size > 50 * 1024 * 1024 { return Err("大附件需要分块下载，请更新手机版。".into()); }
     let path = source_path(root, doc)?;
-    let mut bytes = Vec::new();
-    fs::File::open(&path).map_err(|e| e.to_string())?.take(super::mobile_media::MAX_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let start = offset.unwrap_or(0);
+    if start >= doc.size { return Err("附件下载范围无效。".into()); }
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut header = [0u8;32]; let count = file.read(&mut header).map_err(|e| e.to_string())?;
+    super::mobile_media::validate(&doc.path, &header[..count])?;
+    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+    let limit = if offset.is_some() { super::mobile_media::CHUNK_BYTES as u64 } else { doc.size };
+    let mut bytes = Vec::new(); file.take(limit).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     check_document(data, id, expected)?;
-    super::mobile_media::validate(&doc.path, &bytes)?;
     Ok((bytes, mime))
 }
 
@@ -909,6 +947,28 @@ mod tests {
         assert_eq!(fs::read(inbox.join(&doc.path)).unwrap(), bytes);
         data.roots[0].paused = true;
         assert!(attachment_bytes(&data, &id, &doc.revision).is_err());
+    }
+
+    #[test]
+    fn large_staged_media_is_streamed_and_downloaded_in_ranges() {
+        let fixture = Fixture::new(); let staging = Fixture::new(); let backups = Fixture::new();
+        let inbox = fixture.0.canonicalize().unwrap(); let mut data = fixture.library();
+        let path = staging.0.join("large.part"); let mut file = fs::File::create(&path).unwrap();
+        file.write_all(b"\x00\x00\x00\x18ftypisom").unwrap(); file.set_len(60 * 1024 * 1024 + 17).unwrap(); drop(file);
+        let doc = Document { id: "mobile:12345678-1234-4234-8234-123456789abc".into(), path: "large.mp4".into(), size: 60 * 1024 * 1024 + 17, status: "pending".into(), ..Default::default() };
+        let make = || MobileChange { operation_id: "12345678-1234-4234-8234-123456789abd".into(), doc: doc.clone(), base: None };
+        let id = mobile_apply_source(&mut data, make(), &inbox, &backups.0, Some(AttachmentSource::File(&path))).unwrap();
+        let saved = mobile_find(&data, &id).unwrap();
+        assert!(AttachmentSource::File(&path).equals(&inbox.join(&saved.path)).unwrap());
+        assert!(attachment_bytes(&data, &id, &saved.revision).is_err());
+        let first = attachment_range(&data, &id, &saved.revision, Some(0)).unwrap().0;
+        assert_eq!(first.len(), super::super::mobile_media::CHUNK_BYTES); assert_eq!(&first[4..8], b"ftyp");
+        let tail = attachment_range(&data, &id, &saved.revision, Some(60 * 1024 * 1024)).unwrap().0;
+        assert_eq!(tail, vec![0;17]);
+        assert!(attachment_range(&data, &id, &saved.revision, Some(doc.size)).is_err());
+        fs::remove_file(&path).unwrap();
+        assert_eq!(mobile_apply_source(&mut data, make(), &inbox, &backups.0, Some(AttachmentSource::File(&path))).unwrap(), id);
+        assert_eq!(data.documents.len(), 1);
     }
 
     #[test]

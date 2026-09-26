@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const fixture = name => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
@@ -211,10 +212,14 @@ test('media bytes synchronize both ways and downloads survive disconnect', async
   const png = await readFile(fixture('sample.png')); let remote; const uploads = [];
   await page.route('**/api/mobile/**', async route => {
     expect(route.request().headers().authorization).toBe(`Bearer ${'a'.repeat(64)}`);
-    if (route.request().url().endsWith('snapshot')) return route.fulfill({ json: { serverId: 'media-computer', capabilities: { media: true }, snapshot: { version: 2, roots: [], documents: remote ? [remote] : [] } } });
-    if (route.request().url().endsWith('media-change')) {
+    if (route.request().url().endsWith('snapshot')) return route.fulfill({ json: { serverId: 'media-computer', capabilities: { media: true, mediaChunks: true }, snapshot: { version: 2, roots: [], documents: remote ? [remote] : [] } } });
+    if (route.request().url().endsWith('media-chunk')) {
       const bytes = route.request().postDataBuffer(); const length = bytes.readUInt32BE(0);
-      const change = JSON.parse(bytes.subarray(4, 4 + length)); uploads.push(bytes.subarray(4 + length));
+      const upload = JSON.parse(bytes.subarray(4, 4 + length)); uploads.push(bytes.subarray(4 + length));
+      return route.fulfill({ json: { offset: upload.total } });
+    }
+    if (route.request().url().endsWith('media-finish')) {
+      const change = route.request().postDataJSON();
       remote = { ...change.doc, id: 'remote-media', revision: '1', metadataVersion: 1 };
       return route.fulfill({ json: { document: remote } });
     }
@@ -246,4 +251,72 @@ test('invalid mixed imports remain atomic and do not leave partial media', async
   await expect(page.getByRole('alert')).toContainText('内容与文件格式不符');
   await expect(page.locator('.ml-document')).toHaveCount(0);
   await page.reload(); await expect(page.locator('.ml-document')).toHaveCount(0);
+});
+
+test('60 MB video persists, resumes interrupted upload and downloads in bounded chunks', async ({ page }, info) => {
+  test.setTimeout(180000);
+  const original = Buffer.alloc(60 * 1024 * 1024 + 17, 42);
+  (await readFile(fixture('sample.mp4'))).copy(original);
+  const largeFileDirectory = path.resolve('.artifacts', 'media-fixtures', info.project.name);
+  await mkdir(largeFileDirectory, { recursive: true });
+  const largeFilePath = path.join(largeFileDirectory, '大于50MB.mp4');
+  await writeFile(largeFilePath, original);
+  const chunkSize = 4 * 1024 * 1024;
+  let received = 0; let disconnected = false; let interrupted = false; let remote; let downloadChunks = 0;
+  const sentOffsets = [];
+  await page.route('**/api/mobile/**', async route => {
+    if (disconnected) return route.abort('internetdisconnected');
+    const url = route.request().url();
+    if (url.endsWith('snapshot')) return route.fulfill({ json: { serverId: 'large-video-computer', capabilities: { mediaChunks: true }, snapshot: { version: 2, roots: [], documents: remote ? [remote] : [] } } });
+    if (url.endsWith('media-chunk')) {
+      const frame = route.request().postDataBuffer(); const length = frame.readUInt32BE(0);
+      const upload = JSON.parse(frame.subarray(4, 4 + length)); const bytes = frame.subarray(4 + length);
+      expect(bytes.length).toBeLessThanOrEqual(chunkSize);
+      expect(bytes.equals(original.subarray(upload.offset, upload.offset + bytes.length))).toBe(true);
+      sentOffsets.push(upload.offset);
+      if (upload.offset === received) received += bytes.length;
+      if (received === 2 * chunkSize && !interrupted) { interrupted = true; disconnected = true; return route.abort('internetdisconnected'); }
+      return route.fulfill({ json: { offset: received } });
+    }
+    if (url.endsWith('media-finish')) {
+      expect(received).toBe(original.length);
+      remote = { ...route.request().postDataJSON().doc, id: 'large-remote', revision: '1', metadataVersion: 1 };
+      return route.fulfill({ json: { document: remote } });
+    }
+    if (url.endsWith('attachment')) {
+      const { offset } = route.request().postDataJSON(); downloadChunks++;
+      const body = original.subarray(offset, offset + chunkSize);
+      return route.fulfill({ body, headers: { 'Content-Type': 'video/mp4', 'Content-Length': `${body.length}` } });
+    }
+    throw new Error(`Unexpected endpoint ${url}`);
+  });
+  await page.goto(`/?mobile=1#pair=${'a'.repeat(64)}`);
+  await expect(page.getByRole('heading', { name: '已配对电脑' })).toBeVisible();
+  await page.getByRole('navigation').getByRole('button', { name: '资料', exact: true }).click();
+  await importFiles(page, [largeFilePath]);
+  await expect(page.locator('.ml-document')).toHaveCount(1, { timeout: 60000 });
+  await expect.poll(() => interrupted, { timeout: 30000 }).toBe(true);
+  await expect(page.locator('.ml-document small')).toHaveText('待同步');
+  await page.reload(); await expect(page.locator('.ml-document')).toHaveCount(1);
+  disconnected = false;
+  await page.getByRole('navigation').getByRole('button', { name: /同步/ }).click();
+  await page.getByRole('button', { name: '立即同步', exact: true }).click();
+  await expect.poll(() => remote?.id, { timeout: 60000 }).toBe('large-remote');
+  expect(sentOffsets.filter(offset => offset === 0)).toHaveLength(2);
+  expect(sentOffsets.filter(offset => offset === chunkSize)).toHaveLength(1);
+  await page.getByRole('navigation').getByRole('button', { name: '资料', exact: true }).click();
+  await expect(page.locator('.ml-document small')).toHaveText('已保存');
+  // Change the remote id to force a fresh on-demand download into local storage.
+  remote = { ...remote, id: 'computer-large', path: '电脑大视频.mp4' };
+  await page.getByRole('navigation').getByRole('button', { name: /同步/ }).click();
+  await page.getByRole('button', { name: '立即同步', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: '资料', exact: true }).click();
+  await page.locator('.ml-document').filter({ hasText: '电脑大视频.mp4' }).click();
+  await expect(page.getByRole('link', { name: '导出原文件' })).toBeVisible({ timeout: 60000 });
+  expect(downloadChunks).toBe(Math.ceil(original.length / chunkSize));
+  await disconnectMedia(page, true);
+  const download = page.waitForEvent('download'); await page.getByRole('link', { name: '导出原文件' }).click();
+  const stream = await (await download).createReadStream(); const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+  expect(Buffer.concat(chunks).equals(original)).toBe(true);
+  await page.screenshot({ path: info.outputPath('phone-large-video.png') });
 });

@@ -1,4 +1,5 @@
-export const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
+export const MAX_MEDIA_BYTES = 1024 * 1024 * 1024;
+export const MEDIA_CHUNK_BYTES = 4 * 1024 * 1024;
 const formats: Record<string, [string, 'image' | 'audio' | 'video']> = {
   jpg: ['image/jpeg', 'image'], jpeg: ['image/jpeg', 'image'], png: ['image/png', 'image'],
   gif: ['image/gif', 'image'], webp: ['image/webp', 'image'], heic: ['image/heic', 'image'], heif: ['image/heif', 'image'], avif: ['image/avif', 'image'],
@@ -18,7 +19,8 @@ export async function validateMedia(file: Blob, name: string) {
   const format = mediaType(name);
   if (!format) throw new Error(`${name}：暂不支持这种附件格式。`);
   if (!file.size) throw new Error(`${name}：手机返回了 0 字节，未读取到文件内容。若文件保存在 iCloud 或其他网盘，请先在“文件”App 下载完成，再重新选择。`);
-  if (file.size > MAX_MEDIA_BYTES) throw new Error(`${name}：文件大小 ${formatBytes(file.size)}，超过当前单个附件 50 MB 的上限，本次未导入。`);
+  const limit = format.kind === 'image' ? 50 * 1024 * 1024 : MAX_MEDIA_BYTES;
+  if (file.size > limit) throw new Error(`${name}：文件大小 ${formatBytes(file.size)}，超过${format.kind === 'image' ? '图片 50 MB' : '音视频 1 GB'}的上限，本次未导入。`);
   const bytes = new Uint8Array(await file.slice(0, 32).arrayBuffer());
   const ascii = (start: number, text: string) => [...text].every((c, i) => bytes[start + i] === c.charCodeAt(0));
   const ext = name.split('.').pop()!.toLowerCase();

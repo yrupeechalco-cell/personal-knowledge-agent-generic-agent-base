@@ -1,11 +1,11 @@
 import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspace';
-import { cacheAttachment, mergeSnapshot, readAttachment, readMobileState, updateMobileState, type LocalDocument } from './libraryStore';
-import { MAX_MEDIA_BYTES, mediaType, validateMedia } from './media';
+import { attachStagedFile, mergeSnapshot, readAttachment, readAttachmentRange, readMobileState, stageAttachment, updateMobileState, type LocalDocument } from './libraryStore';
+import { MAX_MEDIA_BYTES, MEDIA_CHUNK_BYTES, mediaType } from './media';
 
 let running: Promise<void> | undefined;
 async function request(path: string, token: string, body?: unknown, attachment?: Blob) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), attachment ? 120000 : 15000);
+  const timeout = window.setTimeout(() => controller.abort(), attachment || path === 'media-finish' ? 120000 : 15000);
   try {
     const metadata = new TextEncoder().encode(JSON.stringify(body));
     const length = new Uint8Array(4); new DataView(length.buffer).setUint32(0, metadata.length);
@@ -29,7 +29,7 @@ export async function pairMobile(token: string) {
 }
 export function syncMobile() {
   if (running) return running;
-  running = performSync().finally(() => { running = undefined; });
+  running = performSync().finally(() => { running = undefined; window.dispatchEvent(new CustomEvent('mobile-transfer-progress', { detail: '' })); });
   return running;
 }
 async function performSync() {
@@ -45,11 +45,22 @@ async function performSync() {
     if (!current?.pending || current.conflict !== undefined) continue;
     const sent: LocalDocument = structuredClone(current);
     const needsUpload = !sent.base && mediaType(sent.doc.path);
-    if (needsUpload && !data.capabilities?.media) throw new Error('电脑 App 版本尚不支持附件同步，请更新到 0.3.4 或更新版本。附件已保存在手机。');
-    const attachment = needsUpload && sent.attachment ? await readAttachment(sent.attachment.key) : undefined;
-    if (needsUpload && !attachment) throw new Error('附件原文件未保存在本机，无法同步。请重新导入。');
-    const { status, data: result } = await request(needsUpload ? 'media-change' : 'change', token, { operationId: sent.editId,
-      base: sent.base ? { revision: sent.base.revision, metadataVersion: sent.base.metadataVersion ?? 0 } : null, doc: sent.doc }, attachment);
+    if (needsUpload && !data.capabilities?.mediaChunks) throw new Error('电脑 App 版本尚不支持附件分块同步，请更新到 0.3.4 或更新版本。附件已保存在手机。');
+    if (needsUpload) {
+      if (!sent.attachment) throw new Error('附件原文件未保存在本机，无法同步。请重新导入。');
+      for (let offset = 0; offset < sent.doc.size;) {
+        if ((await readMobileState()).token !== token) return;
+        const part = await readAttachmentRange(sent.attachment.key, offset);
+        if (!part?.size) throw new Error('本机附件分块缺失，请重新导入。');
+        const uploaded = await request('media-chunk', token, { operationId: sent.editId, name: sent.doc.path, total: sent.doc.size, offset }, part);
+        const next = uploaded.data.offset;
+        if (!Number.isSafeInteger(next) || next < offset + part.size || next > sent.doc.size || next < sent.doc.size && next % MEDIA_CHUNK_BYTES !== 0) throw new Error('附件续传位置无效，请重试。');
+        offset = next;
+        window.dispatchEvent(new CustomEvent('mobile-transfer-progress', { detail: `${sent.doc.path} · 上传 ${Math.round(offset / sent.doc.size * 100)}%` }));
+      }
+    }
+    const { status, data: result } = await request(needsUpload ? 'media-finish' : 'change', token, { operationId: sent.editId,
+      base: sent.base ? { revision: sent.base.revision, metadataVersion: sent.base.metadataVersion ?? 0 } : null, doc: sent.doc });
     await updateMobileState(next => {
       const local = next.documents.find(entry => entry.doc.id === sent.doc.id);
       if (!local) return;
@@ -70,27 +81,44 @@ async function performSync() {
 }
 
 // Attachments from the computer are downloaded on demand and persist for offline use.
-export async function loadMedia(entry: LocalDocument): Promise<Blob> {
-  if (entry.attachment?.revision === entry.doc.revision) {
-    const blob = await readAttachment(entry.attachment.key);
+const downloads = new Map<string, { promise: Promise<Blob>; listeners: Set<(message: string) => void> }>();
+export function loadMedia(entry: LocalDocument, onProgress?: (message: string) => void): Promise<Blob> {
+  const id = JSON.stringify([entry.doc.id, entry.doc.revision]);
+  const existing = downloads.get(id);
+  if (existing) { if (onProgress) existing.listeners.add(onProgress); return existing.promise; }
+  const listeners = new Set(onProgress ? [onProgress] : []);
+  const promise = loadMediaOnce(entry, message => listeners.forEach(listener => listener(message)));
+  downloads.set(id, { promise, listeners });
+  void promise.then(() => downloads.delete(id), () => downloads.delete(id));
+  return promise;
+}
+async function loadMediaOnce(entry: LocalDocument, onProgress?: (message: string) => void): Promise<Blob> {
+  const state = await readMobileState();
+  const current = state.documents.find(item => item.doc.id === entry.doc.id && item.doc.revision === entry.doc.revision) ?? entry;
+  if (current.attachment?.revision === entry.doc.revision) {
+    const blob = await readAttachment(current.attachment.key);
     if (blob) return blob;
   }
-  const state = await readMobileState();
   if (!entry.base || !state.token) throw new Error('附件尚未下载。请连接已配对的电脑后重试。');
-  if (entry.doc.size > MAX_MEDIA_BYTES) throw new Error('此附件超过 50 MB，请在电脑上打开。');
-  const controller = new AbortController(); const timer = window.setTimeout(() => controller.abort(), 120000);
-  try {
+  if (entry.doc.size > MAX_MEDIA_BYTES) throw new Error('此附件超过 1 GB，请在电脑上打开。');
+  const format = mediaType(entry.doc.path)!;
+  const key = await stageAttachment(entry.doc.path, entry.doc.size, format.mime, async offset => {
+    const controller = new AbortController(); const timer = window.setTimeout(() => controller.abort(), 60000);
+    try {
     const response = await fetch('/api/mobile/attachment', { method: 'POST', headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: entry.doc.id, revision: entry.doc.revision }), signal: controller.signal, cache: 'no-store' });
+      body: JSON.stringify({ id: entry.doc.id, revision: entry.doc.revision, offset }), signal: controller.signal, cache: 'no-store' });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || '附件下载失败，请检查电脑同步服务版本及连接。');
     }
     const declared = Number(response.headers.get('Content-Length'));
-    if (!Number.isFinite(declared) || declared !== entry.doc.size || declared > MAX_MEDIA_BYTES) throw new Error('附件大小已变化或响应无效，请重新同步。');
+    const expected = Math.min(MEDIA_CHUNK_BYTES, entry.doc.size - offset);
+    if (!Number.isFinite(declared) || declared !== expected) throw new Error('附件大小已变化或响应无效，请重新同步。');
     const blob = await response.blob();
-    if (blob.size !== entry.doc.size) throw new Error('附件下载不完整，请重试。');
-    const format = await validateMedia(blob, entry.doc.path);
-    return cacheAttachment(entry.doc.id, entry.doc.revision, blob.slice(0, blob.size, format.mime));
-  } finally { window.clearTimeout(timer); }
+    if (blob.size !== expected) throw new Error('附件下载不完整，请重试。');
+    return blob;
+    } finally { window.clearTimeout(timer); }
+  }, onProgress);
+  await attachStagedFile(entry.doc.id, entry.doc.revision, key);
+  return (await readAttachment(key))!;
 }

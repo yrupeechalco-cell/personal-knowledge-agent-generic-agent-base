@@ -23,6 +23,8 @@ export function MobileLibraryApp() {
   const [pairCode, setPairCode] = useState('');
   const [fileAccessOpen, setFileAccessOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const [syncProgress, setSyncProgress] = useState('');
   const [kind, setKind] = useState('all');
   const pairing = useRef(false);
   useEffect(() => {
@@ -30,6 +32,8 @@ export function MobileLibraryApp() {
     const refresh = () => void readMobileState().then(next => { if (alive) { setState(next); setReady(true); } }).catch(e => { if (alive) setError(String(e)); });
     refresh();
     window.addEventListener('mobile-library-changed', refresh);
+    const progress = (event: Event) => setSyncProgress((event as CustomEvent<string>).detail);
+    window.addEventListener('mobile-transfer-progress', progress);
     const focus = () => { refresh(); void runSync(); };
     window.addEventListener('focus', focus);
     window.addEventListener('online', focus);
@@ -41,7 +45,7 @@ export function MobileLibraryApp() {
       history.replaceState(null, '', location.pathname + location.search);
       void pairMobile(token).then(() => { setPairCode(''); return runSync(); }).catch(e => setSyncError(String(e)));
     } else void runSync();
-    return () => { alive = false; window.removeEventListener('mobile-library-changed', refresh); window.removeEventListener('focus', focus); window.removeEventListener('online', focus); window.clearInterval(interval); };
+    return () => { alive = false; window.removeEventListener('mobile-library-changed', refresh); window.removeEventListener('mobile-transfer-progress', progress); window.removeEventListener('focus', focus); window.removeEventListener('online', focus); window.clearInterval(interval); };
   }, []);
   async function runSync() {
     setBusy(true);
@@ -61,8 +65,8 @@ export function MobileLibraryApp() {
       const files = await picked;
       if (!files.length) return;
       setImporting(true);
-      try { await importMobileFiles(files); setCategory(''); setKind('all'); setQuery(''); setPage('library'); void runSync(); }
-      finally { setImporting(false); }
+      try { await importMobileFiles(files, setImportProgress); setCategory(''); setKind('all'); setQuery(''); setPage('library'); void runSync(); }
+      finally { setImporting(false); setImportProgress(''); }
     });
   }
   const pending = state.documents.filter(item => item.pending).length;
@@ -75,7 +79,8 @@ export function MobileLibraryApp() {
     <main className="ml-main">
       {error && <p role="alert" className="ml-error">{error}</p>}
       {!ready && !error && <p role="status">正在读取本机资料…</p>}
-      {importing && <p role="status">正在保存资料和附件，请保持页面打开…</p>}
+      {importing && <p role="status">正在保存到本机：{importProgress || '准备文件…'}。请保持页面打开。</p>}
+      {syncProgress && <p role="status">{syncProgress} · 请保持页面打开，断线后会继续上传。</p>}
       {page === 'library' && <>
         <button className="ml-sync-strip" onClick={() => setPage('sync')}><span className={syncError ? 'ml-dot offline' : 'ml-dot'} />{conflicts.length ? `${conflicts.length} 份资料需要合并` : pending ? `${pending} 份改动已保存本机，等待同步` : state.token ? '本机资料已保存 · 已配对电脑' : '本机资料已保存 · 可配对电脑'}<span>查看</span></button>
         <div className="ml-search"><Search size={19}/><input aria-label="搜索知识库" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜正文、标签、知识 tip" /></div>

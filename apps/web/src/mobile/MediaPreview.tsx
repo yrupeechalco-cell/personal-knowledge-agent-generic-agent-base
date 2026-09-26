@@ -10,17 +10,18 @@ export function MediaPreview({ entry }: { entry: LocalDocument }) {
   const [decodeError, setDecodeError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [zoom, setZoom] = useState(false);
+  const [progress, setProgress] = useState('');
   useEffect(() => {
     let active = true; let objectUrl = '';
     setError(''); setDecodeError(false); setUrl('');
-    void loadMedia(entry).then(blob => {
+    void loadMedia(entry, message => { if (active) setProgress(message); }).then(blob => {
       if (active) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); }
     }).catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [entry.doc.id, entry.doc.revision, attempt]);
   return <section className="ml-media-preview" aria-label={`${media.label}预览`}>
     <div className="ml-media-heading"><strong>{media.label}</strong><span>{formatBytes(entry.doc.size)}</span></div>
-    {!url && !error && <p role="status">正在读取附件，首次从电脑下载可能需要一些时间…</p>}
+    {!url && !error && <p role="status">{progress || '正在读取附件，首次从电脑下载可能需要一些时间…'}</p>}
     {error && <><p role="alert">{error}</p><button onClick={() => setAttempt(value => value + 1)}>重新读取附件</button></>}
     {url && <>
       {media.kind === 'image' && <button className={`ml-image${zoom ? ' enlarged' : ''}`} aria-label={zoom ? '缩小图片' : '放大图片'} onClick={() => setZoom(!zoom)}><img src={url} alt={entry.doc.path.split(/[\\/]/).pop()} onError={() => setDecodeError(true)}/></button>}

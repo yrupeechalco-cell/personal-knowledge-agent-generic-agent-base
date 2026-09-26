@@ -1,5 +1,5 @@
 import type { LibraryDocument, LibrarySnapshot } from '@knowledge-agent/workspace';
-import { mediaType, validateMedia } from './media';
+import { MEDIA_CHUNK_BYTES, mediaType, validateMedia } from './media';
 import { readImportedVault } from '../importedVault';
 
 export interface LocalDocument {
@@ -29,9 +29,25 @@ export function openMobileDatabase() {
       if (!request.result.objectStoreNames.contains('attachments')) request.result.createObjectStore('attachments');
     };
     request.onerror = () => { database = undefined; reject(new Error('无法打开本机知识库，请退出无痕浏览并允许网站保存数据。')); };
-    request.onsuccess = () => { request.result.onversionchange = () => { request.result.close(); database = undefined; }; resolve(request.result); };
+    request.onsuccess = () => { request.result.onversionchange = () => { request.result.close(); database = undefined; }; cleanupAbandonedAttachments(request.result); resolve(request.result); };
   });
   return database;
+}
+
+function cleanupAbandonedAttachments(db: IDBDatabase) {
+  const tx = db.transaction(['library', 'attachments'], 'readwrite');
+  const state = tx.objectStore('library').get('state');
+  state.onsuccess = () => {
+    if (state.result && state.result.version !== 1) return;
+    const used = new Set((state.result as MobileState | undefined)?.documents.flatMap(item => item.attachment ? [item.attachment.key] : []) ?? []);
+    const cursor = tx.objectStore('attachments').openCursor();
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (!item) return;
+      if (item.value.stagedAt < Date.now() - 86400000 && !used.has(String(item.key))) deleteAttachmentInTransaction(tx, String(item.key));
+      item.continue();
+    };
+  };
 }
 
 // Read/modify/write happens in a single IndexedDB transaction, including across tabs.
@@ -54,7 +70,7 @@ export async function updateMobileState(change: (state: MobileState) => void, at
         const previousKeys = new Set(state.documents.flatMap(entry => entry.attachment ? [entry.attachment.key] : []));
         change(state);
         const retainedKeys = new Set(state.documents.flatMap(entry => entry.attachment ? [entry.attachment.key] : []));
-        for (const key of previousKeys) if (!retainedKeys.has(key)) transaction.objectStore('attachments').delete(key);
+        for (const key of previousKeys) if (!retainedKeys.has(key)) deleteAttachmentInTransaction(transaction, key);
         for (const binary of binaries) transaction.objectStore('attachments').put(binary.value, binary.key);
         store.put(state, 'state');
       } catch (error) { failure = error; transaction.abort(); }
@@ -71,26 +87,87 @@ export async function readMobileState(): Promise<MobileState> {
     request.onerror = () => reject(request.error);
   });
 }
-export async function readAttachment(key: string): Promise<Blob | undefined> {
+async function attachmentValue(key: string): Promise<{ bytes: ArrayBuffer; mime: string; chunks?: number; size?: number } | Blob | undefined> {
   const db = await openMobileDatabase();
   return new Promise((resolve, reject) => {
     const request = db.transaction('attachments').objectStore('attachments').get(key);
-    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : request.result ? new Blob([request.result.bytes], { type: request.result.mime }) : undefined);
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
-export async function importMobileFiles(files: File[]) {
+function deleteAttachmentInTransaction(tx: IDBTransaction, key: string) {
+  const store = tx.objectStore('attachments'); const request = store.get(key);
+  request.onsuccess = () => { for (let part = 0; part < (request.result?.chunks ?? 0); part++) store.delete(`${key}:${part}`); store.delete(key); };
+}
+export async function readAttachmentRange(key: string, offset = 0, length = MEDIA_CHUNK_BYTES): Promise<Blob | undefined> {
+  const value = await attachmentValue(key);
+  if (!value) return;
+  if (value instanceof Blob) return value.slice(offset, offset + length, value.type);
+  if (!value.chunks) return new Blob([value.bytes], { type: value.mime }).slice(offset, offset + length, value.mime);
+  const parts: BlobPart[] = [];
+  const end = Math.min(value.size!, offset + length);
+  for (let part = Math.floor(offset / MEDIA_CHUNK_BYTES); part * MEDIA_CHUNK_BYTES < end; part++) {
+    const chunk = await attachmentValue(`${key}:${part}`);
+    if (!chunk || chunk instanceof Blob) throw new Error('附件分块不完整，请重新导入或下载。');
+    const begin = Math.max(offset - part * MEDIA_CHUNK_BYTES, 0);
+    const limit = Math.min(end - part * MEDIA_CHUNK_BYTES, chunk.bytes.byteLength);
+    parts.push(new Blob([chunk.bytes], { type: value.mime }).slice(begin, limit));
+  }
+  return new Blob(parts, { type: value.mime });
+}
+export async function readAttachment(key: string): Promise<Blob | undefined> {
+  const value = await attachmentValue(key);
+  if (!value) return;
+  if (value instanceof Blob) return value;
+  return readAttachmentRange(key, 0, value.size ?? value.bytes.byteLength);
+}
+async function putAttachmentValue(key: string, value: unknown) {
+  const db = await openMobileDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('attachments', 'readwrite'); tx.objectStore('attachments').put(value, key);
+    tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(new Error('附件保存失败，可能是手机空间不足。原文件仍保留，请腾出空间后重试。'));
+  });
+}
+export async function stageAttachment(name: string, size: number, mime: string, readPart: (offset: number) => Promise<Blob>, onProgress?: (message: string) => void) {
+  const key = crypto.randomUUID(); const chunks = Math.ceil(size / MEDIA_CHUNK_BYTES);
+  // The manifest is recorded first, so interrupted staging can be identified and removed.
+  await putAttachmentValue(key, { chunks, size, mime, stagedAt: Date.now() });
+  try {
+    for (let offset = 0; offset < size; offset += MEDIA_CHUNK_BYTES) {
+      const part = await readPart(offset);
+      if (part.size !== Math.min(MEDIA_CHUNK_BYTES, size - offset)) throw new Error('附件分块大小不符，传输已停止。');
+      await putAttachmentValue(`${key}:${offset / MEDIA_CHUNK_BYTES}`, { bytes: await part.arrayBuffer(), mime });
+      onProgress?.(`${name} · ${Math.round(Math.min(size, offset + part.size) / size * 100)}%`);
+    }
+    return key;
+  } catch (e) { await discardAttachment(key); throw e; }
+}
+export async function discardAttachment(key: string) {
+  const db = await openMobileDatabase();
+  await new Promise<void>((resolve, reject) => { const tx = db.transaction('attachments', 'readwrite'); deleteAttachmentInTransaction(tx, key); tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error); });
+}
+export async function attachStagedFile(id: string, revision: string, key: string) {
+  try {
+    await updateMobileState(state => {
+      const entry = state.documents.find(item => item.doc.id === id);
+      if (!entry || entry.doc.revision !== revision) throw new Error('附件已更新，请重新打开。');
+      entry.attachment = { key, revision };
+    });
+  } catch (e) { await discardAttachment(key); throw e; }
+}
+export async function importMobileFiles(files: File[], onProgress?: (message: string) => void) {
   if (!files.length) return;
-  if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 200 * 1024 * 1024) throw new Error('一次最多导入 50 个文件、合计 200 MB。');
-  const entries: LocalDocument[] = []; const attachments: { key: string; blob: Blob }[] = [];
+  if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 2 * 1024 * 1024 * 1024) throw new Error('一次最多导入 50 个文件、合计 2 GB。');
+  const entries: LocalDocument[] = []; const staged: string[] = [];
+  try {
   for (const file of files) {
     if (/[\\/]/.test(file.name)) throw new Error('文件名不能包含路径分隔符。');
     const media = mediaType(file.name);
     if (media) {
       await validateMedia(file, file.name);
       const doc = { ...newDocument(file.name), size: file.size };
-      const key = crypto.randomUUID();
-      attachments.push({ key, blob: file.slice(0, file.size, media.mime) });
+      const key = await stageAttachment(file.name, file.size, media.mime, async offset => file.slice(offset, offset + MEDIA_CHUNK_BYTES, media.mime), onProgress);
+      staged.push(key);
       entries.push({ doc, attachment: { key, revision: '' }, localId: doc.id, base: null, pending: true, editId: crypto.randomUUID() });
     } else {
       const vault = await readImportedVault([file]);
@@ -101,11 +178,12 @@ export async function importMobileFiles(files: File[]) {
       }
     }
   }
-  // All entries and binaries commit together: failures never leave a partial import.
+  // Publish the entire batch only after all binary chunks are durable.
   await updateMobileState(state => {
     if (state.documents.length + entries.length > 1500) throw new Error('最多保存 1500 份资料。');
     state.documents.unshift(...entries);
-  }, attachments);
+  });
+  } catch (e) { for (const key of staged) await discardAttachment(key); throw e; }
 }
 export async function cacheAttachment(id: string, revision: string, blob: Blob) {
   const key = crypto.randomUUID();
