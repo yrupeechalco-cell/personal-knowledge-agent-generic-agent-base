@@ -12,7 +12,7 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [progress, setProgress] = useState("");
-  const [autoScan, setAutoScan] = useState(true);
+  const [autoScan, setAutoScan] = useState(false);
   const alive = useRef(true);
   const lock = useRef(false);
   const cancelled = useRef(false);

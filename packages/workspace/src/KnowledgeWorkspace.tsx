@@ -3925,7 +3925,6 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <IconButton active={centerMode === "graph"} label={t("关系图谱")} onClick={openGraphTab}>
           <Network />
         </IconButton>
-        {adapter.openReadOnlyStructure && <button className={`icon-button${centerMode === "explorer" && isReadOnlyStructure ? " active" : ""}`} title="文件分布图" aria-label="文件分布图" disabled={storageBusy || readOnlyBusy} onClick={() => isReadOnlyStructure ? openExplorerTab() : void openReadOnlyStructure()}><FolderTree size={18}/></button>}
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
         </IconButton>
