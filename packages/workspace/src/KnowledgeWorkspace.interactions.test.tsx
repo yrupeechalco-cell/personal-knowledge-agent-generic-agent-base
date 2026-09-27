@@ -45,6 +45,17 @@ function createLoadedAdapter(): KnowledgeWorkspaceAdapter {
 }
 
 describe("KnowledgeWorkspace navigation", () => {
+  it("opens the physical directory map directly without creating a document tab", async () => {
+    const listing = { root: "C:/资料", path: "", truncated: false, entries: [{ name: "照片", path: "照片", kind: "directory" as const }] };
+    const adapter = { ...createEmptyAdapter(), openReadOnlyStructure: vi.fn(async () => ({ files: [], sourceKind: "structure" as const, sourceName: listing.root, safetyManifest: buildSafetyManifest([]), readOnlyStructure: { listing, folderCount: 1, fileCount: 0, truncated: false } })), listReadOnlyDirectory: vi.fn(async () => ({ ...listing, path: "照片", entries: [] })) };
+    render(<KnowledgeWorkspace adapter={adapter}/>);
+    fireEvent.click(await screen.findByRole("button", { name: "文件分布图" }));
+    const map = await screen.findByRole("region", { name: "文件分布图" });
+    expect(screen.queryByRole("tablist", { name: "Open document tabs" })).toBeNull();
+    fireEvent.click(within(map).getByRole("button", { name: /照片/ }));
+    await screen.findByText("这个文件夹是空的");
+    expect(adapter.listReadOnlyDirectory).toHaveBeenCalledWith("C:/资料", "照片");
+  });
   it.each(["app_create_note", "app_replace_note"])("keeps imported files read-only even for Agent tool %s", async (tool) => {
     const files = [{ path: "A.md", content: "# A\n\n需要保留的原文" }];
     let turns = 0;

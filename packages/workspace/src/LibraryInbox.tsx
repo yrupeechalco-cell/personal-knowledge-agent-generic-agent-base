@@ -6,12 +6,12 @@ import { LibraryDocumentDetail } from "./LibraryDocumentDetail";
 import { KnowledgeCards } from "./KnowledgeCards";
 import { useLibraryController } from "./useLibraryController";
 
-interface Props { adapter?: LibraryAdapter; runModel?: (request: ModelRequest) => Promise<string>; model: string; modelReady: boolean; visible: boolean }
+interface Props { adapter?: LibraryAdapter; runModel?: (request: ModelRequest) => Promise<string>; model: string; modelReady: boolean; visible: boolean; suspended?: boolean }
 const STATUS = { pending: "待整理", reviewed: "已整理", ignored: "已忽略" };
 
-export function LibraryInbox({ adapter, runModel, model, modelReady, visible }: Props) {
+export function LibraryInbox({ adapter, runModel, model, modelReady, visible, suspended = false }: Props) {
   const [detailDirty, setDetailDirty] = useState(false);
-  const { data, busy, error, notice, progress, autoScan, setAutoScan, operate, configure } = useLibraryController(adapter, runModel, model, modelReady, detailDirty);
+  const { data, busy, error, notice, progress, autoScan, setAutoScan, operate, configure } = useLibraryController(adapter, runModel, model, modelReady, detailDirty, suspended);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [selected, setSelected] = useState("");

@@ -5,7 +5,7 @@ import { aiReview, analyzeLibraryDocument, categoryTree, pendingDocuments, type 
 const EMPTY: LibrarySnapshot = { version: 2, roots: [], documents: [], queueState: "idle", autoAnalyze: false };
 export const LIBRARY_CHANGED = "knowledge-library-changed";
 
-export function useLibraryController(adapter: LibraryAdapter | undefined, runModel: ((request: ModelRequest) => Promise<string>) | undefined, model: string, modelReady: boolean, editing: boolean) {
+export function useLibraryController(adapter: LibraryAdapter | undefined, runModel: ((request: ModelRequest) => Promise<string>) | undefined, model: string, modelReady: boolean, editing: boolean, suspended = false) {
   const [data, setData] = useState(EMPTY);
   const latest = useRef(data);
   const [busy, setBusy] = useState(false);
@@ -19,6 +19,8 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
   const configuring = useRef(false);
   const failures = useRef(new Set<string>());
   const consecutiveFailures = useRef(0);
+  // The physical folder view must not start scans or AI work in the hidden library.
+  useEffect(() => { if (suspended) cancelled.current = true; }, [suspended]);
   const apply = useCallback((next: LibrarySnapshot) => {
     if (!alive.current || (next.storeRevision ?? 0) < (latest.current.storeRevision ?? 0)) return;
     latest.current = next; setData(next);
@@ -45,14 +47,14 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
     return () => { alive.current = false; cancelled.current = true; };
   }, [adapter, operate]);
   useEffect(() => {
-    if (!adapter) return;
+    if (!adapter || suspended) return;
     const refresh = () => { if (!editing && !lock.current) void operate(adapter.load); };
     window.addEventListener(LIBRARY_CHANGED, refresh);
     const interval = autoScan ? window.setInterval(() => { if (!editing) void operate(adapter.scan); }, 30000) : undefined;
     return () => { window.removeEventListener(LIBRARY_CHANGED, refresh); if (interval !== undefined) window.clearInterval(interval); };
-  }, [adapter, autoScan, editing, operate]);
+  }, [adapter, autoScan, editing, operate, suspended]);
   useEffect(() => {
-    if (!adapter?.configure || !runModel || !modelReady || busy || lock.current || configuring.current || editing || data.queueState === "paused") return;
+    if (suspended || !adapter?.configure || !runModel || !modelReady || busy || lock.current || configuring.current || editing || data.queueState === "paused") return;
     if (data.queueState !== "running" && !data.autoAnalyze) return;
     const doc = pendingDocuments(data).find((candidate) => !failures.current.has(`${candidate.id}:${candidate.revision}`));
     if (!doc) {
@@ -90,6 +92,6 @@ export function useLibraryController(adapter: LibraryAdapter | undefined, runMod
         return next;
       } finally { if (alive.current) setProgress(""); }
     });
-  }, [adapter, runModel, model, modelReady, editing, busy, data, configure, operate, apply]);
+  }, [adapter, runModel, model, modelReady, editing, busy, data, configure, operate, apply, suspended]);
   return { data, busy, error, notice, progress, autoScan, setAutoScan, operate, configure, setNotice };
 }

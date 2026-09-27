@@ -69,6 +69,7 @@ import {
   Folder,
   FolderOpen,
   FolderSearch,
+  FolderTree,
   GitBranch,
   HardDrive,
   Maximize2,
@@ -103,6 +104,7 @@ import {
 } from "react";
 import { WorkspaceLauncher, type WorkspaceLauncherMode, type WorkspaceLauncherSelectionOptions } from "./WorkspaceLauncher";
 import { LibraryInbox } from "./LibraryInbox";
+import { DirectoryMap } from "./DirectoryMap";
 import { createLibraryAgentTools } from "./libraryAgentTools";
 import { LIBRARY_CHANGED } from "./useLibraryController";
 import type { LibraryAdapter } from "./libraryModel";
@@ -1643,6 +1645,8 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     setGraphDeleteTarget(null);
     if (vault.sourceKind === "structure") {
       setAgentKeyDialogOpen(false);
+      setAgentPanelMode("hidden");
+      setLeftVisible(false);
     }
     setReadOnlyListing(vault.readOnlyStructure?.listing ?? null);
     setReadOnlyPreview(null);
@@ -3921,6 +3925,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <IconButton active={centerMode === "graph"} label={t("关系图谱")} onClick={openGraphTab}>
           <Network />
         </IconButton>
+        {adapter.openReadOnlyStructure && <button className={`icon-button${centerMode === "explorer" && isReadOnlyStructure ? " active" : ""}`} title="文件分布图" aria-label="文件分布图" disabled={storageBusy || readOnlyBusy} onClick={() => isReadOnlyStructure ? openExplorerTab() : void openReadOnlyStructure()}><FolderTree size={18}/></button>}
         <IconButton active={centerMode === "canvas"} label={t("知识画布")} onClick={openCanvasTab}>
           <PanelsTopLeft />
         </IconButton>
@@ -3977,6 +3982,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           </label>
           {isReadOnlyStructure && readOnlyListing ? (
             <ReadOnlySidebarList
+              busy={readOnlyBusy || storageBusy}
               listing={readOnlyListing}
               onOpenDirectory={browseReadOnlyDirectory}
               onOpenFile={previewReadOnlyFile}
@@ -4192,7 +4198,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
         <div className="status-line">{runtime(status)}</div>
         <TypeWordsStartup adapter={adapter.typewords} />
         {typeWordsOpened && <div className="typewords-plugin-host" hidden={centerMode !== "typewords"}><TypeWordsPlugin adapter={adapter.typewords} /></div>}
-        <LibraryInbox adapter={adapter.library} runModel={adapter.runModel} model={selectedAgentModel} modelReady={selectedModelConfigured && selectedAgentProvider !== "offline"} visible={centerMode === "library"} />
+        <LibraryInbox adapter={adapter.library} runModel={adapter.runModel} model={selectedAgentModel} modelReady={selectedModelConfigured && selectedAgentProvider !== "offline"} visible={centerMode === "library"} suspended={isReadOnlyStructure && centerMode !== "library"} />
         {centerMode === "library" || centerMode === "typewords" ? null : centerMode === "canvas" ? (
           <KnowledgeCanvas
             document={canvasDocument}
@@ -4209,6 +4215,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
           />
         ) : shouldShowWorkspaceEmptyState(sourceKind, centerMode, Boolean(currentNote)) ? (
           <WorkspaceEmptyState
+            onBrowseFiles={adapter.openReadOnlyStructure ? () => void openReadOnlyStructure() : undefined}
             canCreate={Boolean(adapter.createVaultFolder)}
             canOpen={adapter.canOpenVault}
             onImport={adapter.importFiles ? () => void importFiles() : undefined}
@@ -4288,6 +4295,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
             <ReadOnlyStorageExplorer
               busy={readOnlyBusy}
               listing={readOnlyListing}
+              onChooseFolder={() => void openReadOnlyStructure()}
               onClosePreview={() => setReadOnlyPreview(null)}
               onOpenDirectory={browseReadOnlyDirectory}
               onOpenFile={previewReadOnlyFile}
@@ -5035,7 +5043,8 @@ function WorkspaceEmptyState({
   onImport,
   importing,
   onCreate,
-  onOpen
+  onOpen,
+  onBrowseFiles
 }: {
   canCreate: boolean;
   canOpen: boolean;
@@ -5043,6 +5052,7 @@ function WorkspaceEmptyState({
   importing?: boolean;
   onCreate(): void;
   onOpen(): void;
+  onBrowseFiles?(): void;
 }) {
   const { t } = useLocalization();
   return (
@@ -5053,6 +5063,7 @@ function WorkspaceEmptyState({
       <h1>{t("连接你的知识库")}</h1>
       <p>{onImport && !canOpen ? "选择 Markdown 或 TXT 文档，试试阅读、搜索和标签浏览。" : t("打开一个存放 Markdown 文档的普通文件夹。新安装的应用和网站不会预置、复制或上传任何笔记。")}</p>
       <div className="workspace-empty-actions">
+        {onBrowseFiles && <button disabled={importing} onClick={onBrowseFiles} type="button"><FolderTree size={16}/>查看文件分布图</button>}
         {onImport ? <button className="primary" disabled={importing} onClick={onImport} type="button"><FileUp size={16} />{importing ? "正在导入…" : "选择文档预览"}</button> : null}
         {canOpen || !onImport ? <button className={onImport ? "" : "primary"} disabled={!canOpen} onClick={onOpen} type="button">
           <FolderOpen size={16} />
@@ -5071,10 +5082,12 @@ function WorkspaceEmptyState({
 }
 
 function ReadOnlySidebarList({
+  busy,
   listing,
   onOpenDirectory,
   onOpenFile
 }: {
+  busy: boolean;
   listing: ReadOnlyDirectoryListing;
   onOpenDirectory(path: string): void;
   onOpenFile(path: string): void;
@@ -5085,6 +5098,7 @@ function ReadOnlySidebarList({
       {listing.entries.map((entry) => (
         <button
           key={`${entry.kind}:${entry.path}`}
+          disabled={busy || (entry.kind !== "directory" && entry.kind !== "file")}
           onClick={() => entry.kind === "directory" ? onOpenDirectory(entry.path) : entry.kind === "file" ? onOpenFile(entry.path) : undefined}
           title={entry.path}
           type="button"
@@ -5103,7 +5117,8 @@ export function ReadOnlyStorageExplorer({
   onClosePreview,
   onOpenDirectory,
   onOpenFile,
-  preview
+  preview,
+  onChooseFolder
 }: {
   busy: boolean;
   listing: ReadOnlyDirectoryListing;
@@ -5111,9 +5126,12 @@ export function ReadOnlyStorageExplorer({
   onOpenDirectory(path: string): void;
   onOpenFile(path: string): void;
   preview: ReadOnlyFilePreview | null;
+  onChooseFolder?(): void;
 }) {
   const { locale, t } = useLocalization();
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"map" | "list">("map");
+  useEffect(() => { setQuery(""); }, [listing.root, listing.path]);
   const segments = listing.path ? listing.path.split("/").filter(Boolean) : [];
   const parentPath = segments.slice(0, -1).join("/");
   const filteredEntries = listing.entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()));
@@ -5131,13 +5149,13 @@ export function ReadOnlyStorageExplorer({
             </button>
           </div>
           <nav className="readonly-breadcrumb" aria-label={t("当前文件路径")}>
-            <button onClick={() => onOpenDirectory("")} type="button"><HardDrive size={14} />{listing.root}</button>
+            <button disabled={busy} onClick={() => onOpenDirectory("")} type="button"><HardDrive size={14} />{listing.root}</button>
             {segments.map((segment, index) => {
               const path = segments.slice(0, index + 1).join("/");
               return (
                 <span key={path}>
                   <ChevronRight size={13} />
-                  <button onClick={() => onOpenDirectory(path)} type="button">{segment}</button>
+                  <button disabled={busy} onClick={() => onOpenDirectory(path)} type="button">{segment}</button>
                 </span>
               );
             })}
@@ -5152,8 +5170,13 @@ export function ReadOnlyStorageExplorer({
           <strong>{segments.at(-1) ?? listing.root}</strong>
           <span>{listing.entries.length} {locale === "en" ? "items · read only" : "项 · 只读"}</span>
         </div>
-
-        <div className="readonly-file-table" role="table" aria-label={t("文件和文件夹")}>
+        <div className="readonly-map-controls" role="group" aria-label="文件展示方式">
+          <button aria-pressed={view === "map"} onClick={() => setView("map")}>分布图</button>
+          <button aria-pressed={view === "list"} onClick={() => setView("list")}>列表</button>
+          {onChooseFolder && <button disabled={busy} onClick={onChooseFolder}>换个文件夹</button>}
+          <small>按原始文件夹浏览 · 自动整理已暂停</small>
+        </div>
+        {view === "map" ? <DirectoryMap key={`${listing.root}:${listing.path}:${query}`} listing={listing} query={query} busy={busy} selectedPath={preview?.path} onOpenDirectory={onOpenDirectory} onOpenFile={onOpenFile}/> : <div className="readonly-file-table" role="table" aria-label={t("文件和文件夹")}>
           <div className="readonly-file-row header" role="row">
             <span>{t("名称")}</span><span>{t("类型")}</span><span>{t("大小")}</span><span>{t("修改时间")}</span>
           </div>
@@ -5162,6 +5185,7 @@ export function ReadOnlyStorageExplorer({
           ) : filteredEntries.map((entry) => (
             <button
               className={`readonly-file-row ${entry.kind}`}
+              disabled={busy || (entry.kind !== "directory" && entry.kind !== "file")}
               key={`${entry.kind}:${entry.path}`}
               onClick={() => entry.kind === "directory" ? onOpenDirectory(entry.path) : entry.kind === "file" ? onOpenFile(entry.path) : undefined}
               role="row"
@@ -5174,7 +5198,7 @@ export function ReadOnlyStorageExplorer({
               <span>{formatModifiedTime(entry.modifiedAtMs, locale)}</span>
             </button>
           ))}
-        </div>
+        </div>}
         {listing.truncated ? <p className="readonly-limit">{t("当前目录超过 1000 项，仅显示前 1000 项。进入子文件夹可继续浏览。")}</p> : null}
       </div>
 
