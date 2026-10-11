@@ -363,7 +363,10 @@ pub async fn library_add_folder(app: tauri::AppHandle) -> Result<Library, String
 fn add_root(data: &mut Library, path: &Path) -> Result<(), String> {
     let canonical = path.canonicalize().map_err(|e| e.to_string())?;
     if !canonical.is_dir() { return Err("请选择一个文件夹。".into()); }
-    if data.roots.iter().any(|r| canonical.starts_with(&r.id) || Path::new(&r.id).starts_with(&canonical)) {
+    if data.roots.iter().any(|r| {
+        let existing = Path::new(&r.id).canonicalize().unwrap_or_else(|_| PathBuf::from(&r.id));
+        canonical.starts_with(&existing) || existing.starts_with(&canonical)
+    }) {
         return Err("这个文件夹或它的上级/下级已在监测列表中，请勿重复添加。".into());
     }
     if data.roots.len() >= 10 { return Err("最多监测 10 个文件夹，请先移除不需要的目录。".into()); }
@@ -491,13 +494,25 @@ fn walk(root: &Path, dir: &Path, state: &mut Traversal) {
     }
 }
 
+// Old indexes can contain ordinary Windows paths instead of verbatim paths.
+// Resolve only for filesystem comparisons; keep IDs stable so annotations stay attached.
+fn resolved_root(root: &Root) -> Result<PathBuf, String> {
+    let path = Path::new(&root.id);
+    let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if linked(&metadata) { return Err("资料根目录已变为链接，请重新选择目录。".into()); }
+    if !metadata.is_dir() { return Err("资料根目录已不是文件夹。".into()); }
+    path.canonicalize().map_err(|e| e.to_string())
+}
+
 fn scan(data: &mut Library) {
     let mut docs: HashMap<String, Document> = data.documents.drain(..).map(|d| (d.id.clone(), d)).collect();
     let mut bytes = docs.values().map(|d| d.text.len()).sum::<usize>();
     for root in &mut data.roots {
         if root.paused { continue; }
-        let root_path = PathBuf::from(&root.id);
-        if !root_path.is_dir() { root.issue = Some("文件夹暂时不可访问，旧索引已保留。请连接磁盘或移除该目录。".into()); continue; }
+        let root_path = match resolved_root(root) {
+            Ok(path) => path,
+            Err(error) => { root.issue = Some(format!("文件夹暂时不可访问，旧索引已保留：{error}")); continue; }
+        };
         let mut traversal = Traversal { files: Vec::new(), seen_entries: 0, issue: None, started: Instant::now() };
         walk(&root_path, &root_path, &mut traversal);
         let seen: HashSet<String> = traversal.files.iter().map(|(_, rel, _)| format!("{}\n{}", root.id, rel)).collect();
@@ -569,7 +584,7 @@ fn check_document(data: &Library, id: &str, expected: &str) -> Result<usize, Str
     let path = source_path(root, doc)?;
     let canonical = path.canonicalize().map_err(|_| "源文件暂时不可访问，请重新扫描。")?;
     let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&root.id) || linked(&metadata) || doc.revision != expected || revision(&metadata) != expected {
+    if !canonical.starts_with(resolved_root(root)?) || linked(&metadata) || doc.revision != expected || revision(&metadata) != expected {
         return Err("源文件已改变，请重新扫描并重新生成整理建议。".into());
     }
     Ok(index)
@@ -580,16 +595,14 @@ fn source_path(root: &Root, doc: &Document) -> Result<PathBuf, String> {
     if relative.is_absolute() || !relative.components().all(|c| matches!(c, std::path::Component::Normal(_))) || !super::is_allowed_path(&doc.path) {
         return Err("资料路径不在已选择的文件夹内。".into());
     }
-    let root_path = Path::new(&root.id);
-    let root_meta = fs::symlink_metadata(root_path).map_err(|e| e.to_string())?;
-    if linked(&root_meta) { return Err("资料根目录已变为链接，请重新选择目录。".into()); }
-    let mut path = root_path.to_path_buf();
+    let root_path = resolved_root(root)?;
+    let mut path = root_path.clone();
     for part in relative.components() {
         path.push(part.as_os_str());
         if linked(&fs::symlink_metadata(&path).map_err(|e| e.to_string())?) { return Err("资料路径含系统链接，已停止操作。".into()); }
     }
     let resolved = path.canonicalize().map_err(|e| e.to_string())?;
-    if !resolved.starts_with(root_path) { return Err("资料路径已离开所选文件夹。".into()); }
+    if !resolved.starts_with(&root_path) { return Err("资料路径已离开所选文件夹。".into()); }
     Ok(resolved)
 }
 
@@ -769,6 +782,31 @@ mod tests {
         fn library(&self) -> Library { let mut data = Library { version: 1, ..Library::default() }; add_root(&mut data, &self.0).unwrap(); data }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+    #[test]
+    fn ordinary_root_paths_keep_ids_and_allow_scanning_and_annotation() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("sample.md");
+        fs::write(&path, "sample source").unwrap();
+        let mut data = fixture.library();
+        let canonical = fixture.0.canonicalize().unwrap().to_string_lossy().into_owned();
+        let ordinary = if let Some(unc) = canonical.strip_prefix("\\\\?\\UNC\\") {
+            format!("\\\\{unc}")
+        } else { canonical.trim_start_matches("\\\\?\\").to_owned() };
+        data.roots[0].id = ordinary.clone();
+        scan(&mut data);
+        assert!(data.roots[0].issue.is_none());
+        assert_eq!(data.documents.len(), 1);
+        let doc = data.documents[0].clone();
+        assert_eq!(doc.root_id, ordinary);
+        save_review(&mut data, Review { id: doc.id.clone(), revision: doc.revision.clone(), status: "reviewed".into(), summary: "retained annotation".into(), category: "sample".into(), ..Review::default() }).unwrap();
+        scan(&mut data);
+        assert_eq!(data.documents[0].id, doc.id);
+        assert_eq!(data.documents[0].summary, "retained annotation");
+        assert_eq!(data.roots[0].id, ordinary);
+        assert_eq!(source_path(&data.roots[0], &data.documents[0]).unwrap(), path.canonicalize().unwrap());
+        assert!(add_root(&mut data, &fixture.0).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "sample source");
+    }
     #[test]
     fn add_modify_delete_and_preserve_original() {
         let fixture = Fixture::new(); let path = fixture.0.join("日常.txt");
