@@ -16,7 +16,9 @@ test('new learning profile renders in the plugin iframe and opens the bundled di
   await page.screenshot({ path: testInfo.outputPath('typewords-home.png'), fullPage: true });
   await frame.getByText('选择词典', { exact: true }).click();
   await frame.getByText('CET-4', { exact: true }).click();
-  await expect(frame.getByText('cancel', { exact: true }).first()).toBeVisible();
+  // Loading the bundled 2607-word JSON and rendering the first page can exceed
+  // 5s on a cold Windows runner. Keep the actual word/content assertion.
+  await expect(frame.getByText('cancel', { exact: true }).first()).toBeVisible({ timeout: 20000 });
   await expect(frame.locator('#study')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('typewords-dictionary.png'), fullPage: true });
   await frame.locator('#study').click();
