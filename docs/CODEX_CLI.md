@@ -8,7 +8,7 @@ Codex 从命令行直接操作正在运行的个人知识库。原有内置 Agen
 
 ## 开启和定位
 
-1. 安装 [0.4.1 正式发布版](https://github.com/yrupeechalco-cell/personal-knowledge-agent-generic-agent-base/releases/tag/app-v0.4.1) 或更新版本，打开软件。
+1. 安装 0.4.2 或更新版本，打开软件。
 2. 设置 → 常规 → Codex CLI → 管理连接 → 允许 Codex 操作软件。
 3. 点击「复制命令」，交给 Codex。安装目录下的 `cli/knowledge-cli.cmd` 和 `knowledge-cli.ps1` 即可独立使用，不需要 Node、Python 或 Rust。
 

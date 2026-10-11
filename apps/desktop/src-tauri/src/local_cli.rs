@@ -42,10 +42,17 @@ fn random_id() -> Result<String, String> {
     getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
+fn shell_path(path: &std::path::Path) -> String {
+    // resource_dir uses a verbatim Windows path; cmd.exe cannot launch the copied
+    // batch entry through that prefix. Filesystem containment paths stay unchanged.
+    let value = path.to_string_lossy();
+    if let Some(unc) = value.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{unc}") }
+    else { value.strip_prefix("\\\\?\\").unwrap_or(&value).to_owned() }
+}
 fn status(app: &tauri::AppHandle, runtime: &Runtime) -> Value {
     json!({"protocolVersion":1, "appVersion":env!("CARGO_PKG_VERSION"),
         "enabled":runtime.stop.is_some(), "ready":runtime.ready,
-        "cliPath":app.path().resource_dir().ok().map(|p| p.join("cli/knowledge-cli.cmd")),
+        "cliPath":app.path().resource_dir().ok().map(|p| shell_path(&p.join("cli/knowledge-cli.cmd"))),
         "connectionDirectory":directory(app).ok(), "error":runtime.error,
         "running":runtime.jobs.values().filter(|j| j.state == "running").count(),
         "capabilityCount":runtime.methods.len()})
@@ -318,6 +325,13 @@ fn serve(app: &tauri::AppHandle, mut request: tiny_http::Request) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn copied_cli_path_uses_shell_compatible_windows_spelling() {
+        use std::path::Path;
+        assert_eq!(shell_path(Path::new(r"\\?\C:\Users\测试 用户\cli\knowledge-cli.cmd")), r"C:\Users\测试 用户\cli\knowledge-cli.cmd");
+        assert_eq!(shell_path(Path::new(r"\\?\UNC\server\share\cli\knowledge-cli.cmd")), r"\\server\share\cli\knowledge-cli.cmd");
+        assert_eq!(shell_path(Path::new(r"C:\Tools\cli\knowledge-cli.cmd")), r"C:\Tools\cli\knowledge-cli.cmd");
+    }
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self { let path = std::env::temp_dir().join(format!("knowledge-cli-{}", random_id().unwrap())); fs::create_dir(&path).unwrap(); Self(path) }
