@@ -23,9 +23,13 @@ describe("library inbox", () => {
     fireEvent.click(await screen.findByRole("button", { name: /note.txt/ })); fireEvent.click(screen.getByText("AI 生成建议"));
     expect(await screen.findByText(/生成失败：.*网络不可用/)).toBeTruthy(); expect(api.saveReview).not.toHaveBeenCalled();
   });
-  it("keeps background scans active when the inbox is hidden and stops after unmount", async () => {
+  it("scans in the background only after opting in and stops after unmount", async () => {
     vi.useFakeTimers();
-    const api = adapter(); const mounted = render(<LibraryInbox adapter={api} visible={false} model="offline" modelReady={false} />);
+    const api = adapter(); const mounted = render(<LibraryInbox adapter={api} visible model="offline" modelReady={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.scan).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /本次运行自动扫描/ }));
+    mounted.rerender(<LibraryInbox adapter={api} visible={false} model="offline" modelReady={false} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(api.scan).toHaveBeenCalledTimes(1); mounted.unmount(); await vi.advanceTimersByTimeAsync(60000); expect(api.scan).toHaveBeenCalledTimes(1);
   });

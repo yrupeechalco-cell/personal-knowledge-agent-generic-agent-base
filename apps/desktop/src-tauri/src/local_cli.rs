@@ -202,6 +202,10 @@ fn read_document(path: &std::path::Path) -> Result<Option<String>, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+fn document_revision(path: &std::path::Path, content: &str) -> String {
+    // A revision from another vault/file cannot authorize an edit with equal content.
+    revision(&format!("{}\0{content}", path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).display()))
+}
 
 /// Revision-checked writes with durable undo copies, shared by the CLI's UI handler.
 /// Files remain confined to the explicitly opened vault; model credentials are excluded.
@@ -219,7 +223,7 @@ pub fn local_cli_document(root: String, path: String, operation: String, expecte
     }
     let full = if canvas { super::safe_internal_join(&root, relative)? } else { super::safe_join(&root, relative)? };
     let before = read_document(&full)?;
-    let current_revision = before.as_deref().map(revision);
+    let current_revision = before.as_deref().map(|text| document_revision(&full, text));
     if operation.ends_with(".read") {
         return Ok(json!({"path":relative,"content":before,"revision":current_revision}));
     }
@@ -257,11 +261,11 @@ pub fn local_cli_document(root: String, path: String, operation: String, expecte
         file.write_all(next.as_bytes()).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
     }
     // Recheck after the backup write in case an external editor changed the source.
-    if read_document(&full)?.as_deref().map(revision) != current_revision {
+    if read_document(&full)?.as_deref().map(|text| document_revision(&full, text)) != current_revision {
         let _ = fs::remove_file(&temp); return Err("保存期间文件发生变化，请重新读取。".into());
     }
     if let Err(error) = super::replace_file_atomic(&temp, &full) { let _ = fs::remove_file(&temp); return Err(error); }
-    Ok(json!({"saved":true,"path":relative,"revision":revision(&next),"backupId":backup}))
+    Ok(json!({"saved":true,"path":relative,"revision":document_revision(&full, &next),"backupId":backup}))
 }
 fn respond(request: tiny_http::Request, code: u16, value: Value) {
     let response = tiny_http::Response::from_string(value.to_string()).with_status_code(code)
