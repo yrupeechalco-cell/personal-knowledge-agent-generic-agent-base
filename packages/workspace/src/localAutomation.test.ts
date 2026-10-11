@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { LOCAL_AUTOMATION_METHODS, runLocalAutomation, validateAutomationParams, type AutomationContext } from "./localAutomation";
 

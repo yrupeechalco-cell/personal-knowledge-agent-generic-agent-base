@@ -3732,11 +3732,12 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       if (adapter.listTrashEntries) void Promise.resolve(adapter.listTrashEntries()).then(setTrashEntries).catch(() => {});
     },
     show: (view, path) => {
-      if (view === "graph" || view === "bases") {
+      if (view === "graph" || view === "tags" || view === "bases") {
         if (sourceKindRef.current === "structure") throw new Error("当前为文件浏览模式，请打开 Markdown 笔记库后使用此视图。");
       }
       switch (view) {
-        case "graph": setGraphPerspective("knowledge"); openGraphTab(); break;
+        case "graph": setGraphPerspective("files"); openGraphTab(); break;
+        case "tags": setGraphPerspective("knowledge"); openGraphTab(); break;
         case "files": openExplorerTab(); break;
         case "canvas": openCanvasTab(); break;
         case "library": openLibraryTab(); break;

@@ -44,7 +44,7 @@ function method(name: string, description: string, parameters = obj({}), mutates
 
 export const LOCAL_AUTOMATION_METHODS: LocalAutomationMethod[] = [
   method("app.state", "Read current view, source, unsaved state, and model settings (no secrets)."),
-  method("app.show", "Switch the existing main view; does not create feature tabs.", obj({ view: enumeration("graph", "files", "canvas", "library", "typewords", "explorer", "bases", "slides", "trash", "settings", "agent", "cli"), path: str("Optional note path for slides") }, ["view"]), true),
+  method("app.show", "Switch the existing main view; graph shows note links, tags shows the tag map; no new feature tabs.", obj({ view: enumeration("graph", "tags", "files", "canvas", "library", "typewords", "explorer", "bases", "slides", "trash", "settings", "agent", "cli"), path: str("Optional note path for slides") }, ["view"]), true),
   method("app.theme", "Set and persist application theme.", obj({ theme: enumeration("dark", "light") }), true),
   method("vault.open", "Explicitly open a local Markdown vault or browse a folder read-only; never scans the whole device.", obj({ path: str("Absolute folder selected by the user"), mode: enumeration("notes", "files") }, ["path"]), true),
   method("files.list", "List one directory within the open source; directories are not read recursively.", obj({ path: str("Relative directory, empty for source root") }, [])),
