@@ -114,6 +114,26 @@ pub fn shutdown(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
+pub async fn typewords_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<TypeWordsProcess>();
+        let mut child = state.0.lock().map_err(|e| e.to_string())?;
+        let managed = match child.as_mut() {
+            Some(process) => process.try_wait().map_err(|e| e.to_string())?.is_none(),
+            None => false,
+        };
+        let running = probe("http://127.0.0.1:5567/words")?;
+        Ok(serde_json::json!({"running":running,"managedByThisApp":managed,"url":"http://127.0.0.1:5567/words","learningDataApi":false}))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn typewords_stop(app: tauri::AppHandle) {
+    // Only terminate the child owned by this application instance.
+    shutdown(&app);
+}
+
+#[tauri::command]
 pub async fn typewords_start(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<TypeWordsProcess>();

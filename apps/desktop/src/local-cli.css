@@ -1,0 +1,13 @@
+.local-cli-overlay { position: fixed; inset: 0; z-index: 240; background: #0007; display: grid; place-items: center; padding: 28px; }
+.local-cli-panel { width: min(620px, 100%); max-height: 85vh; overflow: auto; padding: 24px; border: 1px solid #7775; border-radius: 14px; color: var(--text-normal, #d9d9df); background: var(--background-primary, #202024); box-shadow: 0 16px 70px #0005; }
+.local-cli-panel header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.local-cli-panel h2 { margin: 0; font-size: 21px; }
+.local-cli-panel p { font-size: 14px; line-height: 1.8; }
+.local-cli-panel button { border: 1px solid #8886; background: #8881; color: inherit; padding: 8px 14px; border-radius: 7px; cursor: pointer; }
+.local-cli-panel button:disabled { opacity: .5; cursor: wait; }
+.local-cli-panel .local-cli-toggle { background: #7554aa; color: white; }
+.local-cli-state { display: flex; justify-content: space-between; gap: 12px; padding: 16px; background: #9c7cbe20; border-radius: 8px; }
+.local-cli-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 12px; border-radius: 8px; background: #8882; user-select: text; }
+.local-cli-panel .local-cli-footnote { color: #999; font-size: 12px; }
+.local-cli-panel [role=alert] { color: #ee9180; }
+body[data-theme=light] .local-cli-panel { color: #292930; background: white; }

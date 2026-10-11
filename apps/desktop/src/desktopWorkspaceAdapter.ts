@@ -40,6 +40,44 @@ interface VaultChangedPayload {
 export function createDesktopWorkspaceAdapter(): KnowledgeWorkspaceAdapter {
   let startingTypeWords: Promise<void> | undefined;
   return {
+    automation: {
+      openSettings: () => window.dispatchEvent(new Event("open-local-cli")),
+      async connect(methods, run) {
+        let disposed = false;
+        let queue = Promise.resolve();
+        const unlisten = await listen<string>("local-cli-request", event => {
+          queue = queue.then(async () => {
+            if (disposed) return;
+            let task: { method: string; params: Record<string, unknown> };
+            try { task = await invoke("local_cli_claim", { id: event.payload }); }
+            catch { return; } // Already claimed, disabled or cancelled: never run twice.
+            try {
+              const result = await run(task.method, task.params);
+              await invoke("local_cli_complete", { id: event.payload, result: result ?? null });
+            } catch (error) {
+              await invoke("local_cli_complete", { id: event.payload, error: String(error) });
+            }
+          }).catch(error => console.error("CLI result delivery failed", String(error)));
+        });
+        try { await invoke("local_cli_register", { methods }); }
+        catch (error) { unlisten(); throw error; }
+        return () => { disposed = true; unlisten(); };
+      },
+      async openVaultPath(path) {
+        const vault = await loadVault(path);
+        await invoke("save_app_settings", { settings: { vaultPath: path } satisfies AppSettings });
+        return vault;
+      },
+      document: (operation, root, params) => invoke("local_cli_document", { ...params, operation, root, path: params.path ?? "" }),
+      native(method, params) {
+        switch (method) {
+          case "library.add_folder": return invoke("library_add_path", { path: params.path });
+          case "typewords.status": return invoke("typewords_status");
+          case "typewords.stop": return invoke("typewords_stop");
+          default: throw new Error("未开放的本机方法。");
+        }
+      }
+    },
     canOpenVault: true,
     openMobileSync: () => { window.dispatchEvent(new Event('open-mobile-sync')); },
     typewords: {

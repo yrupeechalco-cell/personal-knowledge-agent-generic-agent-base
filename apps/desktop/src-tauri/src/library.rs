@@ -371,6 +371,12 @@ fn add_root(data: &mut Library, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Explicit CLI path selection; registering a folder does not trigger a scan.
+#[tauri::command]
+pub async fn library_add_path(app: tauri::AppHandle, path: String) -> Result<Library, String> {
+    transaction(app, move |data| add_root(data, Path::new(&path))).await
+}
+
 #[tauri::command]
 pub async fn library_scan(app: tauri::AppHandle) -> Result<Library, String> {
     transaction(app, |data| { scan(data); Ok(()) }).await

@@ -5,3 +5,4 @@ export * from "./themeModel";
 export * from "./shortcutModel";
 
 export * from "./libraryModel";
+export * from "./localAutomation";

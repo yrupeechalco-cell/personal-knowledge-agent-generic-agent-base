@@ -48,6 +48,7 @@ export interface SettingsShortcutCommand {
 }
 
 interface AppSettingsDialogProps {
+  onOpenAutomation?(): void;
   activeSection: AppSettingsSection;
   agentModeOptions: AgentSelectOption[];
   appTheme: AppTheme;
@@ -228,6 +229,9 @@ export function AppSettingsDialog(props: AppSettingsDialogProps) {
               <SettingRow description={runtime(props.sourceName)} label={t("当前知识库")}>
                 <button onClick={props.onOpenStorage} type="button">{t("管理存储空间")}</button>
               </SettingRow>
+              {props.onOpenAutomation ? <SettingRow description="允许本机 Codex 通过 CLI 操作软件，原有 Agent 独立保留。" label="Codex CLI">
+                <button onClick={props.onOpenAutomation} type="button">管理连接</button>
+              </SettingRow> : null}
               <SettingRow description={t("保存侧栏宽度、显示状态和当前主视图。")} label={t("工作区布局")}>
                 <button onClick={props.onOpenLayouts} type="button">{t("管理布局")}</button>
               </SettingRow>

@@ -5,6 +5,7 @@ import { LanguageProvider } from "@knowledge-agent/ui";
 import { createDesktopWorkspaceAdapter } from "./desktopWorkspaceAdapter";
 import { DesktopUpdateNotifier } from "./DesktopUpdateNotifier";
 import { MobileSyncPanel } from "./MobileSyncPanel";
+import { LocalCliPanel } from "./LocalCliPanel";
 import "@knowledge-agent/workspace/styles.css";
 import "./desktop-update.css";
 
@@ -16,6 +17,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <KnowledgeWorkspace adapter={adapter} />
       <DesktopUpdateNotifier />
       <MobileSyncPanel />
+      <LocalCliPanel />
     </LanguageProvider>
   </React.StrictMode>
 );

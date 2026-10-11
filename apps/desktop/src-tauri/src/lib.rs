@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager, State};
 use zip::{write::SimpleFileOptions, ZipWriter};
 
 mod codex_bridge;
+mod local_cli;
 
 const TRASH_DIR: &str = ".knowledge-agent-trash";
 const TRASH_FILES_DIR: &str = "files";
@@ -956,14 +957,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(typewords::TypeWordsProcess::default())
         .manage(mobile_sync::MobileSyncState::default())
-        .setup(|app| { mobile_sync::restore(app.handle()); Ok(()) })
+        .manage(local_cli::LocalCliState::default())
+        .setup(|app| { mobile_sync::restore(app.handle()); local_cli::restore(app.handle()); Ok(()) })
         .manage(VaultWatcherState {
             watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
+            local_cli::local_cli_status, local_cli::local_cli_configure,
+            local_cli::local_cli_register, local_cli::local_cli_claim, local_cli::local_cli_complete,
+            local_cli::local_cli_document,
             mobile_sync::mobile_sync_status, mobile_sync::mobile_sync_enable, mobile_sync::mobile_sync_disable, mobile_sync::mobile_sync_choose_inbox,
             typewords::typewords_start, typewords::typewords_select_directory, typewords::typewords_use_bundled,
-            library::library_load, library::library_add_folder, library::library_scan,
+            typewords::typewords_status, typewords::typewords_stop,
+            library::library_load, library::library_add_folder, library::library_add_path, library::library_scan,
             library::library_update_root, library::library_save_review, library::library_export,
             library::library_configure, library::library_record_error, library::library_open_source,
             library::library_save_source, library::library_restore_source,
@@ -1009,7 +1015,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building knowledge agent desktop")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) { mobile_sync::shutdown(app); typewords::shutdown(app); }
+            if matches!(event, tauri::RunEvent::Exit) { local_cli::shutdown(app); mobile_sync::shutdown(app); typewords::shutdown(app); }
         });
 }
 

@@ -107,6 +107,7 @@ import { LibraryInbox } from "./LibraryInbox";
 import { DirectoryMap } from "./DirectoryMap";
 import { createLibraryAgentTools } from "./libraryAgentTools";
 import { LIBRARY_CHANGED } from "./useLibraryController";
+import { LOCAL_AUTOMATION_METHODS, runLocalAutomation, type AutomationContext, type LocalAutomationAdapter } from "./localAutomation";
 import type { LibraryAdapter } from "./libraryModel";
 import { TypeWordsPlugin } from "./plugins/TypeWordsPlugin";
 import { TypeWordsStartup } from "./plugins/TypeWordsStartup";
@@ -333,6 +334,7 @@ export interface CodexConnectionStatus {
 }
 
 export interface KnowledgeWorkspaceAdapter {
+  automation?: LocalAutomationAdapter;
   canOpenVault: boolean;
   openMobileSync?(): void;
   mobileLayout?: boolean;
@@ -3709,6 +3711,73 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
     void adapter.windowControls.toggleMaximize();
   }
 
+  const automationContextRef = useRef<AutomationContext | null>(null);
+  automationContextRef.current = {
+    adapter,
+    state: () => ({ sourceName: sourceNameRef.current, sourceKind: sourceKindRef.current,
+      view: centerMode, currentPath, theme: appTheme,
+      dirty: dirtyPathsRef.current.length > 0 || autoSaveInFlightRef.current || storageBusy }),
+    files: () => filesRef.current,
+    openVault: (vault) => {
+      filesRef.current = vault.files; sourceKindRef.current = vault.sourceKind; sourceNameRef.current = vault.sourceName;
+      applyLoadedVault(vault, "Codex CLI 已连接文件夹。", { preserveAgentSessions: true });
+    },
+    refresh: (vault) => {
+      if (sourceNameRef.current !== vault.sourceName || dirtyPathsRef.current.length > 0) {
+        setStatus("Codex CLI 已写入磁盘；当前界面有新改动，请保存或重新打开后查看。");
+        return;
+      }
+      filesRef.current = vault.files;
+      refreshLoadedVault(vault, "Codex CLI 操作已保存。");
+      if (adapter.listTrashEntries) void Promise.resolve(adapter.listTrashEntries()).then(setTrashEntries).catch(() => {});
+    },
+    show: (view, path) => {
+      if (view === "graph" || view === "bases") {
+        if (sourceKindRef.current === "structure") throw new Error("当前为文件浏览模式，请打开 Markdown 笔记库后使用此视图。");
+      }
+      switch (view) {
+        case "graph": setGraphPerspective("knowledge"); openGraphTab(); break;
+        case "files": openExplorerTab(); break;
+        case "canvas": openCanvasTab(); break;
+        case "library": openLibraryTab(); break;
+        case "typewords": openTypeWordsTab(); break;
+        case "explorer": openExplorerTab(); break;
+        case "bases": openBasesTab(); break;
+        case "trash": if (sourceKindRef.current !== "desktop") throw new Error("请先打开本地笔记库。"); openTrashTab(); break;
+        case "settings": openAppSettings(); break;
+        case "agent": setAgentPanelMode("docked"); break;
+        case "cli": adapter.automation?.openSettings(); break;
+        case "note": openNoteTab(path!); break;
+        case "slides": {
+          const target = path ?? currentPath;
+          if (!filesRef.current.some(file => file.path === target)) throw new Error("请先指定一篇现有笔记。");
+          setCurrentPath(target); setCenterMode("slides"); setActiveTabId(`slides:${target.toLowerCase()}`); break;
+        }
+        default: throw new Error("未知视图。");
+      }
+    },
+    filterGraph: setGraphFilter, setTheme: setAppTheme,
+    canvas: () => canvasDocumentRef.current,
+    canvasDirty: () => canvasDirtyRef.current || canvasSaveState === "saving",
+    setCanvas: (document) => {
+      canvasDocumentRef.current = document; canvasDirtyRef.current = false;
+      setCanvasDocument(document); setCanvasSaveState("saved");
+    },
+    setModel: (settings) => {
+      setModelSettings(settings);
+    }
+  };
+  useEffect(() => {
+    if (!adapter.automation) return;
+    let cancelled = false;
+    let dispose: (() => void) | undefined;
+    adapter.automation.connect(LOCAL_AUTOMATION_METHODS, (method, params) => {
+      if (cancelled || !automationContextRef.current) return Promise.reject(new Error("工作区已关闭。"));
+      return runLocalAutomation(automationContextRef.current, method, params);
+    }).then(stop => { if (cancelled) stop(); else dispose = stop; }).catch(error => setStatus(`CLI 接口未就绪：${String(error)}`));
+    return () => { cancelled = true; dispose?.(); };
+  }, [adapter]);
+
   return (
     <div ref={shellRef} className={shellClassName} style={shellStyle}>
       {isMobile ? <>
@@ -3841,6 +3910,7 @@ export function KnowledgeWorkspace({ adapter }: { adapter: KnowledgeWorkspaceAda
       ) : null}
 
       <AppSettingsDialog
+        onOpenAutomation={adapter.automation ? () => { setAppSettingsOpen(false); adapter.automation!.openSettings(); } : undefined}
         activeSection={appSettingsSection}
         agentModeOptions={localizedAgentModeOptions}
         appTheme={appTheme}

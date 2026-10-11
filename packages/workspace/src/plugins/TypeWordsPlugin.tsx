@@ -9,6 +9,11 @@ export function TypeWordsPlugin({ adapter }: { adapter?: TypeWordsAdapter }) {
   const [startupError, setStartupError] = useState("");
   const [selecting, setSelecting] = useState(false);
   useEffect(() => {
+    const refresh = () => { setEnabled(isTypeWordsEnabled()); setAttempt(value => value + 1); };
+    window.addEventListener("typewords-preference-changed", refresh);
+    return () => window.removeEventListener("typewords-preference-changed", refresh);
+  }, []);
+  useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     let disposed = false;

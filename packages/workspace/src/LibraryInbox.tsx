@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookOpen, FileText, FolderPlus, FolderSearch, Lightbulb, Pause, Play, RefreshCw, Search, Sparkles } from "lucide-react";
 import type { ModelRequest } from "@knowledge-agent/agent";
 import { categoriesOf, categoryTree, hasCategory, isAnalysisStale, pendingDocuments, searchLibrary, type LibraryAdapter, type LibraryFilter } from "./libraryModel";
@@ -12,6 +12,15 @@ const STATUS = { pending: "待整理", reviewed: "已整理", ignored: "已忽�
 export function LibraryInbox({ adapter, runModel, model, modelReady, visible, suspended = false }: Props) {
   const [detailDirty, setDetailDirty] = useState(false);
   const { data, busy, error, notice, progress, autoScan, setAutoScan, operate, configure } = useLibraryController(adapter, runModel, model, modelReady, detailDirty, suspended);
+  useEffect(() => {
+    const guard = (event: Event) => {
+      const detail = (event as CustomEvent<{ reason: string; method: string }>).detail;
+      if (detailDirty) detail.reason = "资料编辑器有未保存的分类或正文，请先保存再执行 CLI 修改。";
+      else if (busy && /^(library|cards)\./.test(detail.method)) detail.reason = "文件知识库正在处理另一项操作，请稍后重试。";
+    };
+    window.addEventListener("knowledge-cli-before-change", guard);
+    return () => window.removeEventListener("knowledge-cli-before-change", guard);
+  }, [detailDirty, busy]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [selected, setSelected] = useState("");
