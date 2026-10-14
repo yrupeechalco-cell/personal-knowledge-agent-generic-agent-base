@@ -513,6 +513,7 @@ export function KnowledgeCanvas({
       id: "group:" + group.id, type: "topic", position: { x: group.x, y: group.y },
       width: group.width, height: group.height,
       style: { width: group.width, height: group.height }, zIndex: -1,
+      selectable: false,
       selected: selectedGroupId === group.id, dragHandle: ".canvas-group-header",
       data: { content: <div className={`canvas-group${selectedGroupId === group.id ? " is-selected" : ""}`}>
         <div className="canvas-group-header"><Group size={14}/><input className="nodrag"
@@ -693,9 +694,15 @@ export function KnowledgeCanvas({
         }}>
         <ReactFlow<CanvasFlowNode, Edge> key={document.id} nodes={flowNodes} edges={flowEdges} nodeTypes={FLOW_NODE_TYPES}
           onInit={instance => { flowRef.current = instance; }}
-          onNodesChange={changeNodes} onNodeDragStart={beginGesture} onNodeDragStop={finishGesture}
+          onNodesChange={changeNodes} onNodeDragStart={(_, node) => {
+            beginGesture();
+            if (node.type === "topic") { setSelectedGroupId(node.id.slice(6)); setSelectedCardIds([]); setSelectedConnectionId(null); }
+          }} onNodeDragStop={finishGesture}
           onSelectionDragStart={beginGesture} onSelectionDragStop={finishGesture}
-          onNodeClick={(_, node) => { if (connectSourceId && node.id.startsWith("card:") && node.id.slice(5) !== connectSourceId) createConnection(connectSourceId, node.id.slice(5)); }}
+          onNodeClick={(_, node) => {
+            if (node.type === "topic") { setSelectedGroupId(node.id.slice(6)); setSelectedCardIds([]); setSelectedConnectionId(null); }
+            else if (connectSourceId && node.id.slice(5) !== connectSourceId) createConnection(connectSourceId, node.id.slice(5));
+          }}
           onConnect={connection => createConnection(connection.source.slice(5), connection.target.slice(5))}
           onEdgeClick={(_, edge) => { setSelectedConnectionId(edge.id); setSelectedCardIds([]); setSelectedGroupId(null); }}
           onPaneClick={() => { setSelectedCardIds([]); setSelectedGroupId(null); setSelectedConnectionId(null); setConnectSourceId(null); }}

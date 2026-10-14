@@ -114,3 +114,18 @@ test('pan, zoom, snap, card deletion undo and empty-canvas creation',async({page
   await expect(page.getByRole('article')).toHaveCount(3);
   expect((await snapshot(page)).cards.map(c=>c.type)).toEqual(['text','table','note']);
 });
+
+test('selecting a card inside a group never moves or deletes unselected members',async({page})=>{
+  await page.goto('/'); await expect(card(page,'a')).toBeVisible();
+  await page.mouse.move(100,190); await page.mouse.down(); await page.mouse.move(420,400,{steps:12}); await page.mouse.up();
+  await expect(page.locator('.react-flow__node-card.selected')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node-topic.selected')).toHaveCount(0);
+  await drag(page,card(page,'a').locator('.canvas-card-header'),50,40);
+  expect((await snapshot(page)).cards.find(c=>c.id==='b').x).toBe(530);
+  expect((await snapshot(page)).groups[0].x).toBe(70);
+  await page.getByTitle('删除所选内容').click();
+  expect((await snapshot(page)).cards.map(c=>c.id)).toEqual(['b','c']);
+  expect((await snapshot(page)).groups[0].cardIds).toEqual(['b']);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect(page.getByRole('article')).toHaveCount(3);
+});
