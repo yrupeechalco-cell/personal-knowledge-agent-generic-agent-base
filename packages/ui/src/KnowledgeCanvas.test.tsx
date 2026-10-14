@@ -2,14 +2,19 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "./localization";
 import {
   KnowledgeCanvas,
   createEmptyCanvasDocument,
   normalizeCanvasDocument,
+  moveCanvasNodes,
+  arrangeCanvasCards,
   type KnowledgeCanvasDocument
 } from "./KnowledgeCanvas";
+
+beforeAll(() => vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }));
+afterAll(() => vi.unstubAllGlobals());
 
 describe("knowledge canvas document", () => {
   it("starts blank instead of injecting example cards", () => {
@@ -84,5 +89,35 @@ describe("knowledge canvas document", () => {
     expect(screen.getByPlaceholderText("写下观点、问题或结论…")).not.toBeNull();
     expect(screen.getByText("Research/Claim.md")).not.toBeNull();
     expect(screen.getByRole("table")).not.toBeNull();
+  });
+
+  it("moves grouped cards exactly once when a group and its member are dragged together", () => {
+    const document = normalizeCanvasDocument({ cards: [
+      { id: "a", type: "text", x: 50, y: 60, width: 260, height: 170, title: "A" },
+      { id: "b", type: "note", x: 350, y: 60, width: 300, height: 200, title: "B", notePath: "B.md" }
+    ], groups: [{ id: "g", x: 0, y: 0, width: 700, height: 300, cardIds: ["a", "b"], title: "Group" }] });
+    const moved = moveCanvasNodes(document, [
+      { type: "position", id: "group:g", position: { x: 100, y: 200 } },
+      { type: "position", id: "card:a", position: { x: 150, y: 260 } }
+    ]);
+    expect(moved.cards.map(card => [card.x, card.y])).toEqual([[150, 260], [450, 260]]);
+    expect(document.cards[0]?.x).toBe(50);
+    expect(moved.cards[1]?.notePath).toBe("B.md");
+    expect(moveCanvasNodes(document, [{ type: "dimensions", id: "card:a", dimensions: { width: 1, height: 1 } }])).toBe(document);
+  });
+
+  it("arranges without losing old v1 contents, relationships, and source links", () => {
+    const document = normalizeCanvasDocument({ cards: [
+      { id: "a", type: "text", x: 0, y: 0, width: 260, height: 170, title: "A", text: "Keep this" },
+      { id: "b", type: "note", x: 0, y: 0, width: 300, height: 200, title: "B", notePath: "B.md" }
+    ], connections: [{ id: "e", sourceId: "a", targetId: "b", relationship: "references", label: "source" }],
+    groups: [{ id: "g", x: -10, y: -10, width: 500, height: 300, cardIds: ["a", "b"], title: "G" }] });
+    const arranged = arrangeCanvasCards(document);
+    expect(arranged.cards[1]!.x).toBeGreaterThan(arranged.cards[0]!.x + arranged.cards[0]!.width);
+    expect(arranged.cards[0]?.text).toBe("Keep this");
+    expect(arranged.cards[1]?.notePath).toBe("B.md");
+    expect(arranged.connections).toEqual(document.connections);
+    expect(arranged.groups[0]?.cardIds).toEqual(["a", "b"]);
+    expect(normalizeCanvasDocument(JSON.parse(JSON.stringify(arranged)))).toEqual(arranged);
   });
 });

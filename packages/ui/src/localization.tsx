@@ -6,6 +6,20 @@ export type TranslationValues = Record<string, string | number>;
 const LOCALE_STORAGE_KEY = "knowledge-agent.locale";
 
 const ENGLISH_MESSAGES: Record<string, string> = {
+  "画布控制": "Canvas controls",
+  "画布小地图": "Canvas minimap",
+  "选择与框选": "Select and box select",
+  "平移画布": "Pan canvas",
+  "选择": "Select",
+  "平移": "Pan",
+  "整理布局（可撤销）": "Arrange layout (undoable)",
+  "整理布局": "Arrange",
+  "吸附网格": "Snap to grid",
+  "画布编辑区": "Canvas editor",
+  "连入此卡片": "Connect to this card",
+  "从此卡片连出": "Connect from this card",
+  "双击打开原笔记": "Double-click to open original note",
+  "拖动空白处框选 · 空格拖动平移 · 滚轮缩放 · 拖动卡片两侧圆点连线": "Drag to select · Space + drag to pan · Scroll to zoom · Drag side handles to connect",
   "笔记统计": "Note statistics",
   "{count} 字": "{count} words",
   "{count} 字符": "{count} characters",

@@ -1,0 +1,116 @@
+import { test, expect } from '@playwright/test';
+const snapshot = page => page.evaluate(() => JSON.parse(localStorage.getItem('canvas-test')));
+const card = (page,id) => page.locator(`[data-id="card:${id}"]`);
+async function drag(page, locator, dx, dy) {
+  const bounds = await locator.boundingBox();
+  const x = bounds.x + Math.min(10,bounds.width/2), y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x,y); await page.mouse.down(); await page.mouse.move(x+dx,y+dy,{steps:12}); await page.mouse.up();
+}
+test('old canvas, editing, move/resize/undo, links, layout and local persistence work offline', async ({page}, info) => {
+  const errors=[]; page.on('pageerror',error=>errors.push(error.message));
+  await page.route('**/*',route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+  await page.goto('/');
+  await expect(page.getByRole('article')).toHaveCount(3);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(card(page,'a')).toBeVisible();
+  await card(page,'a').locator('textarea').fill('保留原件，通过画布建立关系');
+  await card(page,'a').locator('textarea').blur();
+  const before = await snapshot(page);
+  await drag(page,card(page,'a').locator('.canvas-card-header'),60,40);
+  await expect.poll(async()=> (await snapshot(page)).cards[0].x).toBeGreaterThan(before.cards[0].x+40);
+  const movedX = (await snapshot(page)).cards[0].x;
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).cards[0].x).toBe(before.cards[0].x);
+  await page.getByTitle('重做',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).cards[0].x).toBe(movedX);
+  // Select then resize; it must stay in the same v1 model and form one undo step.
+  await card(page,'a').locator('.canvas-card-header').click({position:{x:10,y:15}});
+  const sizeBefore = (await snapshot(page)).cards[0];
+  await drag(page, card(page,'a').locator('.react-flow__resize-control.handle.bottom.right'),50,35);
+  await expect.poll(async()=> (await snapshot(page)).cards[0].width).toBeGreaterThan(sizeBefore.width+35);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).cards[0].width).toBe(sizeBefore.width);
+  // Connect source handle to target, and edit semantic relationship.
+  await card(page,'b').locator('.react-flow__handle-right').dragTo(card(page,'c').locator('.react-flow__handle-left'));
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  const latest = (await snapshot(page)).connections.at(-1);
+  const edgePoint = await page.locator(`[data-id="${latest.id}"] .react-flow__edge-interaction`).evaluate(path => {
+    const point = path.getPointAtLength(path.getTotalLength() / 2);
+    const screen = new DOMPoint(point.x,point.y).matrixTransform(path.getScreenCTM());
+    return {x:screen.x,y:screen.y};
+  });
+  await page.mouse.click(edgePoint.x,edgePoint.y);
+  await page.getByLabel('关系',{exact:true}).selectOption('supports');
+  await expect.poll(async()=> (await snapshot(page)).connections.at(-1).relationship).toBe('supports');
+  await page.getByTitle('关闭',{exact:true}).click();
+  const preArrange = await snapshot(page);
+  await page.getByTitle('整理布局（可撤销）').click();
+  await expect.poll(async()=> (await snapshot(page)).cards[1].x).not.toBe(preArrange.cards[1].x);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).cards.map(c=>[c.x,c.y])).toEqual(preArrange.cards.map(c=>[c.x,c.y]));
+  await card(page,'b').locator('.canvas-note-card-body').dblclick();
+  await expect(page.getByTestId('opened')).toHaveText('案例/资料来源.md');
+  const saved = await snapshot(page); await page.reload();
+  await expect(page.getByRole('article')).toHaveCount(3);
+  expect((await snapshot(page)).cards).toEqual(saved.cards);
+  expect((await snapshot(page)).connections).toEqual(saved.connections);
+  await page.screenshot({path:info.outputPath('canvas-light.png')});
+  await page.getByText('切换主题',{exact:true}).click();
+  await page.screenshot({path:info.outputPath('canvas-dark.png')});
+  await page.setViewportSize({width:600,height:820});
+  await expect(page.getByTitle('添加文本卡片')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+test('box selection, grouped dragging, deletion undo, note drop, and read-only mode',async({page})=>{
+  await page.goto('/'); await expect(card(page,'a')).toBeVisible();
+  await page.mouse.move(100,180); await page.mouse.down(); await page.mouse.move(870,410,{steps:12}); await page.mouse.up();
+  await expect(page.getByTitle('将所选卡片组成主题分组')).toBeEnabled();
+  await page.getByTitle('将所选卡片组成主题分组').click();
+  const before = await snapshot(page), g = before.groups.at(-1);
+  await drag(page,page.locator(`[data-id="group:${g.id}"] .canvas-group-header`),30,30);
+  await expect.poll(async()=> (await snapshot(page)).cards[0].x).toBeGreaterThan(before.cards[0].x+20);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).cards[0].x).toBe(before.cards[0].x);
+  await page.getByTitle('删除所选内容').click();
+  await expect.poll(async()=> (await snapshot(page)).groups.length).toBe(1);
+  expect((await snapshot(page)).cards).toHaveLength(3);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).groups.length).toBe(2);
+  await page.getByTitle('添加知识库笔记').click();
+  await page.locator('.canvas-note-picker-list button').dragTo(page.locator('.react-flow__pane'),{targetPosition:{x:1000,y:500}});
+  await expect(page.getByRole('article')).toHaveCount(4);
+  await page.goto('/?readonly'); await expect(page.getByTitle('添加文本卡片')).toBeDisabled();
+  const readOnly = await snapshot(page);
+  await drag(page,card(page,'a').locator('.canvas-card-header'),50,50);
+  expect((await snapshot(page)).cards).toEqual(readOnly.cards);
+  await expect(card(page,'a').locator('textarea')).toBeDisabled();
+});
+
+test('pan, zoom, snap, card deletion undo and empty-canvas creation',async({page})=>{
+  await page.goto('/'); await expect(card(page,'a')).toBeVisible();
+  await page.getByTitle('平移画布',{exact:true}).click();
+  await page.mouse.move(1000,200); await page.mouse.down(); await page.mouse.move(1080,260,{steps:12}); await page.mouse.up();
+  await expect.poll(async()=> (await snapshot(page)).viewport.x).toBeGreaterThan(60);
+  await page.getByRole('button',{name:'放大',exact:true}).click();
+  await expect.poll(async()=> (await snapshot(page)).viewport.scale).toBeGreaterThan(1);
+  await page.getByTitle('选择与框选').click();
+  await page.getByTitle('吸附网格').click();
+  await drag(page,card(page,'a').locator('.canvas-card-header'),53,47);
+  const moved = (await snapshot(page)).cards[0];
+  expect(moved.x % 20).toBe(0); expect(moved.y % 20).toBe(0);
+  // A card removed from the canvas does not remove its source or the other cards.
+  await page.getByTitle('删除所选内容').click();
+  await expect(page.getByRole('article')).toHaveCount(2);
+  expect((await snapshot(page)).connections).toHaveLength(0);
+  await page.getByTitle('撤销',{exact:true}).click();
+  await expect(page.getByRole('article')).toHaveCount(3);
+  expect((await snapshot(page)).connections).toHaveLength(1);
+  await page.evaluate(()=>localStorage.setItem('canvas-test',JSON.stringify({version:1,id:'empty',cards:[],groups:[],connections:[],viewport:{x:0,y:0,scale:1}})));
+  await page.reload();
+  await page.getByTitle('添加文本卡片').click();
+  await page.getByTitle('添加表格卡片').click();
+  await page.getByTitle('添加知识库笔记').click();
+  await page.locator('.canvas-note-picker-list button').click();
+  await expect(page.getByRole('article')).toHaveCount(3);
+  expect((await snapshot(page)).cards.map(c=>c.type)).toEqual(['text','table','note']);
+});

@@ -88,6 +88,17 @@ jobs:
       - name: Test offline cross-file retrieval
         run: npm run test:retrieval
 
+      - name: Test offline canvas interactions and v1 compatibility
+        run: npm run test:canvas
+
+      - name: Save canvas browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-browser-evidence
+          path: .artifacts/canvas-browser-results
+          if-no-files-found: ignore
+
       - name: Save retrieval browser test evidence
         if: always()
         uses: actions/upload-artifact@v4

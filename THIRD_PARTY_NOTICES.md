@@ -1,5 +1,14 @@
 # 第三方来源与本轮代码说明
 
+## React Flow 画布（0.6.0）
+
+- 核心组件：`@xyflow/react` **12.12.0**，作者 **webkid GmbH / xyflow 团队**。
+- 上游仓库：<https://github.com/xyflow/xyflow>；文档：<https://reactflow.dev>。
+- 来源：官方 npm 发布包；完整性摘要、系统库及依赖版本保存在根目录 `package-lock.json`。
+- 采用 MIT 许可证，未使用付费 Pro 示例或模板。原始许可证及本次运行依赖许可集中保存在 `docs/licenses/react-flow-dependencies.txt`，构建时随安装包复制到 `mobile-web/licenses/`。
+- `KnowledgeCanvas.tsx` 中的知识卡片、表格、笔记引用、关系语义、v1 格式适配、布局与撤销集成为本项目代码；React Flow 提供拖动、选择、连接点、缩放和小地图基础能力。
+- 画布资源随桌面安装包提供，本地使用不依赖 React Flow 在线服务。在线协作、云同步不随此组件自动获得。
+
 ## TypeWords
 
 - 项目：TypeWords，英语单词和文章打字练习软件。

@@ -1,5 +1,8 @@
 import {
   BoxSelect,
+  Hand,
+  LayoutGrid,
+  Magnet,
   FileText,
   Group,
   Link2,
@@ -19,9 +22,14 @@ import {
   useRef,
   useState,
   type FocusEvent,
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent
+  type ReactNode
 } from "react";
+import {
+  ReactFlow, Background, Controls, MiniMap, Handle, Position, NodeResizer,
+  MarkerType, SelectionMode, type Node, type NodeProps, type NodeChange,
+  type Edge, type ReactFlowInstance
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { useLocalization } from "./localization";
 
 export type CanvasCardType = "text" | "table" | "note";
@@ -99,15 +107,13 @@ interface KnowledgeCanvasProps {
   onOpenNote(path: string): void;
 }
 
-interface DragState {
-  startClientX: number;
-  startClientY: number;
-  startDocument: KnowledgeCanvasDocument;
-  cardPositions: Map<string, { x: number; y: number }>;
-  groupId?: string;
-  groupPosition?: { x: number; y: number };
-  moved: boolean;
-}
+type CanvasFlowNode = Node<{ content: ReactNode }, "card" | "topic">;
+function CanvasFlowNodeView({ data }: NodeProps<CanvasFlowNode>) { return <>{data.content}</>; }
+const FLOW_NODE_TYPES = { card: CanvasFlowNodeView, topic: CanvasFlowNodeView };
+const edgeColors: Record<CanvasRelationship, string> = {
+  relates: "#8b819f", supports: "#5b9b7e", contradicts: "#bd676e", depends: "#af8959", references: "#9270c7"
+};
+const NOTE_DRAG_TYPE = "application/x-knowledge-note";
 
 const MIN_SCALE = 0.28;
 const MAX_SCALE = 2.4;
@@ -184,8 +190,10 @@ export function KnowledgeCanvas({
   const { t } = useLocalization();
   const stageRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef(document);
-  const dragRef = useRef<DragState | null>(null);
-  const panRef = useRef<{ x: number; y: number; viewport: CanvasViewport } | null>(null);
+  const gestureRef = useRef<KnowledgeCanvasDocument | null>(null);
+  const flowRef = useRef<ReactFlowInstance<CanvasFlowNode, Edge> | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  const [snap, setSnap] = useState(false);
   const editSnapshotRef = useRef<KnowledgeCanvasDocument | null>(null);
   const undoStackRef = useRef<KnowledgeCanvasDocument[]>([]);
   const redoStackRef = useRef<KnowledgeCanvasDocument[]>([]);
@@ -215,7 +223,8 @@ export function KnowledgeCanvas({
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target;
       const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      if (!stageRef.current?.parentElement?.contains(target as globalThis.Node)) return;
+      if (!editing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) redo();
         else undo();
@@ -332,15 +341,15 @@ export function KnowledgeCanvas({
     setSelectedCardIds([card.id]);
   }
 
-  function addNoteCard(note: CanvasNoteReference) {
+  function addNoteCard(note: CanvasNoteReference, position?: { x: number; y: number }) {
     if (readOnly) return;
     const center = viewportCenter();
     const offset = documentRef.current.cards.length % 5;
     const card: CanvasCard = {
       id: createId("note"),
       type: "note",
-      x: center.x - 150 + offset * 24,
-      y: center.y - 100 + offset * 18,
+      x: position?.x ?? center.x - 150 + offset * 24,
+      y: position?.y ?? center.y - 100 + offset * 18,
       width: 300,
       height: 200,
       title: note.title,
@@ -367,117 +376,56 @@ export function KnowledgeCanvas({
   function finishEdit() {
     const snapshot = editSnapshotRef.current;
     editSnapshotRef.current = null;
-    if (!snapshot || snapshot.updatedAt === documentRef.current.updatedAt) return;
+    if (!snapshot || snapshot === documentRef.current) return;
     pushUndo(snapshot);
     redoStackRef.current = [];
     setHistoryRevision((value) => value + 1);
   }
 
-  function selectCard(event: ReactPointerEvent, cardId: string) {
-    if (connectSourceId && connectSourceId !== cardId) {
-      createConnection(connectSourceId, cardId);
-      return;
+  function beginGesture() {
+    if (!gestureRef.current) gestureRef.current = documentRef.current;
+  }
+  function finishGesture() {
+    const before = gestureRef.current;
+    gestureRef.current = null;
+    if (before && (before.cards !== documentRef.current.cards || before.groups !== documentRef.current.groups)) {
+      pushUndo(before);
+      redoStackRef.current = [];
+      setHistoryRevision((value) => value + 1);
     }
-    setSelectedConnectionId(null);
-    setSelectedGroupId(null);
-    setSelectedCardIds((current) => {
-      if (event.shiftKey || event.ctrlKey || event.metaKey) {
-        return current.includes(cardId) ? current.filter((id) => id !== cardId) : [...current, cardId];
-      }
-      return current.includes(cardId) ? current : [cardId];
-    });
   }
-
-  function beginCardDrag(event: ReactPointerEvent<HTMLDivElement>, cardId: string) {
-    if (readOnly || event.button !== 0) return;
-    event.stopPropagation();
-    selectCard(event, cardId);
-    if (connectSourceId && connectSourceId !== cardId) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const selected = selectedCardIds.includes(cardId) ? selectedCardIds : [cardId];
+  function changeNodes(changes: NodeChange<CanvasFlowNode>[]) {
+    const selection = changes.filter(change => change.type === "select");
+    if (selection.length) {
+      setSelectedCardIds(previous => {
+        const ids = new Set(previous);
+        for (const change of selection) {
+          if (change.type !== "select" || !change.id.startsWith("card:")) continue;
+          const id = change.id.slice(5);
+          if (change.selected) ids.add(id); else ids.delete(id);
+        }
+        return [...ids];
+      });
+      setSelectedGroupId(previous => {
+        let id = previous;
+        for (const change of selection) {
+          if (change.type !== "select" || !change.id.startsWith("group:")) continue;
+          if (change.selected) id = change.id.slice(6);
+          else if (id === change.id.slice(6)) id = null;
+        }
+        return id;
+      });
+      if (selection.some(change => change.type === "select" && change.selected)) setSelectedConnectionId(null);
+    }
+    if (readOnly) return;
     const current = documentRef.current;
-    dragRef.current = {
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startDocument: current,
-      cardPositions: new Map(
-        current.cards
-          .filter((card) => selected.includes(card.id))
-          .map((card) => [card.id, { x: card.x, y: card.y }])
-      ),
-      moved: false
-    };
+    const moved = moveCanvasNodes(current, changes);
+    if (moved !== current) publish(moved, !gestureRef.current);
   }
-
-  function moveCards(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const viewport = drag.startDocument.viewport;
-    const dx = (event.clientX - drag.startClientX) / viewport.scale;
-    const dy = (event.clientY - drag.startClientY) / viewport.scale;
-    if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
-    const current = documentRef.current;
-    publish({
-      ...current,
-      cards: current.cards.map((card) => {
-        const start = drag.cardPositions.get(card.id);
-        return start ? { ...card, x: start.x + dx, y: start.y + dy } : card;
-      })
-    });
-  }
-
-  function finishDrag() {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag?.moved) return;
-    pushUndo(drag.startDocument);
-    redoStackRef.current = [];
-    setHistoryRevision((value) => value + 1);
-  }
-
-  function beginGroupDrag(event: ReactPointerEvent<HTMLDivElement>, group: CanvasGroup) {
-    if (readOnly || event.button !== 0) return;
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setSelectedGroupId(group.id);
-    setSelectedCardIds([]);
-    setSelectedConnectionId(null);
-    const current = documentRef.current;
-    dragRef.current = {
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startDocument: current,
-      groupId: group.id,
-      groupPosition: { x: group.x, y: group.y },
-      cardPositions: new Map(
-        current.cards
-          .filter((card) => group.cardIds.includes(card.id))
-          .map((card) => [card.id, { x: card.x, y: card.y }])
-      ),
-      moved: false
-    };
-  }
-
-  function moveGroup(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag?.groupId || !drag.groupPosition) return;
-    const scale = drag.startDocument.viewport.scale;
-    const dx = (event.clientX - drag.startClientX) / scale;
-    const dy = (event.clientY - drag.startClientY) / scale;
-    if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
-    const current = documentRef.current;
-    publish({
-      ...current,
-      groups: current.groups.map((group) => (
-        group.id === drag.groupId
-          ? { ...group, x: drag.groupPosition!.x + dx, y: drag.groupPosition!.y + dy }
-          : group
-      )),
-      cards: current.cards.map((card) => {
-        const start = drag.cardPositions.get(card.id);
-        return start ? { ...card, x: start.x + dx, y: start.y + dy } : card;
-      })
-    });
+  function arrangeCards() {
+    if (readOnly || documentRef.current.cards.length < 2) return;
+    publish(arrangeCanvasCards(documentRef.current), true);
+    requestAnimationFrame(() => void flowRef.current?.fitView({ padding: 0.15, maxZoom: 1 }));
   }
 
   function createConnection(sourceId: string, targetId: string) {
@@ -557,91 +505,79 @@ export function KnowledgeCanvas({
   }
 
   function fitToContent() {
-    const stage = stageRef.current;
-    if (!stage) return;
-    const items = [
-      ...documentRef.current.cards.map((card) => ({ x: card.x, y: card.y, width: card.width, height: card.height })),
-      ...documentRef.current.groups
-    ];
-    if (items.length === 0) {
-      publish({ ...documentRef.current, viewport: { x: 0, y: 0, scale: 1 } });
-      return;
-    }
-    const left = Math.min(...items.map((item) => item.x));
-    const top = Math.min(...items.map((item) => item.y));
-    const right = Math.max(...items.map((item) => item.x + item.width));
-    const bottom = Math.max(...items.map((item) => item.y + item.height));
-    const padding = 110;
-    const scale = clamp(Math.min(
-      (stage.clientWidth - padding * 2) / Math.max(1, right - left),
-      (stage.clientHeight - padding * 2) / Math.max(1, bottom - top)
-    ), MIN_SCALE, 1.3);
-    publish({
-      ...documentRef.current,
-      viewport: {
-        scale,
-        x: (stage.clientWidth - (right - left) * scale) / 2 - left * scale,
-        y: (stage.clientHeight - (bottom - top) * scale) / 2 - top * scale
-      }
-    });
+    void flowRef.current?.fitView({ padding: 0.15, maxZoom: 1.3 });
   }
 
-  function handleStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || event.target !== event.currentTarget) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setSelectedCardIds([]);
-    setSelectedConnectionId(null);
-    setSelectedGroupId(null);
-    setConnectSourceId(null);
-    panRef.current = {
-      x: event.clientX,
-      y: event.clientY,
-      viewport: documentRef.current.viewport
-    };
-  }
-
-  function handleStagePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const pan = panRef.current;
-    if (!pan) return;
-    publish({
-      ...documentRef.current,
-      viewport: {
-        ...pan.viewport,
-        x: pan.viewport.x + event.clientX - pan.x,
-        y: pan.viewport.y + event.clientY - pan.y
-      }
-    });
-  }
-
-  function handleStagePointerUp() {
-    panRef.current = null;
-  }
-
-  function handleWheel(event: WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-    const bounds = stage.getBoundingClientRect();
-    const current = documentRef.current;
-    const pointerX = event.clientX - bounds.left;
-    const pointerY = event.clientY - bounds.top;
-    const worldX = (pointerX - current.viewport.x) / current.viewport.scale;
-    const worldY = (pointerY - current.viewport.y) / current.viewport.scale;
-    const factor = Math.exp(-event.deltaY * 0.0012);
-    const scale = clamp(current.viewport.scale * factor, MIN_SCALE, MAX_SCALE);
-    publish({
-      ...current,
-      viewport: {
-        scale,
-        x: pointerX - worldX * scale,
-        y: pointerY - worldY * scale
-      }
-    });
-  }
+  const flowNodes: CanvasFlowNode[] = [
+    ...document.groups.map((group): CanvasFlowNode => ({
+      id: "group:" + group.id, type: "topic", position: { x: group.x, y: group.y },
+      width: group.width, height: group.height,
+      style: { width: group.width, height: group.height }, zIndex: -1,
+      selected: selectedGroupId === group.id, dragHandle: ".canvas-group-header",
+      data: { content: <div className={`canvas-group${selectedGroupId === group.id ? " is-selected" : ""}`}>
+        <div className="canvas-group-header"><Group size={14}/><input className="nodrag"
+          value={group.title} disabled={readOnly} aria-label={t("分组名称")}
+          onFocus={beginEdit} onBlur={finishEdit}
+          onChange={event => publish({ ...documentRef.current, groups: documentRef.current.groups.map(item => item.id === group.id ? { ...item, title: event.target.value } : item) })}/>
+        </div>
+      </div> }
+    })),
+    ...document.cards.map((card): CanvasFlowNode => {
+      const selected = selectedCardIds.includes(card.id);
+      const note = card.notePath ? notesByPath.get(card.notePath) : undefined;
+      return {
+        id: "card:" + card.id, type: "card", position: { x: card.x, y: card.y },
+        width: card.width, height: card.height,
+        style: { width: card.width, height: card.height }, selected,
+        dragHandle: ".canvas-card-header", zIndex: 1,
+        data: { content: <>
+          <NodeResizer isVisible={selected && !readOnly} minWidth={CARD_MIN_WIDTH} minHeight={CARD_MIN_HEIGHT}
+            onResizeStart={beginGesture} onResizeEnd={finishGesture}/>
+          <Handle type="target" position={Position.Left} isConnectable={!readOnly} aria-label={t("连入此卡片")}/>
+          <article className={`canvas-card canvas-card-${card.type}${selected ? " is-selected" : ""}${connectSourceId === card.id ? " is-link-source" : ""}`}>
+            <div className="canvas-card-header">
+              {card.type === "text" ? <Type size={14}/> : card.type === "table" ? <Table2 size={14}/> : <FileText size={14}/>}
+              <input className="nodrag" value={card.type === "note" && note ? note.title : card.title}
+                disabled={readOnly || card.type === "note"} onFocus={beginEdit} onBlur={finishEdit}
+                onChange={event => updateCard(card.id, item => ({ ...item, title: event.target.value }))} aria-label={t("卡片标题")}/>
+              <button type="button" className="nodrag" disabled={readOnly} title={t("从此卡片建立连线")}
+                onClick={event => { event.stopPropagation(); setConnectSourceId(id => id === card.id ? null : card.id); }}><Link2 size={14}/></button>
+            </div>
+            {card.type === "text" ? <textarea className="nodrag nowheel" value={card.text ?? ""} disabled={readOnly}
+              onFocus={beginEdit} onBlur={finishEdit} onChange={event => updateCard(card.id, item => ({ ...item, text: event.target.value }))}
+              placeholder={t("写下观点、问题或结论…")}/> : null}
+            {card.type === "note" ? <button type="button" className="canvas-note-card-body nodrag nowheel"
+              title={t("双击打开原笔记")} onDoubleClick={() => card.notePath && onOpenNote(card.notePath)}>
+              <p>{note ? noteExcerpt(note.content) : t("原笔记已不存在")}</p>
+              <div>{(note?.tags ?? []).slice(0,4).map(tag => <span key={tag}>#{tag}</span>)}</div>
+              <small>{card.notePath}</small>
+            </button> : null}
+            {card.type === "table" ? <CanvasTableEditor card={card} readOnly={readOnly} onFocus={beginEdit} onBlur={finishEdit}
+              onChange={table => updateCard(card.id, item => ({ ...item, table }))}
+              onCommit={table => updateCard(card.id, item => ({ ...item, table }), true)}/> : null}
+          </article>
+          <Handle type="source" position={Position.Right} isConnectable={!readOnly} aria-label={t("从此卡片连出")}/>
+        </> }
+      };
+    })
+  ];
+  const flowEdges: Edge[] = document.connections.map(connection => ({
+    id: connection.id, source: "card:" + connection.sourceId, target: "card:" + connection.targetId,
+    label: connection.label || t(RELATIONSHIP_LABELS[connection.relationship]),
+    type: "smoothstep", selected: selectedConnectionId === connection.id,
+    markerEnd: { type: MarkerType.ArrowClosed, color: edgeColors[connection.relationship] },
+    style: { stroke: edgeColors[connection.relationship], strokeWidth: selectedConnectionId === connection.id ? 3 : 1.8,
+      strokeDasharray: connection.relationship === "contradicts" ? "5 4" : undefined },
+    interactionWidth: 24
+  }));
 
   return (
-    <section className="knowledge-canvas" aria-label={t("知识画布")}>
+    <section className="knowledge-canvas" aria-label={t("知识画布")} tabIndex={-1}>
       <div className="canvas-toolbar">
+        <div className="canvas-toolbar-group">
+          <button type="button" aria-pressed={!panMode} onClick={() => setPanMode(false)} title={t("选择与框选")}><BoxSelect size={15}/><span>{t("选择")}</span></button>
+          <button type="button" aria-pressed={panMode} onClick={() => setPanMode(true)} title={t("平移画布")}><Hand size={15}/><span>{t("平移")}</span></button>
+        </div>
         <div className="canvas-toolbar-group">
           <button type="button" onClick={addTextCard} disabled={readOnly} title={t("添加文本卡片")}>
             <Type size={15} />
@@ -687,6 +623,8 @@ export function KnowledgeCanvas({
           >
             <Redo2 size={15} />
           </button>
+          <button type="button" onClick={arrangeCards} disabled={readOnly || document.cards.length < 2} title={t("整理布局（可撤销）")}><LayoutGrid size={15}/><span>{t("整理布局")}</span></button>
+          <button type="button" onClick={() => setSnap(value => !value)} aria-pressed={snap} title={t("吸附网格")}><Magnet size={15}/></button>
           <button type="button" onClick={fitToContent} title={t("适应全部内容")}>
             <Maximize2 size={15} />
           </button>
@@ -732,7 +670,7 @@ export function KnowledgeCanvas({
           </label>
           <div className="canvas-note-picker-list">
             {filteredNotes.map((note) => (
-              <button type="button" key={note.path} onClick={() => addNoteCard(note)}>
+              <button type="button" key={note.path} draggable onDragStart={event => { event.dataTransfer.setData(NOTE_DRAG_TYPE, note.path); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addNoteCard(note)}>
                 <FileText size={14} />
                 <span>
                   <strong>{note.title}</strong>
@@ -745,228 +683,45 @@ export function KnowledgeCanvas({
         </aside>
       ) : null}
 
-      <div
-        ref={stageRef}
-        className={`canvas-stage${panRef.current ? " is-panning" : ""}${connectSourceId ? " is-connecting" : ""}`}
-        onPointerDown={handleStagePointerDown}
-        onPointerMove={handleStagePointerMove}
-        onPointerUp={handleStagePointerUp}
-        onPointerCancel={handleStagePointerUp}
-        onDoubleClick={(event) => {
-          if (event.target === event.currentTarget) addTextCard();
-        }}
-        onWheel={handleWheel}
-      >
-        {document.cards.length === 0 ? (
-          <div className="canvas-empty-state">
-            <BoxSelect size={28} />
-            <strong>{t("从卡片开始组织知识")}</strong>
-            <span>{t("添加文本、表格或真实笔记，再用有意义的连线表达关系。")}</span>
-          </div>
-        ) : null}
-        <div
-          className="canvas-world"
-          style={{
-            transform: `translate3d(${document.viewport.x}px, ${document.viewport.y}px, 0) scale(${document.viewport.scale})`
+      <div ref={stageRef} className="canvas-stage canvas-flow-stage" tabIndex={0} aria-label={t("画布编辑区")}
+        onDragOver={event => { if (event.dataTransfer.types.includes(NOTE_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+        onDrop={event => {
+          const note = notesByPath.get(event.dataTransfer.getData(NOTE_DRAG_TYPE));
+          if (!note || readOnly) return;
+          event.preventDefault();
+          addNoteCard(note, flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+        }}>
+        <ReactFlow<CanvasFlowNode, Edge> key={document.id} nodes={flowNodes} edges={flowEdges} nodeTypes={FLOW_NODE_TYPES}
+          onInit={instance => { flowRef.current = instance; }}
+          onNodesChange={changeNodes} onNodeDragStart={beginGesture} onNodeDragStop={finishGesture}
+          onSelectionDragStart={beginGesture} onSelectionDragStop={finishGesture}
+          onNodeClick={(_, node) => { if (connectSourceId && node.id.startsWith("card:") && node.id.slice(5) !== connectSourceId) createConnection(connectSourceId, node.id.slice(5)); }}
+          onConnect={connection => createConnection(connection.source.slice(5), connection.target.slice(5))}
+          onEdgeClick={(_, edge) => { setSelectedConnectionId(edge.id); setSelectedCardIds([]); setSelectedGroupId(null); }}
+          onPaneClick={() => { setSelectedCardIds([]); setSelectedGroupId(null); setSelectedConnectionId(null); setConnectSourceId(null); }}
+          viewport={{ x: document.viewport.x, y: document.viewport.y, zoom: document.viewport.scale }}
+          onViewportChange={viewport => {
+            const current = documentRef.current;
+            if (current.viewport.x !== viewport.x || current.viewport.y !== viewport.y || current.viewport.scale !== viewport.zoom)
+              publish({ ...current, viewport: { x: viewport.x, y: viewport.y, scale: viewport.zoom } });
           }}
-        >
-          <svg className="canvas-connections" aria-hidden="true">
-            <defs>
-              <marker id="canvas-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                <path d="M0,0 L8,4 L0,8 Z" />
-              </marker>
-            </defs>
-            {document.connections.map((connection) => {
-              const source = document.cards.find((card) => card.id === connection.sourceId);
-              const target = document.cards.find((card) => card.id === connection.targetId);
-              if (!source || !target) return null;
-              const line = connectionLine(source, target);
-              const selected = selectedConnectionId === connection.id;
-              return (
-                <g
-                  key={connection.id}
-                  className={`canvas-connection is-${connection.relationship}${selected ? " is-selected" : ""}`}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    setSelectedConnectionId(connection.id);
-                    setSelectedCardIds([]);
-                    setSelectedGroupId(null);
-                  }}
-                >
-                  <path className="canvas-connection-hit" d={line.path} />
-                  <path className="canvas-connection-line" d={line.path} markerEnd="url(#canvas-arrow)" />
-                  <g transform={`translate(${line.labelX} ${line.labelY})`}>
-                    <rect x={-42} y={-11} width={84} height={22} rx={5} />
-                    <text textAnchor="middle" dominantBaseline="central">{connection.label || RELATIONSHIP_LABELS[connection.relationship]}</text>
-                  </g>
-                </g>
-              );
-            })}
-          </svg>
-
-          {document.groups.map((group) => (
-            <div
-              key={group.id}
-              className={`canvas-group${selectedGroupId === group.id ? " is-selected" : ""}`}
-              style={{ left: group.x, top: group.y, width: group.width, height: group.height }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                setSelectedGroupId(group.id);
-                setSelectedCardIds([]);
-                setSelectedConnectionId(null);
-              }}
-            >
-              <div
-                className="canvas-group-header"
-                onPointerDown={(event) => beginGroupDrag(event, group)}
-                onPointerMove={moveGroup}
-                onPointerUp={finishDrag}
-                onPointerCancel={finishDrag}
-              >
-                <Group size={14} />
-                <input
-                  value={group.title}
-                  disabled={readOnly}
-                  onFocus={beginEdit}
-                  onBlur={finishEdit}
-                  onChange={(event) => {
-                    const current = documentRef.current;
-                    publish({
-                      ...current,
-                      groups: current.groups.map((item) => (
-                        item.id === group.id ? { ...item, title: event.target.value } : item
-                      ))
-                    });
-                  }}
-                  aria-label={t("分组名称")}
-                />
-              </div>
-            </div>
-          ))}
-
-          {document.cards.map((card) => {
-            const selected = selectedCardIds.includes(card.id);
-            const note = card.notePath ? notesByPath.get(card.notePath) : undefined;
-            return (
-              <article
-                key={card.id}
-                className={`canvas-card canvas-card-${card.type}${selected ? " is-selected" : ""}${connectSourceId === card.id ? " is-link-source" : ""}`}
-                style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  selectCard(event, card.id);
-                }}
-              >
-                <div
-                  className="canvas-card-header"
-                  onPointerDown={(event) => beginCardDrag(event, card.id)}
-                  onPointerMove={moveCards}
-                  onPointerUp={finishDrag}
-                  onPointerCancel={finishDrag}
-                >
-                  {card.type === "text" ? <Type size={14} /> : card.type === "table" ? <Table2 size={14} /> : <FileText size={14} />}
-                  <input
-                    value={card.type === "note" && note ? note.title : card.title}
-                    disabled={readOnly || card.type === "note"}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onFocus={beginEdit}
-                    onBlur={finishEdit}
-                    onChange={(event) => updateCard(card.id, (current) => ({ ...current, title: event.target.value }))}
-                    aria-label={t("卡片标题")}
-                  />
-                  <button
-                    type="button"
-                    className={connectSourceId === card.id ? "is-active" : ""}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setConnectSourceId((current) => current === card.id ? null : card.id);
-                    }}
-                    disabled={readOnly}
-                    title={t("从此卡片建立连线")}
-                  >
-                    <Link2 size={14} />
-                  </button>
-                </div>
-
-                {card.type === "text" ? (
-                  <textarea
-                    value={card.text ?? ""}
-                    disabled={readOnly}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onFocus={beginEdit}
-                    onBlur={finishEdit}
-                    onChange={(event) => updateCard(card.id, (current) => ({ ...current, text: event.target.value }))}
-                    placeholder={t("写下观点、问题或结论…")}
-                  />
-                ) : null}
-
-                {card.type === "note" ? (
-                  <button
-                    type="button"
-                    className="canvas-note-card-body"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onDoubleClick={() => card.notePath && onOpenNote(card.notePath)}
-                  >
-                    <p>{note ? noteExcerpt(note.content) : t("原笔记已不存在")}</p>
-                    <div>
-                      {(note?.tags ?? []).slice(0, 4).map((tag) => <span key={tag}>#{tag}</span>)}
-                    </div>
-                    <small>{card.notePath}</small>
-                  </button>
-                ) : null}
-
-                {card.type === "table" ? (
-                  <CanvasTableEditor
-                    card={card}
-                    readOnly={readOnly}
-                    onFocus={beginEdit}
-                    onBlur={finishEdit}
-                    onChange={(table) => updateCard(card.id, (current) => ({ ...current, table }))}
-                    onCommit={(table) => updateCard(card.id, (current) => ({ ...current, table }), true)}
-                  />
-                ) : null}
-
-                <button
-                  type="button"
-                  className="canvas-card-resize"
-                  disabled={readOnly}
-                  aria-label={t("调整卡片大小")}
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    const startX = event.clientX;
-                    const startY = event.clientY;
-                    const startWidth = card.width;
-                    const startHeight = card.height;
-                    const snapshot = documentRef.current;
-                    const target = event.currentTarget;
-                    target.setPointerCapture(event.pointerId);
-                    const move = (moveEvent: PointerEvent) => {
-                      const scale = documentRef.current.viewport.scale;
-                      updateCard(card.id, (current) => ({
-                        ...current,
-                        width: Math.max(CARD_MIN_WIDTH, startWidth + (moveEvent.clientX - startX) / scale),
-                        height: Math.max(CARD_MIN_HEIGHT, startHeight + (moveEvent.clientY - startY) / scale)
-                      }));
-                    };
-                    const finish = () => {
-                      target.removeEventListener("pointermove", move);
-                      target.removeEventListener("pointerup", finish);
-                      target.removeEventListener("pointercancel", finish);
-                      pushUndo(snapshot);
-                      redoStackRef.current = [];
-                      setHistoryRevision((value) => value + 1);
-                    };
-                    target.addEventListener("pointermove", move);
-                    target.addEventListener("pointerup", finish);
-                    target.addEventListener("pointercancel", finish);
-                  }}
-                />
-              </article>
-            );
-          })}
-        </div>
+          nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesReconnectable={false}
+          deleteKeyCode={null} selectionOnDrag={!panMode} selectionMode={SelectionMode.Partial}
+          panOnDrag={panMode ? true : [1, 2]} panActivationKeyCode="Space"
+          multiSelectionKeyCode={["Shift", "Meta", "Control"]} zoomOnDoubleClick={false}
+          minZoom={MIN_SCALE} maxZoom={MAX_SCALE} snapToGrid={snap} snapGrid={[20,20]} elevateNodesOnSelect={false}
+          ariaLabelConfig={{ 'controls.ariaLabel': t("画布控制"), 'controls.zoomIn.ariaLabel': t("放大"), 'controls.zoomOut.ariaLabel': t("缩小"), 'controls.fitView.ariaLabel': t("适应全部内容"), 'minimap.ariaLabel': t("画布小地图") }}
+          defaultEdgeOptions={{ zIndex: 0 }}>
+          <Background gap={20} size={1}/>
+          <Controls showInteractive={false}/>
+          <MiniMap pannable zoomable nodeColor={node => node.type === "topic" ? "#b9a7d2" : "#8b70bb"}/>
+        </ReactFlow>
+        {document.cards.length === 0 ? <div className="canvas-empty-state">
+          <BoxSelect size={28}/><strong>{t("从卡片开始组织知识")}</strong>
+          <span>{t("添加文本、表格或真实笔记，再用有意义的连线表达关系。")}</span>
+        </div> : null}
       </div>
+      <div className="canvas-help-bar"><span>{t("拖动空白处框选 · 空格拖动平移 · 滚轮缩放 · 拖动卡片两侧圆点连线")}</span><span>{Math.round(document.viewport.scale * 100)}%</span></div>
 
       {selectedConnection ? (
         <aside className="canvas-connection-inspector">
@@ -979,6 +734,7 @@ export function KnowledgeCanvas({
           <label>
             <span>{t("关系")}</span>
             <select
+              aria-label={t("关系")}
               value={selectedConnection.relationship}
               disabled={readOnly}
               onChange={(event) => {
@@ -1051,7 +807,7 @@ function CanvasTableEditor({
   const { t } = useLocalization();
   const table = card.table ?? { columns: [t("列 1")], rows: [[""]] };
   return (
-    <div className="canvas-table-wrap" onPointerDown={(event) => event.stopPropagation()}>
+    <div className="canvas-table-wrap nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
       <table>
         <thead>
           <tr>
@@ -1126,17 +882,52 @@ function CanvasTableEditor({
   );
 }
 
-function connectionLine(source: CanvasCard, target: CanvasCard) {
-  const sourceX = source.x + source.width / 2;
-  const sourceY = source.y + source.height / 2;
-  const targetX = target.x + target.width / 2;
-  const targetY = target.y + target.height / 2;
-  const curve = Math.max(42, Math.abs(targetX - sourceX) * 0.32);
-  return {
-    path: `M ${sourceX} ${sourceY} C ${sourceX + curve} ${sourceY}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`,
-    labelX: (sourceX + targetX) / 2,
-    labelY: (sourceY + targetY) / 2
-  };
+// The persisted v1 model remains independent from React Flow and usable by the CLI.
+export function moveCanvasNodes(current: KnowledgeCanvasDocument, changes: NodeChange<CanvasFlowNode>[]): KnowledgeCanvasDocument {
+  const positions = new Map<string, { x: number; y: number }>();
+  const dimensions = new Map<string, { width: number; height: number }>();
+  for (const change of changes) {
+    if (change.type === "position" && change.position) positions.set(change.id, change.position);
+    if (change.type === "dimensions" && change.dimensions && change.setAttributes) dimensions.set(change.id, change.dimensions);
+  }
+  if (!positions.size && !dimensions.size) return current;
+  let changed = false;
+  const groupDeltas = new Map<string, { x: number; y: number }>();
+  const groups = current.groups.map(group => {
+    const next = positions.get("group:" + group.id);
+    if (!next || (next.x === group.x && next.y === group.y)) return group;
+    changed = true;
+    for (const id of group.cardIds) if (!groupDeltas.has(id)) groupDeltas.set(id, { x: next.x - group.x, y: next.y - group.y });
+    return { ...group, ...next };
+  });
+  const cards = current.cards.map(card => {
+    const delta = groupDeltas.get(card.id);
+    const position = positions.get("card:" + card.id) ?? (delta ? { x: card.x + delta.x, y: card.y + delta.y } : card);
+    const size = dimensions.get("card:" + card.id) ?? card;
+    const width = Math.max(CARD_MIN_WIDTH, size.width), height = Math.max(CARD_MIN_HEIGHT, size.height);
+    if (position.x === card.x && position.y === card.y && width === card.width && height === card.height) return card;
+    changed = true;
+    return { ...card, x: position.x, y: position.y, width, height };
+  });
+  return changed ? { ...current, cards, groups } : current;
+}
+
+export function arrangeCanvasCards(document: KnowledgeCanvasDocument): KnowledgeCanvasDocument {
+  if (document.cards.length < 2) return document;
+  const columns = Math.ceil(Math.sqrt(document.cards.length));
+  const cellWidth = Math.max(...document.cards.map(card => card.width)) + 72;
+  const cellHeight = Math.max(...document.cards.map(card => card.height)) + 90;
+  const originX = Math.min(...document.cards.map(card => card.x));
+  const originY = Math.min(...document.cards.map(card => card.y));
+  const cards = document.cards.map((card, index) => ({ ...card, x: originX + (index % columns) * cellWidth, y: originY + Math.floor(index / columns) * cellHeight }));
+  const groups = document.groups.map(group => {
+    const members = cards.filter(card => group.cardIds.includes(card.id));
+    if (!members.length) return group;
+    const x = Math.min(...members.map(card => card.x)) - 30;
+    const y = Math.min(...members.map(card => card.y)) - 50;
+    return { ...group, x, y, width: Math.max(...members.map(card => card.x + card.width)) - x + 30, height: Math.max(...members.map(card => card.y + card.height)) - y + 30 };
+  });
+  return { ...document, cards, groups };
 }
 
 function normalizeCard(value: unknown): CanvasCard | null {

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { buildSafetyManifest } from "@knowledge-agent/core";
 import { createEmptyVault, KnowledgeWorkspace, type KnowledgeWorkspaceAdapter } from "./KnowledgeWorkspace";
 import { APP_THEME_STORAGE_KEY } from "./themeModel";
@@ -10,6 +10,9 @@ import { SHORTCUT_STORAGE_KEY } from "./shortcutModel";
 
 // These are workspace interaction tests; jsdom cannot create a WebGL context.
 vi.mock("./TagKnowledgeMap", () => ({ TagKnowledgeMap: () => null }));
+
+// Real layout/gestures are covered by scripts/browser-tests/canvas.spec.mjs.
+beforeEach(() => vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }));
 
 afterEach(() => {
   cleanup();
