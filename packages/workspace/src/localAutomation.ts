@@ -3,6 +3,7 @@ import { normalizeCanvasDocument, type KnowledgeCanvasDocument } from "@knowledg
 import type { KnowledgeWorkspaceAdapter, LoadedVault, ModelConnectionSettings } from "./KnowledgeWorkspace";
 import { aiReview, categoryTree, parseLibrarySuggestion, searchLibrary, type KnowledgeCardReview } from "./libraryModel";
 import { LIBRARY_CHANGED } from "./useLibraryController";
+import { expandEvidence, retrieveLibrary, RETRIEVAL_PROPERTIES, EXPAND_PROPERTIES, type RetrievalRequest, type EvidenceAnchor } from "./libraryEvidence";
 
 type ObjectValue = Record<string, any>;
 type Schema = { type?: string | string[]; description?: string; enum?: unknown[]; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean; items?: Schema; minimum?: number; maximum?: number; maxItems?: number };
@@ -68,6 +69,8 @@ export const LOCAL_AUTOMATION_METHODS: LocalAutomationMethod[] = [
   method("library.update_root", "Pause, resume or unregister one watched root; source files are not deleted.", obj({ id: str(), action: enumeration("pause", "resume", "remove") }), true),
   method("library.search", "Search names, indexed text, labels and tips; use document IDs for subsequent calls.", obj({ query: str(), filter: enumeration("all", "pending", "reviewed", "ignored", "issues"), ...page }, [])),
   method("library.read", "Read indexed source text in pages plus revisions needed for saving annotations.", obj({ id: str(), offset: integer() }, ["id"])),
+  method("library.retrieve", "Retrieve bounded cross-file excerpts with indexed-text source locations, exact-text duplicate groups and a versioned plan. Read-only; no model calls or disk scans. Reuse request + planId + nextOffset for subsequent batches. Candidate matches are not full-document reads.", obj(RETRIEVAL_PROPERTIES, ["query"])),
+  method("library.expand", "Expand an excerpt using id, revision, textHash, start and end from library.retrieve. Rejects changed indexed text. Locations are UTF-16 index offsets, not PDF pages. No disk freshness check.", obj(EXPAND_PROPERTIES, ["id", "revision", "textHash", "start", "end"])),
   method("library.annotate", "Save Codex-generated summary, categories, tags and source-quoted tips. Preserves user-locked classification. No model API call or source write.", obj({ ...docVersion, summary: str(), categories: strings(12), tags: strings(20), tips: { type: "array", maxItems: 16, items: obj({ content: str(), quote: str("Exact continuous source excerpt") }) } }), true),
   method("library.configure", "Control the existing Agent's AI queue. Running/autoAnalyze can invoke the configured model.", obj({ autoAnalyze: bool, queueState: enumeration("idle", "running", "paused"), retryFailed: bool }, []), true),
   method("library.source_write", "Replace a supported text source with revision check and existing source backup. Does not support editing PDF/DOCX binaries.", obj({ id: str(), revision: str(), content: str() }), true, true),
@@ -179,6 +182,8 @@ export async function runLocalAutomation(context: AutomationContext, name: strin
     case "library.add_folder": await bridge.native(name, p); changed(null); return libraryStatus();
     case "library.scan": await library().scan(); changed(null); return libraryStatus();
     case "library.update_root": await library().updateRoot(p.id, p.action); changed(null); return libraryStatus();
+    case "library.retrieve": return retrieveLibrary(await library().load(), p as RetrievalRequest);
+    case "library.expand": return expandEvidence(await library().load(), p as EvidenceAnchor & { contextChars?: number });
     case "library.search": {
       const data = await library().load();
       return paginate(searchLibrary(data.documents, p.query ?? "", p.filter ?? "all").map(({ text, ...doc }) => ({ ...doc, textCharacters: text.length })), p);

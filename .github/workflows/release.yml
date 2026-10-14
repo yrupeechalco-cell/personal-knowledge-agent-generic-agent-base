@@ -85,6 +85,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run typewords:browser
 
+      - name: Test offline cross-file retrieval
+        run: npm run test:retrieval
+
+      - name: Save retrieval browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-browser-evidence
+          path: .artifacts/retrieval-browser-results
+          if-no-files-found: ignore
+
       - name: Save TypeWords browser test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -109,6 +120,9 @@ jobs:
           npm run mobile:prepare
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build:desktop
+
+      - name: Verify standalone client resources
+        run: npm run client:check
 
       - name: Test native document index
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml

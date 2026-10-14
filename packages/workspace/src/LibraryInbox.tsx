@@ -4,6 +4,7 @@ import type { ModelRequest } from "@knowledge-agent/agent";
 import { categoriesOf, categoryTree, hasCategory, isAnalysisStale, pendingDocuments, searchLibrary, type LibraryAdapter, type LibraryFilter } from "./libraryModel";
 import { LibraryDocumentDetail } from "./LibraryDocumentDetail";
 import { KnowledgeCards } from "./KnowledgeCards";
+import { LibraryRetrieval } from "./LibraryRetrieval";
 import { useLibraryController } from "./useLibraryController";
 
 interface Props { adapter?: LibraryAdapter; runModel?: (request: ModelRequest) => Promise<string>; model: string; modelReady: boolean; visible: boolean; suspended?: boolean }
@@ -27,7 +28,7 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible, su
   const [category, setCategory] = useState("");
   const [tag, setTag] = useState("");
   const [rootId, setRootId] = useState("");
-  const [view, setView] = useState<"documents" | "tips" | "cards">(adapter?.saveKnowledgeCard ? "cards" : "documents");
+  const [view, setView] = useState<"documents" | "tips" | "cards" | "retrieval">(adapter?.saveKnowledgeCard ? "cards" : "documents");
   const [pendingSelection, setPendingSelection] = useState("");
   const [removeId, setRemoveId] = useState("");
   const results = useMemo(() => searchLibrary(data.documents, query, filter).filter((doc) => (filter !== "all" || doc.status !== "ignored") && hasCategory(doc, category) && (!tag || doc.tags.includes(tag)) && (!rootId || doc.rootId === rootId)), [data.documents, query, filter, category, tag, rootId]);
@@ -52,11 +53,11 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible, su
       </div>
     </div>
     {!adapter ? <div className="library-empty"><FolderSearch size={32} /><h3>请在正式安装的 App 中添加资料</h3><p>选择一个电脑文件夹，在这里浏览主题分类、关键词和知识 tip。</p><p>文件读取与编辑需要桌面 App。网页预览不会扫描你的电脑。</p></div> : <>
-      {view !== "cards" && <div className="library-stats"><span><strong>{data.documents.filter((doc) => doc.status !== "ignored").length}</strong> 份资料</span><span><strong>{tree.filter((node) => node.depth === 0).length}</strong> 个主题</span><span><strong>{tipCount}</strong> 条知识 tip</span><span><strong>{data.documents.filter((doc) => doc.status === "pending").length}</strong> 份待整理</span></div>}
+      {view !== "cards" && view !== "retrieval" && <div className="library-stats"><span><strong>{data.documents.filter((doc) => doc.status !== "ignored").length}</strong> 份资料</span><span><strong>{tree.filter((node) => node.depth === 0).length}</strong> 个主题</span><span><strong>{tipCount}</strong> 条知识 tip</span><span><strong>{data.documents.filter((doc) => doc.status === "pending").length}</strong> 份待整理</span></div>}
       <div className="library-settings"><label><input type="checkbox" checked={autoScan} onChange={(e) => setAutoScan(e.target.checked)} />本次运行自动扫描（每 30 秒）</label><span>{detailDirty ? "正在编辑，后台整理暂缓" : "分类和标签保存在本机知识索引中"}</span></div>
       {error && <p className="library-error" role="alert">{error}<button disabled={busy || detailDirty} onClick={() => void operate(adapter.load)}>重试读取</button></p>}
       {notice && <p className="library-notice" role="status">{notice}</p>}
-      {adapter.configure && view !== "cards" && <section className="library-queue" aria-label="AI 整理任务">
+      {adapter.configure && view !== "cards" && view !== "retrieval" && <section className="library-queue" aria-label="AI 整理任务">
         <div><strong><Sparkles size={16} />AI 整理</strong><p>{progress || (data.queueState === "paused" ? "已暂停，已完成的整理结果已保存。" : !modelReady ? "请先在设置中连接模型。" : pending ? `${pending} 份可整理资料，完成后自动保存分类和 tip。` : "当前没有可自动整理的资料。")}</p></div>
         <div className="library-actions">{queueActive ? <button onClick={() => void configure({ queueState: "paused" })}><Pause size={14} />暂停整理</button> : <button disabled={!modelReady || !runModel || busy || detailDirty || pending === 0} onClick={() => void configure({ queueState: "running", retryFailed: true })}><Play size={14} />{data.queueState === "paused" ? "继续整理" : "整理全部待处理"}</button>}{failures > 0 && <button disabled={!modelReady || busy || detailDirty} onClick={() => void configure({ retryFailed: true, queueState: "running" })}>重试失败项（{failures}）</button>}</div>
         <label className="library-check"><input type="checkbox" disabled={(!modelReady && !data.autoAnalyze) || detailDirty} checked={data.autoAnalyze ?? false} onChange={(e) => void configure({ autoAnalyze: e.target.checked, queueState: e.target.checked ? "running" : "paused" })} />自动 AI 整理新增和更新的资料</label>
@@ -72,8 +73,8 @@ export function LibraryInbox({ adapter, runModel, model, modelReady, visible, su
           {removeId === root.id && <div className="library-remove"><span>{adapter.saveKnowledgeCard ? "停止接入此目录，已有知识卡片保留并设为仅本机；原文件不变。" : "移除此目录的索引和整理卡片，原文件保留。重要 tip 可先导出。"}</span><button disabled={busy || detailDirty} onClick={() => { setRemoveId(""); void operate(() => adapter.updateRoot(root.id, "remove")); }}>确认移除索引</button><button onClick={() => setRemoveId("")}>取消</button></div>}
         </div>)}
       </details>
-      {adapter.saveKnowledgeCard && <div className="library-view-controls knowledge-card-navigation" role="group" aria-label="资料查看方式"><div><button disabled={detailDirty} aria-pressed={view === "cards"} className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}>知识卡片</button><button disabled={detailDirty} aria-pressed={view !== "cards"} className={view !== "cards" ? "active" : ""} onClick={() => setView("documents")}>原文与 AI 整理</button></div></div>}
-      {view === "cards" ? <KnowledgeCards records={data.knowledgeCards?.records ?? []} adapter={adapter} busy={busy} operate={operate} onDirty={setDetailDirty}/> : <div className="library-workbench">
+      <div className="library-view-controls knowledge-card-navigation" role="group" aria-label="资料查看方式"><div>{adapter.saveKnowledgeCard && <button disabled={detailDirty} aria-pressed={view === "cards"} className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}>知识卡片</button>}<button disabled={detailDirty} aria-pressed={view === "retrieval"} className={view === "retrieval" ? "active" : ""} onClick={() => setView("retrieval")}>检索与引用</button><button disabled={detailDirty} aria-pressed={view === "documents" || view === "tips"} className={view === "documents" || view === "tips" ? "active" : ""} onClick={() => setView("documents")}>原文与 AI 整理</button></div></div>
+      {view === "retrieval" ? <LibraryRetrieval adapter={adapter} snapshot={data}/> : view === "cards" ? <KnowledgeCards records={data.knowledgeCards?.records ?? []} adapter={adapter} busy={busy} operate={operate} onDirty={setDetailDirty}/> : <div className="library-workbench">
         <aside className="library-taxonomy" aria-label="知识分类">
           <h3>知识分类</h3><button className={!category ? "active" : ""} onClick={() => { setCategory(""); setFilter("all"); setTag(""); }}>全部资料</button>
           <button className={category === "__uncategorized" ? "active" : ""} onClick={() => { setCategory("__uncategorized"); setFilter("all"); setTag(""); }}>未分类 <span>{data.documents.filter((doc) => doc.status !== "ignored" && !categoriesOf(doc).length).length}</span></button>

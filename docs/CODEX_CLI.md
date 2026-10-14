@@ -1,5 +1,7 @@
 # Codex CLI 通道（Windows 桌面版 0.4.0 起）
 
+0.5.0 新增 `library.retrieve` 与 `library.expand`，共 41 个方法；[跨文件取证、批次及独立部署说明](LIBRARY_RETRIEVAL.md)。
+
 ## 用途
 
 Codex 从命令行直接操作正在运行的个人知识库。原有内置 Agent、DeepSeek 与 Codex 模型连接独立保留。本通道不调用模型，不要求新的 API Key。

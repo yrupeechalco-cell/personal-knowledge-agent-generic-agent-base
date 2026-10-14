@@ -1,0 +1,17 @@
+个人知识库 Agent 0.5.0
+
+本机使用：打开 App → 文件知识库 → 检索与引用。
+新电脑先选择自己的资料文件夹并扫描。输入主题，查看跨文件节选，按需补读上下文或复制出处。
+无需 Node、Python、Git、Codex 或开发服务器。系统需有 WebView2；缺少时安装器补装，首次补装需联网。
+TypeWords 与其运行环境已包含在安装包。资料索引、分类与模型凭据由各用户在自己的电脑配置，不包含开发者的数据。
+
+Codex 可选接入：设置 → Codex CLI → 开启。入口位于本文件同目录的 knowledge-cli.cmd。
+先执行 status 和 capabilities。library.retrieve 按主题分批读取；library.expand 按返回的版本与位置补读。
+CLI 需要 App 已打开。本地检索不调用 AI；在线 Agent 需用户自己配置模型连接。
+
+检索依据为已保存的索引，行号不是 PDF 页码；PDF 与图片当前只有文件名和已有标注，尚不自动识别正文。
+同账户标注云同步尚未接入，无自建服务器依赖。当前交付 Windows x64；其他系统安装包尚未验收。
+
+项目、来源与详细说明：
+https://github.com/yrupeechalco-cell/personal-knowledge-agent-generic-agent-base
+docs/LIBRARY_RETRIEVAL.md
